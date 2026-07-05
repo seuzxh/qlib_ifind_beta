@@ -1,12 +1,18 @@
 """First-principles: pin the cn_data_1min 1min.bin format before materialization.
 
-Guards two assumptions the materialize layer depends on:
+Guards four invariants the materialize layer depends on:
   1. start_index is a float32 calendar-row index (same FileFeatureStorage format as
      day.bin). If it were uint32-reinterpreted, the value would be ~1e9 and fail
      the `< len(calendar)` check.
-  2. A stock's first 1min bar is slot 0 of some trading day (day-aligned), so the
-     bin can be reshaped to (n_days, 242) with day boundaries intact.
+  2. A stock's first stored 1min bar is day-aligned and lands at/near market open
+     (9:30 or 9:31) — the dataset has a universal head-hole (every bin starts at
+     9:31 of 2024-01-02), so the materialize layer aligns by absolute calendar
+     row, NOT by reshape(242).
+  3. Calendar slot 11 == 9:41 (the buy-price bar), anchored on the calendar grid —
+     robust to the head-hole (the naive bin-offset slot 11 would land on 9:42).
+  4. 242 slots per trading day.
 """
+import functools
 from datetime import datetime, time
 from pathlib import Path
 
@@ -14,6 +20,7 @@ from qlib_ifind_beta.binio import read_bin
 from qlib_ifind_beta.config import FEATURES_1MIN_SRC, MIN_CAL, SLOTS_PER_DAY
 
 
+@functools.lru_cache(maxsize=1)
 def _load_1min_cal():
     dts = []
     with open(MIN_CAL) as fp:
@@ -64,7 +71,7 @@ def test_slot11_is_941():
     dts = _load_1min_cal()
     p = Path(FEATURES_1MIN_SRC) / "sh600519" / "close.1min.bin"
     si, _ = read_bin(p)
-    slot_of_si = si % 242                        # 1 (dataset head-hole)
+    slot_of_si = si % SLOTS_PER_DAY              # 1 (dataset head-hole)
     day_slot0_row = si - slot_of_si              # calendar row of that day's 09:30
     slot11_time = dts[day_slot0_row + 11].time()
     assert slot11_time == time(9, 41), (
