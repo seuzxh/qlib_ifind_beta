@@ -207,6 +207,90 @@ qlib 原生支持买卖不同价（[exchange.py:44/157-164](file:///home/zxh/min
 
 ---
 
+## 全流程图（本次全量跑，~17 秒）
+
+> 上面「全链路一张图」是**数据视角**（数据怎么流进来）；下面这张是**配置执行视角**——`workflow.yaml` 从 init 到报告产物的完整执行链，并附本次实跑（recorder `79d912a4`，2026-07-05）的关键指标。
+
+```
+qlib.init(provider_uri = data/qlib_root)    ← overlay：qlib_data 只读视图 + 自有衍生字段/股池
+      │
+      ▼
+┌─ Alpha158 Handler（qlib 原生，零子类）─────────────────┐
+│  输入：7 字段 × highbeta883926 时变池（T-1 lag）       │
+│  产出：158 特征 + 1 label                              │
+│  label = Ref($close,-2) / Ref($open,-1) - 1            │
+│        （T 日出信号 → T+1 开盘买 → T+2 收盘卖）         │
+│  processors：DropnaLabel + CSZScoreNorm（仅 label 截面  │
+│              标准化；特征不标准化——LightGBM 尺度无关）  │
+└────────────────────────────────────────────────────────┘
+      │
+      ▼
+┌─ DatasetH 切分（2024-2026，~2.5 年）──────────────────┐
+│  train  2024-01-01 → 2025-12-31   训练（~2 年）        │
+│  valid  2026-01-01 → 2026-03-31    早停依据            │
+│  test   2026-04-01 → 2026-07-02    样本外              │
+└────────────────────────────────────────────────────────┘
+      │
+      ▼
+┌─ LGBModel（LightGBM）─────────────────────────────────┐
+│  num_boost_round=200，early_stopping_rounds=20         │
+│  本次：第 20 轮早停（valid 不再降）                    │
+│  → 每只票 × 每天的 score（预测分）                      │
+│  本次 test 段：pred / label 各 6198 行（dropna 后 5971）│
+└────────────────────────────────────────────────────────┘
+      │
+      ▼   qlib Recorder 三段分析链（task.record）
+┌────────────────────────────────────────────────────────┐
+│ ① SignalRecord   → pred.pkl + label.pkl                │
+│                                                         │
+│ ② SigAnaRecord   → sig_analysis/{ic, ric}.pkl          │
+│    （模型层）    本次 IC = -0.0078 ± 0.140  ICIR=-0.055 │
+│                  Rank IC = -0.0072  胜率 48.4%（≈ 随机）│
+│                                                         │
+│ ③ PortAnaRecord  → portfolio_analysis/*.pkl            │
+│    （组合层）    Strategy = TopkDropoutStrategy         │
+│                    topk=20  n_drop=5  hold_thresh=1     │
+│                    forbid_all_trade_at_limit            │
+│                  Exchange  deal_price = [$open, $close] │
+│                    limit_threshold =                    │
+│                      [ $change ≥ $limit_up,             │
+│                        $change ≤ $limit_down ]          │
+│                    开 0.05% / 平 0.15% / 最小 5 元       │
+│                  benchmark = SH000300                   │
+│                  本次回测 61 天（test 62 天，回测       │
+│                    end=2026-07-01 规避日历末日越界）     │
+│                  换手均值 45.0% / 最大 90.2%            │
+│                  基准年化 +44.85%  超额年化 -37%        │
+│                  成本年化 -10.72%                       │
+└────────────────────────────────────────────────────────┘
+      │
+      ▼   mlruns/264165997523727437/79d912a4…/artifacts/
+┌─ 产物清单（全 .pkl）──────────────────────────────────┐
+│  pred.pkl / label.pkl                                  │
+│  sig_analysis/{ic, ric}.pkl                            │
+│  portfolio_analysis/{report_normal, port_analysis,     │
+│                     positions_normal}_1day.pkl         │
+└────────────────────────────────────────────────────────┘
+      │
+      ▼   conda run -n qlib_ifind_beta python scripts/make_report.py
+┌─ 报告（13 个 HTML，plotly 交互式，reports/）──────────┐
+│  01_model_performance_* (6)  IC 时序 / 累积 IC / 月度  │
+│                              热力图 / 分组收益 / QQ /  │
+│                              自相关 / 换手             │
+│  02_report (1)               净值 / 回撤 / 换手 /      │
+│                              成本 / 超额               │
+│  03_risk_analysis_* (5)      月度收益 / 年度对比 等    │
+│  04_score_ic (1)             score IC 时序             │
+│  （HTML 内嵌 plotly.js，离线可看）                     │
+└────────────────────────────────────────────────────────┘
+```
+
+**本次全量跑耗时 ~17 秒**——快是因为数据量小：test 段每天约 100 只票，158 特征 × 6198 行，LightGBM 训练 + 61 天回测都很轻。
+
+> ⚠️ 以上 IC≈0、超额为负是 **baseline 快照**，不是最终策略效果——Alpha158 默认周期与日频 label + 高贝塔池当前不匹配，信噪比低。改进方向见 [technical-design.md §8](technical-design.md)（标签周期拉长 / 自定义因子 / `n_drop` 调小 等）。
+
+---
+
 ## 关键文件索引
 
 | 文件 | 作用 |

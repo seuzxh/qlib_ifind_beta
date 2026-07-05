@@ -90,7 +90,7 @@ conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow.yaml
 ## 文档
 
 - 📐 [docs/architecture.md](docs/architecture.md) — 系统架构、模块划分、数据流、依赖图
-- 🔄 [docs/data_flow.md](docs/data_flow.md) — 数据流程（股池准备 / overlay 落盘 / 数据过滤 / 因子计算），通俗版
+- 🔄 [docs/data_flow.md](docs/data_flow.md) — 数据流程 + 全流程图（股池 / overlay / 因子 / 训练 / 回测 / 报告），通俗版
 - 🧭 [docs/technical-design.md](docs/technical-design.md) — 技术选型、关键设计决策、已知妥协、本机坑绕过、演进路径
 - ⚙️ [CLAUDE.md](CLAUDE.md) — 工程约束（conda-only / context7 / sequential-thinking / 只读消费 / secret 纪律）
 

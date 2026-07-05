@@ -9,6 +9,8 @@ __pycache__/
 
 # qlib run artifacts
 mlruns/
+# report HTML（scripts/make_report.py 产出的 plotly 图表，衍生物）
+reports/
 *.pkl
 *.pkl.lock
 __pycache__/
