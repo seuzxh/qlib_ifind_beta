@@ -8,7 +8,7 @@ This file guides Claude Code when working in this repository.
 
 > 注意：`ths_qlib_data`（iFinD 直连，116 天）是**另一套**并行数据基础设施，**不是**本项目的数据源。本项目用 `/home/zxh/qlib_data`（26 年深度）。
 
-> 项目状态：**MVP 已端到端跑通**（数据工程 overlay + 时变 universe + Alpha158 + 回测 + 报告）；未初始化 git。
+> 项目状态：**MVP 已端到端跑通**（数据工程 overlay + 时变 universe + Alpha158 + 回测 + 报告）；已本地 git 初始化（master，未接远端）。
 
 ## 工程约束（用户指定，硬性）
 
@@ -96,4 +96,3 @@ conda run -n qlib_ifind_beta python -c "import qlib; print(qlib.__version__)"
 ## 待定
 
 - 自定义因子起步集最终清单（MVP baseline 验证后再设计）
-- git 初始化时机
