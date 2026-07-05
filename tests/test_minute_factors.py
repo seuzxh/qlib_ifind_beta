@@ -72,3 +72,36 @@ def test_price_941():
     c, o, h, l, vol = _synthetic()
     f = compute_day_factors(c, o, h, l, vol, prev_day_volume=24000.0)
     assert f["price_941"] == pytest.approx(11.1)   # c[11]
+
+
+def test_edge_cases_nan_guards():
+    """Verify NaN guards: vol_ratio inf-guards, close_pos h==l, vol_vs_yest denom=0."""
+    n = 12
+    idx = np.arange(n, dtype=np.float64)
+
+    # --- Case 1: vol_ratio_* denominator = 0 → NaN (not inf) ---
+    # vol[0:10] all zero so d1=d3=d5 are 0; vol[10]=100, vol[11]=50 (non-zero back-seg)
+    vol_zero = np.zeros(n)
+    vol_zero[10] = 100.0
+    vol_zero[11] = 50.0
+    c1 = 10.0 + idx * 0.1
+    o1 = c1 - 0.05
+    h1 = c1 + 0.05
+    l1 = o1 - 0.05
+    f1 = compute_day_factors(c1, o1, h1, l1, vol_zero)
+    assert np.isnan(f1["vol_ratio_1m"])
+    assert np.isnan(f1["vol_ratio_3m"])
+    assert np.isnan(f1["vol_ratio_5m"])
+
+    # --- Case 2: close_pos_* when h == l (limit-up/down flat bar) → NaN ---
+    flat = np.full(n, 10.0)  # h == l == c == o everywhere
+    vol_flat = np.full(n, 100.0)
+    f2 = compute_day_factors(flat, flat, flat, flat, vol_flat)
+    assert np.isnan(f2["close_pos_1m"])
+    assert np.isnan(f2["close_pos_3m"])
+    assert np.isnan(f2["close_pos_5m"])
+
+    # --- Case 3: vol_vs_yest when prev_day_volume == 0 → NaN ---
+    c3, o3, h3, l3, vol3 = _synthetic()
+    f3 = compute_day_factors(c3, o3, h3, l3, vol3, prev_day_volume=0.0)
+    assert np.isnan(f3["vol_vs_yest"])
