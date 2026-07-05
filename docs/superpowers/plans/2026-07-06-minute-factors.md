@@ -72,7 +72,7 @@ MINUTE_DEAL_PRICE_FIELD = "price_941"
 - [ ] **Step 2: 验证 import**
 
 Run: `conda run -n qlib_ifind_beta python -c "from qlib_ifind_beta.config import MINUTE_FACTOR_FIELDS, MINUTE_DEAL_PRICE_FIELD, FEATURES_1MIN_SRC, MIN_CAL, SLOTS_PER_DAY; print(len(MINUTE_FACTOR_FIELDS), MINUTE_DEAL_PRICE_FIELD, FEATURES_1MIN_SRC.exists(), MIN_CAL.exists(), SLOTS_PER_DAY)"`
-Expected: `15 price_941 True True 242`
+Expected: `14 price_941 True True 242`（`len(MINUTE_FACTOR_FIELDS)=14` 因子；`price_941` 是独立的 `MINUTE_DEAL_PRICE_FIELD`，第 15 个物化 bin 但非 feature）
 
 - [ ] **Step 3: Commit**
 
