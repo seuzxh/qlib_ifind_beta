@@ -46,11 +46,12 @@
 ### cn_data_1min 结构（第一性原理 probe 验证）
 
 - 路径：`/home/zxh/cn_data_1min`
-- 1min 日历：`calendars/1min.txt`，1,553,640 行，**每日 242 槽**，标记 end-time（`YYYY-MM-DD HH:MM:00`）。
+- 1min 日历：`calendars/1min.txt`，1,553,640 行 = 6420 日 × **242 槽**，**标记 start-time**（`YYYY-MM-DD HH:MM:00`）：slot 0 = 09:30、slot 11 = 09:41、slot 241 = 15:00（probe 实证 2026-07-06）。
 - 字段：7 个 `.1min.bin`（close/open/high/low/volume/factor/vwap），与日频一致。
-- **日内槽位**（关键）：
-  - index 0~10 = 9:30~9:40（11 根 bar，**因子输入**）
-  - **index 11 = 9:41**（**买入价 bar，不参与因子计算**）
+- **日内槽位**（关键，start-time 标记下）：
+  - slot 0~10 = 9:30~9:40（11 根 bar，**因子输入**）
+  - **slot 11 = 9:41**（**买入价 bar，不参与因子计算**）
+- **数据集头洞（实证，影响物化）**：全池所有票的 1min.bin `start_index` 均为 1407473 = 2024-01-02 09:31（slot 1），`arr.size % 242 = 241` —— 即 **2024-01-02 的 9:30 那根 bar 全池普遍缺失**，其余每日完整 242 根。物化必须按**日历网格对齐**（见 §物化架构）：按绝对日历行散射、不可 `reshape(242)`（会逐日偏移一格）。slot 0 缺失处写 NaN，引用 slot 0 的因子（`startup_total / accel_* / vol_ratio_*` 等）当日为 NaN → DropnaLabel 处理（仅 1 个训练日，可忽略）。
 - day 日历：`calendars/day.txt`（与 qlib_data 一致）。
 - instruments：`all.txt`（与 qlib_data 一致）。
 
@@ -122,7 +123,7 @@ highbeta883926 时变池 5116 只 unique codes，在 cn_data_1min 覆盖 5040 �
 
 ### 方案 A（采用）：独立读 1min.bin，qlib 不挂双频
 
-物化脚本（`materialize_minute_factors.py`）独立用 numpy 解析 cn_data_1min 的 1min.bin（probe_1min.py 已验证读法：bin 头部 uint32 `start_index` + float32 数组），按 1min 日历切日（每日 242 槽），取 index 0-10 / index 11 算 14 因子 + 9:41 close → 写 day.bin 进 overlay。
+物化脚本（`materialize_minute.py`）独立用 numpy 解析 cn_data_1min 的 1min.bin（probe 已验证读法：bin 头部 float32 `start_index` + float32 数组），按 **1min 日历的 slot 网格对齐**取数：预计算全局 `min_slots[cal_row]`（0..241），把每只票的 bin 按 `start_index` 散射到全局 `(day, slot)` 网格，取 slot 0-10 / slot 11（9:30-9:41）算 14 因子 + 9:41 close → 写 day.bin 进 overlay。**为什么不 `reshape(242)`**：全池 bin 普遍从 slot 1 起步（2024-01-02 9:30 头洞，见 §数据基础），`arr.reshape(n,242)` 会逐日整体偏移一格、首日错位；日历网格散射按绝对 cal_row 取值，对任意 bin 头洞/缺格鲁棒（缺处 NaN）。
 
 qlib 保持 `provider_uri=data/qlib_root, freq=day`（不变），完全不知道分钟数据存在。新增 **15 个 day.bin/票**（14 因子 + `$price_941`）与现有 `change/limit_up/limit_down` 同模式。
 

@@ -329,26 +329,39 @@ def test_start_index_is_float32_calendar_row():
 
 
 def test_first_bar_day_aligned_near_open():
-    """Stock's first 1min bar is slot 0 of a trading day, near market open."""
+    """Stock's first stored 1min bar is at/near market open (slot 0 or 1).
+
+    The dataset has a universal head-hole: every stock's bin starts at calendar
+    slot 1 (09:31) of 2024-01-02 — the 09:30 bar is missing pool-wide (see spec
+    §数据基础). So the first stored bar is 09:31, not 09:30. The materialize layer
+    must NOT assume the bin starts at slot 0; it aligns by absolute calendar row
+    (calendar-grid alignment, Task 4). Both 09:30 and 09:31 are accepted here.
+    """
     dts = _load_1min_cal()
     p = Path(FEATURES_1MIN_SRC) / "sh600519" / "close.1min.bin"
     si, arr = read_bin(p)
     first = dts[si]
-    # slot 0 = market open (9:30 or 9:31 depending on marking convention)
     assert first.time() in (time(9, 30), time(9, 31)), f"first bar not open: {first}"
     # consecutive 1-min spacing within the first day
     assert (dts[si + 1] - dts[si]).total_seconds() == 60
 
 
 def test_slot11_is_941():
-    """index 11 (buy-price bar) lands on 9:41 — spec §数据基础 slot map."""
+    """Calendar slot 11 (buy-price bar) lands on 9:41 — spec §数据基础 slot map.
+
+    Anchored on the CALENDAR, not the bin offset: derive the stock's in-day slot
+    from si (si % 242), back up to that day's slot-0 row, then check slot 0+11.
+    Robust to the universal head-hole (bin starts at slot 1, so the naive
+    dts[si+11] would land on 9:42 — that's the bug the calendar-grid fix repairs).
+    """
     dts = _load_1min_cal()
     p = Path(FEATURES_1MIN_SRC) / "sh600519" / "close.1min.bin"
     si, _ = read_bin(p)
-    # spec: index 0-10 = 9:30-9:40, index 11 = 9:41
-    slot11_time = dts[si + 11].time()
+    slot_of_si = si % 242                        # 1 (dataset head-hole)
+    day_slot0_row = si - slot_of_si              # calendar row of that day's 09:30
+    slot11_time = dts[day_slot0_row + 11].time()
     assert slot11_time == time(9, 41), (
-        f"slot 11 = {slot11_time}, expected 9:41. "
+        f"calendar slot 11 = {slot11_time}, expected 9:41. "
         "If this fails, the spec slot-map is wrong — do NOT silently change; "
         "re-probe cn_data_1min and update spec + PRICE_941_SLOT."
     )
@@ -368,7 +381,7 @@ def test_slots_per_day_is_242():
 Run: `conda run -n qlib_ifind_beta python -m pytest tests/test_1min_format.py -v`
 Expected: PASS (4 tests)。
 
-> **如果 `test_slot11_is_941` 失败**：说明 spec 的槽位→时刻映射错了（可能是 end-time 标记导致整体偏移一格）。**不要静默改断言** —— 先 `conda run -n qlib_ifind_beta python -c "from qlib_ifind_beta.config import MIN_CAL; print(open(MIN_CAL).readline().strip())"` 看 1min.txt 第一行真实时刻，再回头订正 spec §数据基础 + `config.PRICE_941_SLOT` + `minute_factors` 的 slot 索引。这是第一性原理 gate，必须查清楚。
+> **第一性原理 gate（2026-07-06 已触发并解决）**：原断言 `dts[si+11]==9:41` 假设 bin 从 slot 0 起步；实证全池 bin 从 slot 1（2024-01-02 09:31）起步 → 原断言会得 9:42、必然失败。修正为按**日历 slot** 校验（`si%242` 定位日内 slot、`day_slot0_row+11` 取 9:41），对 bin 头洞鲁棒。根因与修正详见 spec §数据基础「数据集头洞」+ §物化架构「日历网格对齐」。`config.PRICE_941_SLOT=11` 与 `minute_factors` 的 slot 索引**无需改**（start-time 标记下 slot 11=9:41 仍正确）。
 
 - [ ] **Step 3: Commit**
 
@@ -402,21 +415,33 @@ import numpy as np
 
 from qlib_ifind_beta import materialize_minute as mm
 from qlib_ifind_beta.binio import read_bin
-from qlib_ifind_beta.config import (
-    FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, SLOTS_PER_DAY,
-)
+from qlib_ifind_beta.config import FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC
 
 
 def _stock_arrays(code="SH600519"):
-    """Read 1min + daily arrays for independent hand-recompute."""
+    """Read 1min + daily arrays; scatter 1min onto the calendar morning grid.
+
+    Mirrors materialize_minute's calendar-grid mapping (slot <= 11 → (n_min_days, 12))
+    so hand-computed expected values are correct. A naive reshape(242) would be
+    off-by-one everywhere due to the dataset's universal 2024-01-02 09:30 head-hole
+    (every bin starts at slot 1). See spec §数据基础 / §物化架构.
+    """
     si_m, c1m = read_bin(Path(FEATURES_1MIN_SRC) / code.lower() / "close.1min.bin")
     _, v1m = read_bin(Path(FEATURES_1MIN_SRC) / code.lower() / "volume.1min.bin")
     si_dc, close_d = read_bin(Path(FEATURES_SRC) / code.lower() / "close.day.bin")
     si_dv, vol_d = read_bin(Path(FEATURES_SRC) / code.lower() / "volume.day.bin")
-    n_days_m = c1m.size // SLOTS_PER_DAY
-    c2d = c1m[: n_days_m * SLOTS_PER_DAY].reshape(n_days_m, SLOTS_PER_DAY)
-    v2d = v1m[: n_days_m * SLOTS_PER_DAY].reshape(n_days_m, SLOTS_PER_DAY)
-    return si_m, c2d, v2d, si_dc, close_d, si_dv, vol_d, n_days_m
+
+    _, min_slots = mm._load_min_calendar()
+    morning_rows = np.where(min_slots <= 11)[0]
+    n_min_days = morning_rows.size // 12
+
+    def to_morning2d(arr):
+        flat = np.full(morning_rows.size, np.nan, dtype=np.float64)
+        valid = (morning_rows >= si_m) & (morning_rows < si_m + arr.size)
+        flat[valid] = arr[morning_rows[valid] - si_m].astype(np.float64)
+        return flat.reshape(n_min_days, 12)
+
+    return si_m, to_morning2d(c1m), to_morning2d(v1m), si_dc, close_d, si_dv, vol_d, n_min_days
 
 
 def test_materialize_returns_true_for_liquid_stock():
@@ -446,10 +471,11 @@ def test_startup_mom_and_price941_crosscheck():
     _, p941 = read_bin(Path(FEATURES_DST) / "sh600519" / "price_941.day.bin")
 
     si_m, c2d, v2d, si_dc, close_d, si_dv, vol_d, n_days_m = _stock_arrays()
-    min_dates, _ = mm._load_min_calendar()
+    min_dates, min_slots = mm._load_min_calendar()
     _, date_to_row = mm._load_day_calendar_lookup()
+    morning_rows = np.where(min_slots <= 11)[0]
 
-    # find a recent 1min day with valid slots 9,10,11
+    # find a recent min-cal day with valid slots 9,10,11 (stock-data day)
     km = None
     for k in range(n_days_m - 1, -1, -1):
         if np.all(np.isfinite(c2d[k, [9, 10, 11]])):
@@ -457,7 +483,7 @@ def test_startup_mom_and_price941_crosscheck():
             break
     assert km is not None, "no valid 1min day for SH600519"
 
-    first_row = si_m + km * SLOTS_PER_DAY
+    first_row = morning_rows[km * 12]            # slot-0 cal row of global day km
     day_row = int(date_to_row[min_dates[first_row]])
     out_row = day_row - si_out
     assert 0 <= out_row < startup.size
@@ -474,8 +500,9 @@ def test_vol_vs_yest_crosscheck():
     si_out, vol_vs_yest = read_bin(Path(FEATURES_DST) / "sh600519" / "vol_vs_yest.day.bin")
 
     si_m, c2d, v2d, si_dc, close_d, si_dv, vol_d, n_days_m = _stock_arrays()
-    min_dates, _ = mm._load_min_calendar()
+    min_dates, min_slots = mm._load_min_calendar()
     _, date_to_row = mm._load_day_calendar_lookup()
+    morning_rows = np.where(min_slots <= 11)[0]
 
     km = None
     for k in range(n_days_m - 1, -1, -1):
@@ -483,7 +510,7 @@ def test_vol_vs_yest_crosscheck():
             km = k
             break
     assert km is not None
-    first_row = si_m + km * SLOTS_PER_DAY
+    first_row = morning_rows[km * 12]            # slot-0 cal row of global day km
     day_row = int(date_to_row[min_dates[first_row]])
     out_row = day_row - si_out
     prev_day_vol = vol_d[day_row - 1 - si_dv]
@@ -526,8 +553,11 @@ $close[T]).
 vol_vs_yest denominator = previous trading day's TOTAL daily volume / 240 (read
 from qlib_data daily volume.bin) — the only factor that crosses minute↔daily.
 
-Vectorized per stock: reshape the dense 1min array to (n_days, 242), take
-[:, :12], compute factors column-wise, scatter into the day-aligned output.
+Vectorized per stock: scatter the 1min bin onto the global (day, slot) calendar
+grid by absolute start_index, take morning slots 0-11 (9:30-9:41) → (n_days, 12),
+compute factors column-wise, scatter into the day-aligned output. Calendar-grid
+alignment is robust to the dataset's universal 2024-01-02 09:30 head-hole (every
+bin starts at slot 1) — see spec §物化架构; a naive reshape(242) is off-by-one.
 
 Run: see scripts/materialize_minute.py (full universe) or call
 materialize_minute_instrument(code) directly.
@@ -542,7 +572,7 @@ import numpy as np
 from .binio import read_bin, write_bin
 from .config import (
     DAY_CAL, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FREQ,
-    MIN_CAL, MINUTE_DEAL_PRICE_FIELD, MINUTE_FACTOR_FIELDS, SLOTS_PER_DAY,
+    MIN_CAL, MINUTE_DEAL_PRICE_FIELD, MINUTE_FACTOR_FIELDS,
 )
 
 _1MIN_FIELDS = ("close", "open", "high", "low", "volume")
@@ -636,28 +666,38 @@ def materialize_minute_instrument(code: str) -> bool:
     if close_d.size == 0 or si_dc is None or si_dc != si_dv:
         return False
 
-    # day-alignment precondition (verified for liquid stocks in test_1min_format);
-    # if a stock's 1min bin doesn't start at slot 0, the reshape below is invalid.
-    _, min_slots = _load_min_calendar()
-    if si_m >= min_slots.size or min_slots[si_m] != 0:
-        return False
-
-    min_dates, _ = _load_min_calendar()
+    # Calendar-grid alignment: scatter each 1min bin onto the global (day, slot)
+    # grid by absolute calendar row, then take morning slots 0-11 (9:30-9:41).
+    # Robust to the dataset's universal head-hole (every bin starts at slot 1 of
+    # 2024-01-02 — the 09:30 bar is missing pool-wide) and to stock-local holes;
+    # missing cells become NaN. A naive reshape(242) is off-by-one due to the
+    # head-hole. See spec §物化架构.
+    min_dates, min_slots = _load_min_calendar()
     _, date_to_row = _load_day_calendar_lookup()
 
-    n_m = m["close"].size
-    n_days_m = n_m // SLOTS_PER_DAY
-    take = n_days_m * SLOTS_PER_DAY       # drop trailing partial day if any
+    morning_rows = np.where(min_slots <= 11)[0]   # 12 rows/day (slots 0-11), ordered
+    n_min_days = morning_rows.size // 12           # total trading days in 1min cal
 
-    def win(field):
-        return m[field][:take].reshape(n_days_m, SLOTS_PER_DAY)[:, :12]
+    def morning2d(field):
+        """Stock's morning bars on the global grid → (n_min_days, 12).
 
-    c, o, h, l, v = win("close"), win("open"), win("high"), win("low"), win("volume")
+        Column j = calendar slot j (0-11 = 9:30-9:41). NaN where the stock has no
+        bar at that calendar row (head-hole, suspension, or pre-listing).
+        """
+        arr = m[field]
+        flat = np.full(morning_rows.size, np.nan, dtype=np.float64)
+        valid = (morning_rows >= si_m) & (morning_rows < si_m + arr.size)
+        flat[valid] = arr[morning_rows[valid] - si_m].astype(np.float64)
+        return flat.reshape(n_min_days, 12)
 
-    # per-1min-day date → day-calendar row → output-relative index.
+    c, o, h, l, v = (morning2d("close"), morning2d("open"), morning2d("high"),
+                     morning2d("low"), morning2d("volume"))
+
+    # per-min-day date → day-calendar row → output-relative index.
+    # morning_rows[::12] = each day's slot-0 calendar row (date is constant in-day).
     # clip ordinal before fancy-index (defensive: a stray 1min date outside the
     # day calendar must not crash the whole stock — mark it invalid instead).
-    first_rows = si_m + np.arange(n_days_m) * SLOTS_PER_DAY
+    first_rows = morning_rows[::12]
     day_dates = min_dates[first_rows]
     max_ord = date_to_row.size - 1
     safe = np.clip(day_dates, 0, max_ord)
