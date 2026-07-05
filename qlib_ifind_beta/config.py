@@ -41,3 +41,25 @@ FREQ = "day"
 
 # calendar
 DAY_CAL = QLIB_DATA / "calendars" / "day.txt"
+
+# --- minute-frequency factors (T-day 9:30-9:40, materialized as day.bin) ------
+# Source: /home/zxh/cn_data_1min (readonly, 1min bins, 242 slots/day).
+# Slot map (probe-verified): index 0-10 = 9:30-9:40 (factor input),
+# index 11 = 9:41 (buy-price bar, NOT used in factors). See spec §数据基础.
+CN_DATA_1MIN = Path("/home/zxh/cn_data_1min")
+FEATURES_1MIN_SRC = CN_DATA_1MIN / "features"
+MIN_CAL = CN_DATA_1MIN / "calendars" / "1min.txt"
+SLOTS_PER_DAY = 242          # cn_data_1min: 9:30-15:00 = 242 1min bars/trading day
+FACTOR_INPUT_SLOTS = 11      # slots 0-10 (9:30-9:40) feed the 14 factors
+PRICE_941_SLOT = 11          # slot 11 = 9:41 close → $price_941 buy price
+
+# 14 minute factors materialized as <name>.day.bin per stock.
+MINUTE_FACTOR_FIELDS = (
+    "startup_mom_1m", "startup_mom_3m", "startup_mom_5m", "startup_total",
+    "accel_1m", "accel_3m", "accel_5m",
+    "close_pos_1m", "close_pos_3m", "close_pos_5m",
+    "vol_ratio_1m", "vol_ratio_3m", "vol_ratio_5m",
+    "vol_vs_yest",
+)
+# 15th materialized bin: T-day 9:41 close (deal_price for buy, NOT a feature).
+MINUTE_DEAL_PRICE_FIELD = "price_941"
