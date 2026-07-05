@@ -127,7 +127,7 @@ def _synthetic():
     o = np.array([9.9, 10.0, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 11.0])
     h = c + 0.05        # high = close + 0.05
     l = o - 0.05        # low  = open - 0.05
-    vol = np.array([100.0] * 11 + [50.0])   # slot 11 vol irrelevant
+    vol = np.array([100.0] * 10 + [50.0, 50.0])   # slot 10=50 (last factor bar, distinct), slot 11=50 (price_941, irrelevant)
     return c, o, h, l, vol
 
 
@@ -172,9 +172,9 @@ def test_volume_ratio():
 
 def test_vol_vs_yest():
     c, o, h, l, vol = _synthetic()
-    # prev_day_volume=24000 → per-min denom = 100; numerator = sum(vol[0:11]) = 1100
+    # prev_day_volume=24000 → per-min denom = 100; numerator = sum(vol[0:11]) = 10*100+50 = 1050
     f = compute_day_factors(c, o, h, l, vol, prev_day_volume=24000.0)
-    assert f["vol_vs_yest"] == pytest.approx(1100.0 / 100.0)
+    assert f["vol_vs_yest"] == pytest.approx(1050.0 / 100.0)
     # no prev volume → NaN (first trading day)
     f0 = compute_day_factors(c, o, h, l, vol, prev_day_volume=None)
     assert np.isnan(f0["vol_vs_yest"])
