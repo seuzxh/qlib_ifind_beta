@@ -1,0 +1,86 @@
+# 烟雾测试配置 — 2025 子窗口快速跑通全链路（train 9 月 / valid 1 月 / test 2 月）。
+# Universe/benchmark/label/limit_threshold/deal_price 口径与 workflow.yaml 完全一致（此处从简，
+# 完整注释——Universe T-1 lag 机制、label 买卖价口径、涨跌停分级——见 workflow.yaml）。
+# 验证通过后此文件可删。
+qlib_init:
+    provider_uri: /home/zxh/projects/3.qlib_ifind_beta/data/qlib_root
+    region: cn
+
+# Universe=highbeta883926（883926 时变成分股池，T-1 lag 无前视：T 日观察池 = 883926 的 T-1 在册集；
+#   instruments/highbeta883926.txt 按 [next(d_in), next(d_out)] 逐段写入，详见 workflow.yaml + universe.py）。
+# Benchmark=SH000300。
+market: &market highbeta883926
+benchmark: &benchmark SH000300
+
+data_handler_config: &data_handler_config
+    start_time: 2025-01-01
+    end_time: 2025-12-31
+    fit_start_time: 2025-01-01
+    fit_end_time: 2025-09-30
+    instruments: *market
+    # Label：T+1 开盘买、T+2 收盘卖（与 workflow.yaml 一致）。
+    label:
+        - Ref($close, -2) / Ref($open, -1) - 1
+
+port_analysis_config: &port_analysis_config
+    strategy:
+        class: TopkDropoutStrategy
+        module_path: qlib.contrib.strategy.signal_strategy
+        kwargs:
+            signal: <PRED>
+            topk: 20
+            n_drop: 5
+            hold_thresh: 1
+            forbid_all_trade_at_limit: true
+    backtest:
+        start_time: 2025-11-01
+        end_time: 2025-12-31   # 烟雾窗口末日；非 calendars/day.txt 末日（=2026-07-02）→ 不触发坑 3
+                                # （get_step_time IndexError OOB，详见 technical-design §6）。
+        account: 100000000
+        benchmark: *benchmark
+        exchange_kwargs:
+            freq: day
+            limit_threshold:
+                - $change >= $limit_up
+                - $change <= $limit_down
+            deal_price: ["$open", "$close"]
+                                 # 买卖不同价（见 workflow.yaml 详解）：买 open[T+1]、卖 close[T+2]，与 label 完全对齐
+            open_cost: 0.0005
+            close_cost: 0.0015
+            min_cost: 5
+
+task:
+    model:
+        class: LGBModel
+        module_path: qlib.contrib.model.gbdt
+        kwargs:
+            loss: mse
+            learning_rate: 0.05
+            max_depth: 6
+            num_leaves: 64
+            num_threads: 20
+            lambda_l1: 5.0
+            lambda_l2: 10.0
+            num_boost_round: 100
+            early_stopping_rounds: 20
+    dataset:
+        class: DatasetH
+        module_path: qlib.data.dataset
+        kwargs:
+            handler:
+                class: Alpha158
+                module_path: qlib.contrib.data.handler
+                kwargs: *data_handler_config
+            segments:
+                train: [2025-01-01, 2025-09-30]
+                valid: [2025-10-01, 2025-10-31]
+                test:  [2025-11-01, 2025-12-31]
+    record:
+        - class: SignalRecord
+          module_path: qlib.workflow.record_temp
+        - class: SigAnaRecord
+          module_path: qlib.workflow.record_temp
+        - class: PortAnaRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+              config: *port_analysis_config

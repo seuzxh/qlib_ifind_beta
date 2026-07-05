@@ -1,0 +1,28 @@
+# generated overlay (symlink farm + derived bins) — rebuilt by scripts/build_overlay.py
+data/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# qlib run artifacts
+mlruns/
+*.pkl
+*.pkl.lock
+__pycache__/
+.recipes/
+
+# editors / misc
+.trae/
+.idea/
+.vscode/
+
+# secrets — CLAUDE.md red line: never commit
+# (.claude/settings.local.json holds ANTHROPIC_AUTH_TOKEN etc.)
+.claude/
+
+# stray path-bug artifact (empty home/zxh/.../mlruns tree from a
+# script writing an abs path as relative; safe to delete)
+/home/

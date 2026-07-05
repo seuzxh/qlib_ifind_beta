@@ -1,0 +1,103 @@
+# 883926 高贝塔成分股 · 日频 Alpha158 最小 MVP — 全链路 qrun 配置
+# 运行：conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow.yaml
+#
+# 为什么走 run.py 而非裸 qrun：
+#   1. exchange LT_TP_EXP 涨跌停拦截要求 limit_threshold 是 Python **tuple**（exchange.py:264
+#      `isinstance(limit_threshold, tuple)`），YAML 的 `[a,b]` 加载成 list 会落到 NotImplementedError。
+#      run.py 在加载后把该字段 list→tuple。
+#   2. 本机 mlflow 3.12.0 把 file store 列 maintenance mode，run.py 预置 MLFLOW_ALLOW_FILE_STORE=true。
+#
+# Universe=highbeta883926（883926 时变成份股池，T-1 lag 无前视：T 日观察池 = 883926 的 T-1 在册集；
+#   883926 是每日重平衡高贝塔榜，每日 ~80-90% 换手是其编制本质。instruments/highbeta883926.txt 按
+#   [next(d_in), next(d_out)] 逐段写入，由 universe.py 从 data/universe_snapshots.csv 生成）；
+# Benchmark=SH000300（CSI300，复用 qlib_data 26y 干净 bin；883926 暂搁置——history_data 返回
+# incoherent 序列，见 config.py 注释）。
+qlib_init:
+    provider_uri: /home/zxh/projects/3.qlib_ifind_beta/data/qlib_root
+    region: cn
+
+market: &market highbeta883926
+benchmark: &benchmark SH000300
+
+data_handler_config: &data_handler_config
+    start_time: 2024-01-01
+    end_time: 2026-07-02
+    fit_start_time: 2024-01-01
+    fit_end_time: 2025-12-31
+    instruments: *market
+    # Label（用户指定 2026-07-05）：T+1 开盘买入、T+2 收盘卖出的收益。
+    # 默认 Alpha158 label = Ref($close,-2)/Ref($close,-1)-1（close[T+1]→close[T+2]）；
+    # 此处分母改 $open：T 日收盘出信号 → T+1 开盘成交（买价）、T+2 收盘卖出。
+    # deal_price 已同步为 ["$open","$close"]（见下 exchange_kwargs.deal_price，qlib 原生支持
+    #   买卖不同价 exchange.py:44/157-164）：买入 open[T+1]、卖出 close[T+2]，与本 label 完全对齐。
+    label:
+        - Ref($close, -2) / Ref($open, -1) - 1
+
+port_analysis_config: &port_analysis_config
+    strategy:
+        class: TopkDropoutStrategy
+        module_path: qlib.contrib.strategy.signal_strategy
+        kwargs:
+            signal: <PRED>
+            topk: 20
+            n_drop: 5
+            hold_thresh: 1                  # daily 模式 = 天，原生强制 A 股 T+1（持仓≥1 天才能卖）
+            forbid_all_trade_at_limit: true # 封板禁交易，依赖 $change + 板块阈值 $limit_up/$limit_down
+    backtest:
+        start_time: 2026-04-01
+        end_time: 2026-07-01   # 不取 2026-07-02（calendars/day.txt 末日）→ qlib get_step_time
+                                # 访问 calendar[index+1] 越界（IndexError: 6419 OOB）。dataset test
+                                # 段仍到 2026-07-02，pred/IC 覆盖全窗；仅回测模拟少最后 1 天。
+        account: 100000000
+        benchmark: *benchmark
+        exchange_kwargs:
+            freq: day
+            # LT_TP_EXP 表达式 tuple（run.py 把 list→tuple）：
+            #   buy 表达式 True（$change >= $limit_up，封涨停）→ 禁买
+            #   sell 表达式 True（$change <= $limit_down，封跌停）→ 禁卖
+            # $limit_up/$limit_down 按板块分级物化（主板 0.095 / 创·科 0.195 / 北交所 0.295）。
+            limit_threshold:
+                - $change >= $limit_up
+                - $change <= $limit_down
+            deal_price: ["$open", "$close"]
+                                 # 买卖不同价（exchange.py:44/157-164 原生支持二元 deal_price）：
+                                 # 买入 open[T+1]、卖出 close[T+2]，与 label 完全对齐。
+            open_cost: 0.0005
+            close_cost: 0.0015
+            min_cost: 5
+
+task:
+    model:
+        class: LGBModel
+        module_path: qlib.contrib.model.gbdt
+        kwargs:
+            loss: mse
+            learning_rate: 0.05
+            max_depth: 6
+            num_leaves: 64
+            num_threads: 20
+            lambda_l1: 5.0
+            lambda_l2: 10.0
+            num_boost_round: 200
+            early_stopping_rounds: 20
+    dataset:
+        class: DatasetH
+        module_path: qlib.data.dataset
+        kwargs:
+            handler:
+                class: Alpha158            # qlib contrib 原生，零自定义因子，仅依赖 7 字段
+                module_path: qlib.contrib.data.handler
+                kwargs: *data_handler_config
+            segments:
+                train: [2024-01-01, 2025-12-31]
+                valid: [2026-01-01, 2026-03-31]
+                test:  [2026-04-01, 2026-07-02]
+    record:
+        - class: SignalRecord
+          module_path: qlib.workflow.record_temp
+        - class: SigAnaRecord
+          module_path: qlib.workflow.record_temp
+        - class: PortAnaRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+              config: *port_analysis_config
