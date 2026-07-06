@@ -7,14 +7,14 @@ day.bin aligned to qlib_data's day
 calendar (same start_index and length as the stock's daily close.bin, so
 $price_941[T] row-aligns with $close[T]).
 
-vol_vs_yest denominator = previous min-cal trading day's TOTAL minute volume / 240
-(computed from cn_data_1min itself — minute volume on BOTH sides). The
+vol_vs_yest denominator = previous min-cal trading day's TOTAL minute volume / REAL_BARS_PER_DAY
+(= 240 real bars/day; computed from cn_data_1min itself — minute volume on BOTH sides). The
 minute-vs-daily volume unit mismatch (per-stock ratio 1.0-192.7, ≈ cumulative
 adjustment factor: 科创板≈1, 茅台 5.84, 平安银行 192.7) ruled out the prior
 qlib_data daily-volume denominator.
 
 Vectorized per stock: scatter the 1min bin onto the global (day, slot) calendar
-grid by absolute start_index, take morning slots 1-11 (09:30-09:41) →
+grid by absolute start_index, take morning slots 1-11 (09:31-09:41) →
 (n_min_days, 11), compute factors column-wise, scatter into the day-aligned
 output. Calendar-grid alignment is robust to the dataset's UNIVERSAL slot-0 NaN
 (every day's 09:30 bar is NaN pool-wide, 0/604 non-NaN — probe 2026-07-06) and
@@ -35,7 +35,7 @@ from .binio import read_bin, write_bin
 from .config import (
     BUY_SLOT, DAY_CAL, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FREQ,
     FIRST_FEATURE_SLOT, MIN_CAL, MINUTE_DEAL_PRICE_FIELD, MINUTE_FACTOR_FIELDS,
-    SLOTS_PER_DAY,
+    REAL_BARS_PER_DAY, SLOTS_PER_DAY,
 )
 
 _1MIN_FIELDS = ("close", "open", "high", "low", "volume")
@@ -109,6 +109,10 @@ def _read_1min_fields(code: str):
             si = s
         elif s != si:
             return None, None   # fields disagree on start_index
+    # Length-consistency guard: a truncated bin (e.g. partial write) would scatter
+    # with mismatched sizes → silent field misalignment. Treat as "no minute data".
+    if len({a.size for a in arrs.values()}) > 1:
+        return None, None
     return si, arrs
 
 
@@ -134,7 +138,7 @@ def materialize_minute_instrument(code: str) -> bool:
 
     # Calendar-grid alignment: scatter each 1min bin onto the global (day, slot)
     # grid by absolute calendar row, then take morning slots FIRST_FEATURE_SLOT
-    # (1) .. BUY_SLOT (11) → 09:30-09:41. Robust to the dataset's UNIVERSAL
+    # (1) .. BUY_SLOT (11) → 09:31-09:41. Robust to the dataset's UNIVERSAL
     # slot-0 NaN (every day's 09:30 bar is NaN pool-wide, probe 2026-07-06) and
     # to stock-local holes; missing cells become NaN. A naive reshape(242) is
     # off-by-one. See spec §物化架构.
@@ -144,13 +148,17 @@ def materialize_minute_instrument(code: str) -> bool:
     morning_rows = np.where(
         (min_slots >= FIRST_FEATURE_SLOT) & (min_slots <= BUY_SLOT)
     )[0]   # 11 rows/day (slots 1-11), ordered
+    assert morning_rows.size % _MORNING_WINDOW == 0, (
+        f"1min calendar malformed: morning_rows={morning_rows.size} not divisible "
+        f"by {_MORNING_WINDOW} (slots/day={SLOTS_PER_DAY})"
+    )
     n_min_days = morning_rows.size // _MORNING_WINDOW   # total trading days in 1min cal
 
     def morning2d(field):
         """Stock's morning bars on the global grid → (n_min_days, _MORNING_WINDOW).
 
         Column j corresponds to calendar slot FIRST_FEATURE_SLOT+j (1..11 =
-        09:30-09:41). NaN where the stock has no bar at that calendar row
+        09:31-09:41). NaN where the stock has no bar at that calendar row
         (universal slot-0 NaN doesn't enter — window starts at slot 1 — but
         suspensions and pre-listing still produce NaN).
         """
@@ -226,9 +234,9 @@ def materialize_minute_instrument(code: str) -> bool:
         d5 = v[:, 0:4].mean(axis=1)
         fac["vol_ratio_5m"] = np.full(n, np.nan)
         np.divide(v[:, 5:10].mean(axis=1), d5, out=fac["vol_ratio_5m"], where=(d5 > 0))
-        # E. cross-day volume (minute-only): prev min-cal day's full-day vol / 240
+        # E. cross-day volume (minute-only): prev min-cal day's full-day vol / REAL_BARS_PER_DAY
         prev_safe = np.where(prev_day_full_vol > 0, prev_day_full_vol, np.nan)
-        fac["vol_vs_yest"] = v[:, 0:10].sum(axis=1) / (prev_safe / 240.0)
+        fac["vol_vs_yest"] = v[:, 0:10].sum(axis=1) / (prev_safe / float(REAL_BARS_PER_DAY))
     price_941 = c[:, 10]
 
     # scatter into day-aligned output (length = daily close.bin length)

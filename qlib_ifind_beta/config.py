@@ -54,6 +54,9 @@ CN_DATA_1MIN = Path("/home/zxh/cn_data_1min")
 FEATURES_1MIN_SRC = CN_DATA_1MIN / "features"
 MIN_CAL = CN_DATA_1MIN / "calendars" / "1min.txt"
 SLOTS_PER_DAY = 242          # cn_data_1min calendar: 242 slots/day (09:30-15:00)
+REAL_BARS_PER_DAY = SLOTS_PER_DAY - 2   # 240: 242 slots − slot 0 (09:30) − slot 121 (13:00),
+                             # both universally NaN pool-wide (probe 2026-07-06). Exact, not
+                             # approximate: 240 real bars/day (used as vol_vs_yest denominator).
 FIRST_FEATURE_SLOT = 1       # slot 1 = first REAL bar (covers [09:30,09:31) open auction);
                              # slot 0 (09:30) is universally NaN pool-wide (probe 2026-07-06)
 FEATURE_SLOT_COUNT = 10      # slots 1-10 = 09:31-09:40 factor input (10 real bars)

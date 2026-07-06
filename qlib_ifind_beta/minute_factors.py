@@ -1,7 +1,7 @@
 """14 minute-bar factors + $price_941, computed for ONE trading day.
 
 Inputs are per-day 1min slot arrays (length 11). Slot map (probe-verified
-2026-07-06, cn_data_1min): index 0-9 = slots 1-10 = 09:30-09:40 (the first 10
+2026-07-06, cn_data_1min): index 0-9 = slots 1-10 = 09:31-09:40 (the first 10
 REAL trading bars; slot 0 is universally NaN pool-wide so the window starts at
 slot 1), index 10 = slot 11 = 09:41 (buy-price bar, NOT used in factors).
 See docs/superpowers/specs/2026-07-06-minute-factors-design.md.
@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import numpy as np
 
+from .config import REAL_BARS_PER_DAY
+
 
 def compute_day_factors(c, o, h, l, vol, prev_day_minute_vol=None) -> dict:
     """Compute 14 factors + price_941 for one trading day.
 
     Args:
-        c, o, h, l, vol: 1D arrays length 11. Index 0-9 = slots 1-10 (09:30-09:40);
+        c, o, h, l, vol: 1D arrays length 11. Index 0-9 = slots 1-10 (09:31-09:40);
             index 10 = slot 11 (09:41 buy bar). Float-castable.
         prev_day_minute_vol: T-1 day's TOTAL minute volume (sum of all ~240 real
             bars that day) from cn_data_1min. None/<=0 → vol_vs_yest NaN.
@@ -60,9 +62,9 @@ def compute_day_factors(c, o, h, l, vol, prev_day_minute_vol=None) -> dict:
     d5 = vol[0:4].mean()
     out["vol_ratio_5m"] = vol[5:10].mean() / d5 if d5 > 0 else np.nan
 
-    # E. cross-day volume = first-ten-bar total / (prev day full-day vol / 240)
+    # E. cross-day volume = first-ten-bar total / (prev day full-day vol / REAL_BARS_PER_DAY)
     if prev_day_minute_vol is not None and prev_day_minute_vol > 0:
-        out["vol_vs_yest"] = vol[0:10].sum() / (prev_day_minute_vol / 240.0)
+        out["vol_vs_yest"] = vol[0:10].sum() / (prev_day_minute_vol / float(REAL_BARS_PER_DAY))
     else:
         out["vol_vs_yest"] = np.nan
 
