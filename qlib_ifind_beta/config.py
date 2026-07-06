@@ -72,3 +72,7 @@ MINUTE_FACTOR_FIELDS = (
 )
 # 15th materialized bin: T-day 9:41 close (deal_price for buy, NOT a feature).
 MINUTE_DEAL_PRICE_FIELD = "price_941"
+# 16th materialized bin: 9:41 时刻涨跌幅（不复权）vs T-1 不复权收盘 —— v2 涨跌停 buy 表达式用。
+# (price_941[T]/factor[T]) / (close[T-1]/factor[T-1]) - 1；与 materialize.compute_change 同源、
+# 仅把"全天 close"换成"9:41 close"。必须不复权（除权日 factor 跳变会误判涨跌停）。
+MINUTE_CHANGE_941_FIELD = "change_941"

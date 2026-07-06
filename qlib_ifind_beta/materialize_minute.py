@@ -34,8 +34,8 @@ import numpy as np
 from .binio import read_bin, write_bin
 from .config import (
     BUY_SLOT, DAY_CAL, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FREQ,
-    FIRST_FEATURE_SLOT, MIN_CAL, MINUTE_DEAL_PRICE_FIELD, MINUTE_FACTOR_FIELDS,
-    REAL_BARS_PER_DAY, SLOTS_PER_DAY,
+    FIRST_FEATURE_SLOT, MIN_CAL, MINUTE_CHANGE_941_FIELD, MINUTE_DEAL_PRICE_FIELD,
+    MINUTE_FACTOR_FIELDS, REAL_BARS_PER_DAY, SLOTS_PER_DAY,
 )
 
 _1MIN_FIELDS = ("close", "open", "high", "low", "volume")
@@ -135,6 +135,9 @@ def materialize_minute_instrument(code: str) -> bool:
     si_dc, close_d = read_bin(ddir / f"close.{FREQ}.bin")
     if close_d.size == 0 or si_dc is None:
         return False
+    si_df, factor_d = read_bin(ddir / f"factor.{FREQ}.bin")
+    if factor_d.size != close_d.size or si_df != si_dc:
+        return False   # factor 必须与 close 同对齐（同属 qlib_data 日频 bin）
 
     # Calendar-grid alignment: scatter each 1min bin onto the global (day, slot)
     # grid by absolute calendar row, then take morning slots FIRST_FEATURE_SLOT
@@ -249,8 +252,20 @@ def materialize_minute_instrument(code: str) -> bool:
         out[name][rel_v] = fac[name][valid].astype(np.float32)
     out_p941[rel_v] = price_941[valid].astype(np.float32)
 
+    # $change_941 (v2): 9:41 时刻涨跌幅（不复权）vs T-1 不复权收盘 —— 涨跌停 buy 表达式用。
+    # day-aligned 空间算：change_941[T]=(price_941[T]/factor[T])/(close[T-1]/factor[T-1])-1。
+    # 首日无昨收 → NaN；停牌日 out_p941=NaN → change_941=NaN（NaN-safe）。
+    with np.errstate(invalid="ignore", divide="ignore"):
+        raw_p941 = out_p941.astype(np.float64) / factor_d.astype(np.float64)
+        raw_close = close_d.astype(np.float64) / factor_d.astype(np.float64)
+        raw_prev_close = np.full(n_out, np.nan, dtype=np.float64)
+        if n_out > 1:
+            raw_prev_close[1:] = raw_close[:-1]
+        out_change941 = (raw_p941 / raw_prev_close - 1.0).astype(np.float32)
+
     dst_dir = Path(FEATURES_DST) / code.lower()
     for name in MINUTE_FACTOR_FIELDS:
         write_bin(dst_dir / f"{name}.{FREQ}.bin", si_dc, out[name])
     write_bin(dst_dir / f"{MINUTE_DEAL_PRICE_FIELD}.{FREQ}.bin", si_dc, out_p941)
+    write_bin(dst_dir / f"{MINUTE_CHANGE_941_FIELD}.{FREQ}.bin", si_dc, out_change941)
     return True

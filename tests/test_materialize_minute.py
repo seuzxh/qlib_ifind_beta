@@ -83,13 +83,15 @@ def test_materialize_returns_true_for_liquid_stock():
     assert mm.materialize_minute_instrument("SH600519") is True
 
 
-def test_materialize_writes_15_bins():
+def test_materialize_writes_16_bins():
     mm.materialize_minute_instrument("SH600519")
     d = Path(FEATURES_DST) / "sh600519"
     from qlib_ifind_beta.config import MINUTE_FACTOR_FIELDS, MINUTE_DEAL_PRICE_FIELD
     for name in MINUTE_FACTOR_FIELDS:
         assert (d / f"{name}.day.bin").exists(), name
     assert (d / f"{MINUTE_DEAL_PRICE_FIELD}.day.bin").exists()
+    from qlib_ifind_beta.config import MINUTE_CHANGE_941_FIELD
+    assert (d / f"{MINUTE_CHANGE_941_FIELD}.day.bin").exists()
 
 
 def test_day_bin_aligned_to_daily_close():
@@ -301,3 +303,21 @@ def test_missing_daily_close_bin_returns_false(tmp_path, monkeypatch):
     (fake_src / "sh600519" / "close.day.bin").touch()   # 0-byte file
     monkeypatch.setattr(mm, "FEATURES_SRC", str(fake_src))
     assert mm.materialize_minute_instrument("SH600519") is False
+
+
+def test_change_941_matches_hand_formula():
+    """A1b: change_941[T] = (price_941[T]/factor[T]) / (close[T-1]/factor[T-1]) - 1，首日 NaN。"""
+    mm.materialize_minute_instrument("SH600519")
+    from qlib_ifind_beta.config import FEATURES_SRC, FEATURES_DST, MINUTE_CHANGE_941_FIELD
+    _, close = read_bin(Path(FEATURES_SRC) / "sh600519" / "close.day.bin")
+    _, factor = read_bin(Path(FEATURES_SRC) / "sh600519" / "factor.day.bin")
+    _, p941 = read_bin(Path(FEATURES_DST) / "sh600519" / "price_941.day.bin")
+    _, ch941 = read_bin(Path(FEATURES_DST) / "sh600519" / f"{MINUTE_CHANGE_941_FIELD}.day.bin")
+    raw_p = p941.astype(np.float64) / factor.astype(np.float64)
+    raw_c = close.astype(np.float64) / factor.astype(np.float64)
+    prev = np.full_like(raw_c, np.nan)
+    prev[1:] = raw_c[:-1]
+    expected = raw_p / prev - 1.0
+    m = np.isfinite(expected) & np.isfinite(ch941)
+    assert np.nanmax(np.abs(expected[m] - ch941[m])) < 1e-5
+    assert np.isnan(ch941[0])   # 首日无昨收 → NaN
