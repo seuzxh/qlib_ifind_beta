@@ -5,11 +5,13 @@ Guards four invariants the materialize layer depends on:
      day.bin). If it were uint32-reinterpreted, the value would be ~1e9 and fail
      the `< len(calendar)` check.
   2. A stock's first stored 1min bar is day-aligned and lands at/near market open
-     (9:30 or 9:31) — the dataset has a universal head-hole (every bin starts at
-     9:31 of 2024-01-02), so the materialize layer aligns by absolute calendar
-     row, NOT by reshape(242).
+     (9:30 or 9:31) — the dataset has a UNIVERSAL slot-0 NaN (every day's 09:30
+     bar is NaN pool-wide, 0/604 non-NaN for 5 stocks × 604 days — probe
+     2026-07-06), so the materialize layer aligns by absolute calendar row, NOT
+     by reshape(242).
   3. Calendar slot 11 == 9:41 (the buy-price bar), anchored on the calendar grid —
-     robust to the head-hole (the naive bin-offset slot 11 would land on 9:42).
+     robust to the universal slot-0 NaN (the naive bin-offset slot 11 would land
+     on 9:42 because every bin starts at slot 1).
   4. 242 slots per trading day.
 """
 import functools
@@ -45,10 +47,11 @@ def test_start_index_is_float32_calendar_row():
 def test_first_bar_day_aligned_near_open():
     """Stock's first stored 1min bar is at/near market open (slot 0 or 1).
 
-    The dataset has a universal head-hole: every stock's bin starts at calendar
-    slot 1 (09:31) of 2024-01-02 — the 09:30 bar is missing pool-wide (see spec
-    §数据基础). So the first stored bar is 09:31, not 09:30. The materialize layer
-    must NOT assume the bin starts at slot 0; it aligns by absolute calendar row
+    The dataset has a UNIVERSAL slot-0 NaN: every day's 09:30 bar is NaN
+    pool-wide (probe 2026-07-06, 5 stocks × 604 days = 0/604 non-NaN), so the
+    first stored bar of every bin is at slot 1 (09:31) of its first trading day
+    (2024-01-02 for the bulk of the universe). The materialize layer must NOT
+    assume the bin starts at slot 0; it aligns by absolute calendar row
     (calendar-grid alignment, Task 4). Both 09:30 and 09:31 are accepted here.
     """
     dts = _load_1min_cal()
@@ -65,19 +68,19 @@ def test_slot11_is_941():
 
     Anchored on the CALENDAR, not the bin offset: derive the stock's in-day slot
     from si (si % 242), back up to that day's slot-0 row, then check slot 0+11.
-    Robust to the universal head-hole (bin starts at slot 1, so the naive
+    Robust to the universal slot-0 NaN (bin starts at slot 1, so the naive
     dts[si+11] would land on 9:42 — that's the bug the calendar-grid fix repairs).
     """
     dts = _load_1min_cal()
     p = Path(FEATURES_1MIN_SRC) / "sh600519" / "close.1min.bin"
     si, _ = read_bin(p)
-    slot_of_si = si % SLOTS_PER_DAY              # 1 (dataset head-hole)
+    slot_of_si = si % SLOTS_PER_DAY              # 1 (universal slot-0 NaN)
     day_slot0_row = si - slot_of_si              # calendar row of that day's 09:30
     slot11_time = dts[day_slot0_row + 11].time()
     assert slot11_time == time(9, 41), (
         f"calendar slot 11 = {slot11_time}, expected 9:41. "
         "If this fails, the spec slot-map is wrong — do NOT silently change; "
-        "re-probe cn_data_1min and update spec + PRICE_941_SLOT."
+        "re-probe cn_data_1min and update spec + BUY_SLOT."
     )
 
 
