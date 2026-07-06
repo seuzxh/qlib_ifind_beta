@@ -21,7 +21,7 @@ from pathlib import Path
 # allow `python -m scripts.build_overlay` from project root + `python scripts/build_overlay.py`
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from qlib_ifind_beta import overlay, universe, materialize
+from qlib_ifind_beta import overlay, universe, materialize, materialize_minute
 from qlib_ifind_beta.config import BENCHMARK, OVERLAY_ROOT, UNIVERSE_MARKET
 
 # window covering train/valid/test (2024-01-01 → 2026-07-02)
@@ -43,19 +43,27 @@ def build(start: str = DUMP_START, end: str = DUMP_END) -> dict:
     print(f"✓ universe: {len(codes)} historical codes (T-1 time-varying) "
           f"→ instruments/{UNIVERSE_MARKET}.txt")
 
-    # 4. per-stock overlay + derived bins
+    # 4. per-stock overlay + derived bins (daily change/limit + minute factors)
     ok, miss = [], []
+    min_ok, min_miss = 0, 0
     for i, code in enumerate(codes, 1):
         overlay.link_stock(code)               # 7 base bins (symlink)
         if materialize.materialize_instrument(code):  # change/limit_up/limit_down
             ok.append(code)
         else:
             miss.append(code)
+        if materialize_minute.materialize_minute_instrument(code):  # 14 minute factors + price_941
+            min_ok += 1
+        else:
+            min_miss += 1
         if i % 25 == 0:
             print(f"  …{i}/{len(codes)} stock dirs done")
     summary["materialized_ok"] = len(ok)
     summary["materialized_missing"] = miss
+    summary["minute_ok"] = min_ok
+    summary["minute_missing"] = min_miss
     print(f"✓ derived bins: {len(ok)} ok" + (f", {len(miss)} missing: {miss}" if miss else ""))
+    print(f"✓ minute factors: {min_ok} ok, {min_miss} missing (delisted/no-1min)")
 
     # 5. benchmark SH000300 — reuse qlib_data's clean 26y bins (symlink) + derive change
     overlay.link_stock(BENCHMARK)
