@@ -18,26 +18,38 @@
 >
 > 本计划下文 Task 1–4 的正文仍含旧 slot 假设（已落实的 Task 1–4 实际按 Option A 重做，commit `7edcf60`）。**冲突时一律以 spec + 本横幅为准**。Task 5–9 派发时由 controller 从 spec 派生正确文本。
 
+> ⚠️ **v2 修订（2026-07-06，用户"好，没问题"拍板）：T 日撮合 shift=0 + 9:41 涨跌停**
+>
+> v1 隐含假设"T 日能直接用 `pred[T]` 撮合"，但 qlib `TopkDropoutStrategy.generate_trade_decision:142` **硬编码 `shift=1`** → `pred[T]` 被推到 T+1 执行，label/deal_price 全错位一天。v2 三处修复（详见 spec 顶部 v2 块）：
+>
+> 1. **特征 lag**：158 个 Alpha158 field 全包 `Ref(...,1)` 压到 T-1（Task 6 原实现 commit `c2f8283` 漏写 → **Task 6 rework**）。分钟 14 因子不 lag（T 日当天）。
+> 2. **shift=0 子类**：新增 `TopkDropoutStrategyTD0`（**新 Task 6b**），整段复制 `generate_trade_decision` 仅改 line 142 `shift=1→0`，让 `pred[T]`→T 日 9:41 撮合。
+> 3. **9:41 涨跌停**：buy 表达式 `$change_941 >= $limit_up`（**新 Task 5b 物化 `$change_941`**）、sell 表达式 `$change <= $limit_down`；跌停不拦买入（撮合可行性：跌停买得进）。
+>
+> **受影响 Task**：Task 5b（新，物化 change_941）/ Task 6（rework 加 lag）/ Task 6b（新 TD0 子类）/ Task 7（扩 strategy.class + limit_threshold）/ Task 8（B2 加 shift=0 + 涨停核验）。Task 1–5、9 主体不变。**冲突时一律以 spec + 本横幅为准。**
+
 ---
 
 ## File Structure
 
 | 文件 | 责任 | 动作 |
 |---|---|---|
-| `qlib_ifind_beta/config.py` | 路径/字段常量 | **改**：追加 cn_data_1min 路径 + 14 因子名表 + 槽位常量 |
+| `qlib_ifind_beta/config.py` | 路径/字段常量 | **改**：追加 cn_data_1min 路径 + 14 因子名表 + 槽位常量；**v2**：+ `MINUTE_CHANGE_941_FIELD` |
 | `qlib_ifind_beta/minute_factors.py` | 14 因子纯函数（无 IO） | **建**：`compute_day_factors(c,o,h,l,vol,prev_day_volume)` |
-| `qlib_ifind_beta/materialize_minute.py` | 读 1min.bin + 日频对齐 → 写 15 day.bin | **建**：`materialize_minute_instrument(code)` + 日历 helper |
-| `qlib_ifind_beta/highbeta_handler.py` | `HighBetaAlpha158(Alpha158)` 子类 | **建**：覆写 `get_feature_config()` |
+| `qlib_ifind_beta/materialize_minute.py` | 读 1min.bin + 日频对齐 → 写 16 day.bin | **建**：`materialize_minute_instrument(code)` + 日历 helper；**v2 改**：+ `$change_941` 物化（读 daily factor.bin） |
+| `qlib_ifind_beta/highbeta_handler.py` | `HighBetaAlpha158(Alpha158)` 子类 | **建**：覆写 `get_feature_config()`；**v2**：158 日频 field 包 `Ref(*,1)` lag 到 T-1 |
+| `qlib_ifind_beta/td0_strategy.py` | `TopkDropoutStrategyTD0` shift=0 子类 | **v2 建**：复制 `generate_trade_decision`，line 142 `shift=1→0` |
 | `scripts/materialize_minute.py` | 全 universe 物化 CLI（不依赖 iFinD） | **建**：循环 instruments，调用 `materialize_minute_instrument` |
 | `scripts/build_overlay.py` | 端到端 overlay 编排 | **改**：循环里加分钟物化调用（fresh build 含分钟因子） |
-| `qrun/run.py` | qrun 入口 | **改**：插入项目根到 sys.path（handler `module_path` 依赖） |
-| `qrun/workflow.yaml` | 全量回测配置 | **改**：handler class → HighBetaAlpha158 + label + deal_price |
-| `qrun/workflow_smoke.yaml` | 烟雾测试配置 | **改**：同上三处 |
+| `qrun/run.py` | qrun 入口 | **改**：插入项目根到 sys.path（handler/strategy `module_path` 依赖） |
+| `qrun/workflow.yaml` | 全量回测配置 | **改**：handler class + label + deal_price；**v2**：+ strategy.class→TD0 + limit_threshold→`$change_941` |
+| `qrun/workflow_smoke.yaml` | 烟雾测试配置 | **改**：同上（v2 五处） |
 | `tests/conftest.py` | pytest sys.path 引导 | **建**：插入项目根 |
 | `tests/test_minute_factors.py` | 14 因子纯函数单测（手算期望值） | **建** |
 | `tests/test_1min_format.py` | 1min bin 格式 + 日历对齐（A3） | **建** |
-| `tests/test_materialize_minute.py` | 物化正确性交叉核验（A1/A2/A4） | **建** |
-| `tests/test_highbeta_handler.py` | 特征数 158+14（A5 单测部分） | **建** |
+| `tests/test_materialize_minute.py` | 物化正确性交叉核验（A1/A2/A4） | **建**；**v2**：+ change_941 断言（A1b） |
+| `tests/test_highbeta_handler.py` | 特征数 158+14（A5 单测部分） | **建**；**v2**：+ 158 日频全 Ref(*,1) 断言 |
+| `tests/test_td0_strategy.py` | shift=0 子类单测（pred[T]→T 日执行） | **v2 建** |
 
 **为什么不挂双频 / 为什么物化**：见 spec §物化架构（方案 A）。qlib 原生 `NestedDataLoader`/`QlibDataLoader(freq=dict)` 混出来是分钟级行（一天 242 行），本设计要日级二维表送 LGBModel + 日级回测，qlib 无现成「分钟序列→每日标量」聚合类，物化最轻。
 
@@ -929,17 +941,149 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ---
 
-## Task 6: HighBetaAlpha158 子类 + 特征数单测（A5）
+## Task 5b: $change_941 物化（v2 涨跌停 buy 表达式依赖）⚠️ v2 新增
 
-Handler 子类追加 14 个 `$field` 到 Alpha158 原生 158 特征。`get_feature_config` 不依赖实例状态（Alpha158.get_feature_config 忽略 self，直接调 Alpha158DL），故单测可用 `__new__` 绕开 fetch。
+v2 涨跌停 buy 表达式 `$change_941 >= $limit_up` 需要 `$change_941` 字段 = T 日 9:41 时刻涨跌幅（不复权）vs T-1 不复权收盘。与 `$price_941` 同源同生命，在 `materialize_minute.py` 内一并算（不放 `materialize.py`——`build_overlay.py` 物化顺序是 derived 先、minute 后，`materialize.py` 跑时 `$price_941.bin` 还不存在）。
+
+公式：`change_941[T] = (price_941[T]/factor[T]) / (close[T-1]/factor[T-1]) - 1`（与 [`compute_change`](../../qlib_ifind_beta/materialize.py) 同源，仅把"全天 close"换成"9:41 close"；必须不复权——除权日 factor 跳变，后复权会跳空被误判涨跌停）。首日无昨收 → NaN。
 
 **Files:**
-- Create: `qlib_ifind_beta/highbeta_handler.py`
-- Test: `tests/test_highbeta_handler.py`
+- Modify: `qlib_ifind_beta/config.py:74`（`MINUTE_DEAL_PRICE_FIELD` 之后追加 `MINUTE_CHANGE_941_FIELD`）
+- Modify: `qlib_ifind_beta/materialize_minute.py`（import + 读 factor.bin + 算 change_941 + 写 bin）
+- Modify: `tests/test_materialize_minute.py`（加 change_941 断言，A1b）
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: config.py 加常量**
 
-Create `tests/test_highbeta_handler.py`：
+把 `qlib_ifind_beta/config.py` 的
+```python
+# 15th materialized bin: T-day 9:41 close (deal_price for buy, NOT a feature).
+MINUTE_DEAL_PRICE_FIELD = "price_941"
+```
+改为
+```python
+# 15th materialized bin: T-day 9:41 close (deal_price for buy, NOT a feature).
+MINUTE_DEAL_PRICE_FIELD = "price_941"
+# 16th materialized bin: 9:41 时刻涨跌幅（不复权）vs T-1 不复权收盘 —— v2 涨跌停 buy 表达式用。
+# (price_941[T]/factor[T]) / (close[T-1]/factor[T-1]) - 1；与 materialize.compute_change 同源、
+# 仅把"全天 close"换成"9:41 close"。必须不复权（除权日 factor 跳变会误判涨跌停）。
+MINUTE_CHANGE_941_FIELD = "change_941"
+```
+
+- [ ] **Step 2: 写失败测试（A1b：change_941 口径）**
+
+在 `tests/test_materialize_minute.py` 加一个测试（手算 1 票 × 几日 change_941 对比 bin，首日 NaN，除权日不复权基准正确）。具体断言形如：
+```python
+def test_change_941_matches_hand_formula():
+    """A1b: change_941[T] = (price_941[T]/factor[T]) / (close[T-1]/factor[T-1]) - 1."""
+    # 读某 fixture 票的 price_941.day.bin / close.day.bin / factor.day.bin + change_941.day.bin
+    # 手算 expected，断言 np.nanmax(abs(got - expected)) < 1e-5（跳过首日 NaN）
+    # 并断言 got[0] 是 NaN（首日无昨收）
+```
+（实现期由 controller 读 `tests/test_materialize_minute.py` 现有结构，按其 fixture 模式补全具体读 bin 路径与断言。）
+
+Run: `conda run -n qlib_ifind_beta python -m pytest tests/test_materialize_minute.py -v`
+Expected: FAIL — `change_941.day.bin` 还不存在 / `MINUTE_CHANGE_941_FIELD` 未定义。
+
+- [ ] **Step 3: materialize_minute.py 读 factor.bin + 算 change_941 + 写 bin**
+
+(3a) import 行加 `MINUTE_CHANGE_941_FIELD`：
+```python
+from .config import (
+    BUY_SLOT, DAY_CAL, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FREQ,
+    FIRST_FEATURE_SLOT, MIN_CAL, MINUTE_CHANGE_941_FIELD, MINUTE_DEAL_PRICE_FIELD,
+    MINUTE_FACTOR_FIELDS, REAL_BARS_PER_DAY, SLOTS_PER_DAY,
+)
+```
+
+(3b) 在读 daily close.bin 之后，紧跟读 factor.bin（必须与 close 同 start_index/长度）：
+```python
+    ddir = Path(FEATURES_SRC) / code.lower()
+    si_dc, close_d = read_bin(ddir / f"close.{FREQ}.bin")
+    if close_d.size == 0 or si_dc is None:
+        return False
+    si_df, factor_d = read_bin(ddir / f"factor.{FREQ}.bin")
+    if factor_d.size != close_d.size or si_df != si_dc:
+        return False   # factor 必须与 close 同对齐（同属 qlib_data 日频 bin）
+```
+
+(3c) 在 `out_p941[rel_v] = price_941[valid].astype(np.float32)` 之后、写 bin 之前，加 change_941 计算（day-aligned 空间，out_p941/close_d/factor_d 同长同对齐）：
+```python
+    # $change_941 (v2): 9:41 时刻涨跌幅（不复权）vs T-1 不复权收盘 —— 涨跌停 buy 表达式用。
+    # day-aligned 空间算：change_941[T]=(price_941[T]/factor[T])/(close[T-1]/factor[T-1])-1。
+    # 首日无昨收 → NaN；停牌日 out_p941=NaN → change_941=NaN（NaN-safe）。
+    with np.errstate(invalid="ignore", divide="ignore"):
+        raw_p941 = out_p941.astype(np.float64) / factor_d.astype(np.float64)
+        raw_close = close_d.astype(np.float64) / factor_d.astype(np.float64)
+        raw_prev_close = np.full(n_out, np.nan, dtype=np.float64)
+        if n_out > 1:
+            raw_prev_close[1:] = raw_close[:-1]
+        out_change941 = (raw_p941 / raw_prev_close - 1.0).astype(np.float32)
+```
+
+(3d) 在写 price_941 bin 之后，加写 change_941 bin：
+```python
+    write_bin(dst_dir / f"{MINUTE_DEAL_PRICE_FIELD}.{FREQ}.bin", si_dc, out_p941)
+    write_bin(dst_dir / f"{MINUTE_CHANGE_941_FIELD}.{FREQ}.bin", si_dc, out_change941)
+    return True
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+Run: `conda run -n qlib_ifind_beta python -m pytest tests/test_materialize_minute.py -v`
+Expected: PASS（含新 A1b 测试）。
+
+- [ ] **Step 5: 重跑全 universe 物化（生成 change_941.bin）**
+
+Run: `conda run -n qlib_ifind_beta python scripts/materialize_minute.py`
+Expected: 末尾 `✓ minute factors: ~5040 ok, ~76 missing`（与 Task 5 一致；现每票多写一个 change_941.day.bin）。
+
+- [ ] **Step 6: 抽样 A1b 人工核验**
+
+Run:
+```bash
+conda run -n qlib_ifind_beta python -c "
+from pathlib import Path
+from qlib_ifind_beta.binio import read_bin
+from qlib_ifind_beta.config import FEATURES_SRC, FEATURES_DST, FREQ
+import numpy as np
+code='sh600519'
+_, close = read_bin(Path(FEATURES_SRC)/code/f'close.{FREQ}.bin')
+_, factor = read_bin(Path(FEATURES_SRC)/code/f'factor.{FREQ}.bin')
+_, p941 = read_bin(Path(FEATURES_DST)/code/f'price_941.{FREQ}.bin')
+_, ch941 = read_bin(Path(FEATURES_DST)/code/f'change_941.{FREQ}.bin')
+raw_p = p941/factor; raw_c = close/factor
+prev = np.full_like(raw_c, np.nan); prev[1:] = raw_c[:-1]
+exp = raw_p/prev - 1
+m = np.isfinite(exp) & np.isfinite(ch941)
+print(f'{code}: max|diff|={np.nanmax(np.abs(exp[m]-ch941[m])):.2e}  first_nan={np.isnan(ch941[0])}  shape={ch941.shape}')
+"
+```
+Expected: `max|diff| < 1e-5`，`first_nan=True`（首日无昨收）。
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add qlib_ifind_beta/config.py qlib_ifind_beta/materialize_minute.py tests/test_materialize_minute.py
+git commit -m "feat(materialize-minute): add \$change_941 (9:41 pct vs T-1) for v2 limit-up buy check
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+```
+
+---
+
+## Task 6: HighBetaAlpha158 子类 + 特征数单测（A5）⚠️ v2 rework
+
+> **v2 rework（原 commit `c2f8283` 漏 lag）**：v1 的 Handler 把 158 日频 field 原样拼接，T 日 9:41 撮合时这些日频特征用的是 T 日数据 → 前视。v2 把 158 日频 field 全包 `Ref(...,1)` 压到 T-1，14 分钟因子保持 T 日当天。本 Task 在已 commit 的 `highbeta_handler.py` / `test_highbeta_handler.py` 上增量改：实现加一行 `lag_fields`、测试加一个 lag 断言。
+
+Handler 子类追加 14 个 `$field`（T 日当天）到 Alpha158 原生 158 特征（**全 lag 到 T-1**）。`get_feature_config` 不依赖实例状态（Alpha158.get_feature_config 忽略 self，直接调 Alpha158DL），故单测可用 `__new__` 绕开 fetch。
+
+**Files:**
+- Modify: `qlib_ifind_beta/highbeta_handler.py`（已 commit `c2f8283`，增量加 lag）
+- Modify: `tests/test_highbeta_handler.py`（已 commit，增量加 lag 断言）
+
+- [ ] **Step 1: 写失败测试（lag 断言）**
+
+在 `tests/test_highbeta_handler.py` 末尾追加第三个测试（前两个已存在并通过，本步只加新测试）：
 
 ```python
 """HighBetaAlpha158 appends 14 $minute-fields to Alpha158's native 158 (A5 unit part).
@@ -965,26 +1109,38 @@ def test_minute_fields_present():
     for mf in MINUTE_FACTOR_FIELDS:
         assert f"${mf}" in names, mf
         assert f"${mf}" in fields, mf
+
+
+def test_daily158_fields_are_lagged_to_t_minus_1():
+    """v2: 158 Alpha158 日频 field 必须全包 Ref(...,1) → 压到 T-1，避免 9:41 撮合前视。"""
+    h = HighBetaAlpha158.__new__(HighBetaAlpha158)
+    fields, names = h.get_feature_config()
+    daily_fields = fields[:158]
+    assert all(f.startswith("Ref(") and f.endswith(", 1)") for f in daily_fields), (
+        "all 158 Alpha158 fields must be wrapped in Ref(..., 1) to lag to T-1; "
+        f"offenders: {[f for f in daily_fields if not (f.startswith('Ref(') and f.endswith(', 1)'))][:3]}"
+    )
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
 
 Run: `conda run -n qlib_ifind_beta python -m pytest tests/test_highbeta_handler.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'qlib_ifind_beta.highbeta_handler'`
+Expected: FAIL — `test_daily158_fields_are_lagged_to_t_minus_1` 失败（当前 158 field 未包 `Ref(...,1)`）；前两个旧测试仍 PASS。
 
-- [ ] **Step 3: 实现 highbeta_handler.py**
+- [ ] **Step 3: 给 highbeta_handler.py 加 lag**
 
-Create `qlib_ifind_beta/highbeta_handler.py`：
+改 `qlib_ifind_beta/highbeta_handler.py`（把 `get_feature_config` body 换成 lag 版，docstring 一并更新）：
 
 ```python
-"""HighBetaAlpha158 — Alpha158 + 14 materialized minute factors.
+"""HighBetaAlpha158 — Alpha158(全 lag T-1) + 14 materialized minute factors (T-day).
 
-Overrides get_feature_config to append 14 $-prefixed minute fields (materialized
-as day.bin by materialize_minute.py) to Alpha158's native 158. qlib reads them
-like any other field; no frequency mixing at the Handler layer.
+v2 (2026-07-06): wraps all 158 Alpha158 daily fields in Ref(...,1) to lag them to
+T-1 — T 日 9:41 撮合只用 T-1 及更早的日频数据，无前视。The 14 minute fields stay
+T-day (they are 9:30-9:40, before the 9:41 buy). qlib reads all as daily overlay;
+no frequency mixing at the Handler layer.
 
-label / deal_price are passed via qrun YAML (handler.kwargs.label,
-exchange_kwargs.deal_price), not here — see qrun/workflow.yaml.
+label / deal_price via qrun YAML (handler.kwargs.label, exchange_kwargs.deal_price).
+pred[T]→T-day execution needs TopkDropoutStrategyTD0 — see td0_strategy.py.
 """
 from __future__ import annotations
 
@@ -995,35 +1151,298 @@ from .config import MINUTE_FACTOR_FIELDS
 
 class HighBetaAlpha158(Alpha158):
     def get_feature_config(self):
-        fields, names = super().get_feature_config()   # native 158
-        min_fields = [f"${n}" for n in MINUTE_FACTOR_FIELDS]
-        return fields + min_fields, names + min_fields
+        fields, names = super().get_feature_config()          # native 158
+        lag_fields = [f"Ref({f}, 1)" for f in fields]         # v2: lag 158 日频 → T-1
+        min_fields = [f"${n}" for n in MINUTE_FACTOR_FIELDS]  # 14 分钟因子，T 日当天不 lag
+        return lag_fields + min_fields, names + min_fields
 ```
 
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `conda run -n qlib_ifind_beta python -m pytest tests/test_highbeta_handler.py -v`
-Expected: PASS (2 tests)
+Expected: PASS (3 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add tests/test_highbeta_handler.py qlib_ifind_beta/highbeta_handler.py
-git commit -m "feat(handler): HighBetaAlpha158 subclass appends 14 minute factors
+git commit -m "refactor(handler): lag 158 Alpha158 fields to T-1 (v2 rework of c2f8283)
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
 ---
 
-## Task 7: run.py sys.path 修复 + YAML 三处改动
+## Task 6b: TopkDropoutStrategyTD0 — T 日成交子类（shift=0）⚠️ v2 新增（命门）
 
-`python qrun/run.py` 把 `qrun/`（脚本目录）放 sys.path[0]，项目根不在路径上 → handler 的 `module_path: qlib_ifind_beta.highbeta_handler` import 失败。run.py 需显式插入项目根。YAML 改 handler class / label / deal_price 三处（workflow.yaml + workflow_smoke.yaml 各一份）。
+**命门。** qlib 原生 `TopkDropoutStrategy.generate_trade_decision`（`signal_strategy.py:138-295`）在第 142 行**硬编码** `self.trade_calendar.get_step_time(trade_step, shift=1)`：pred 用的是 T-1 窗口 → 在 T 日成交（"次日成交"语义）。但本策略分钟因子是 **T 日 9:40** 的数据、**T 日 9:41** 成交，必须 **pred[T] → T 日成交**（"当日成交"语义）→ `shift=0`。
+
+qlib 没把 shift 暴露成参数/属性（写死在方法体内），无法经 YAML 配置覆盖 → **只能 override 整个 `generate_trade_decision`**，把方法体逐字复制、仅把 `shift=1` 改成 `shift=0`，其余零改动。`test_td0_only_diff_is_shift_zero` 守卫"仅 shift 一行差异"。
+
+**源定位：** `conda run -n qlib_ifind_beta python -c "import qlib.contrib.strategy.signal_strategy as m; print(m.__file__)"` → `.../qlib/contrib/strategy/signal_strategy.py`，方法 L138-295。
+
+**Files:**
+- Create: `qlib_ifind_beta/td0_strategy.py`
+- Create: `tests/test_td0_strategy.py`
+
+- [ ] **Step 1: 写失败测试**
+
+`tests/test_td0_strategy.py`：
+```python
+"""TopkDropoutStrategyTD0 — 命门守卫：generate_trade_decision 与父类唯一差异 = shift=1→0。"""
+import inspect
+
+import pytest
+
+from qlib.contrib.strategy.signal_strategy import TopkDropoutStrategy
+from qlib_ifind_beta.td0_strategy import TopkDropoutStrategyTD0
+
+
+def test_td0_is_subclass_of_topkdropout():
+    assert issubclass(TopkDropoutStrategyTD0, TopkDropoutStrategy)
+
+
+def test_td0_overrides_generate_trade_decision():
+    # 命门：必须 override（否则继承父类的 shift=1 → T+1 成交）
+    assert TopkDropoutStrategyTD0.generate_trade_decision is not TopkDropoutStrategy.generate_trade_decision
+
+
+def test_td0_uses_shift_zero():
+    """命门：pred 窗口用 shift=0（T 日成交），不是 shift=1（T+1 成交）。"""
+    src = inspect.getsource(TopkDropoutStrategyTD0.generate_trade_decision)
+    assert "get_step_time(trade_step, shift=0)" in src
+    assert "get_step_time(trade_step, shift=1)" not in src
+
+
+def test_td0_only_diff_is_shift_zero():
+    """守卫：子类 generate_trade_decision 与父类逐行对比，唯一差异是 shift=1→0。
+    任何意外差异（手抖改了别的行、加了注释/docstring）都会被抓到。"""
+    def norm(meth):
+        return [ln.strip() for ln in inspect.getsource(meth).splitlines() if ln.strip()]
+    p, c = norm(TopkDropoutStrategy.generate_trade_decision), norm(TopkDropoutStrategyTD0.generate_trade_decision)
+    diffs = [(a, b) for a, b in zip(p, c) if a != b]
+    assert len(diffs) == 1, f"expected exactly 1 differing line, got {len(diffs)}: {diffs}"
+    a, b = diffs[0]
+    assert "shift=1" in a and "shift=0" in b, f"diff must be shift=1→0: parent={a!r} child={b!r}"
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `conda run -n qlib_ifind_beta python -m pytest tests/test_td0_strategy.py -v`
+Expected: FAIL — `ModuleNotFoundError: qlib_ifind_beta.td0_strategy`。
+
+- [ ] **Step 3: 创建 td0_strategy.py（逐字复制 + shift=0）**
+
+`qlib_ifind_beta/td0_strategy.py`（方法体从 signal_strategy.py:138-295 逐字复制，**仅**第 142 行 `shift=1`→`shift=0`；模块必须显式 import 方法体用到的全局名，否则运行期 NameError）：
+```python
+"""TopkDropoutStrategyTD0 — T 日成交版 TopkDropoutStrategy（shift=0）。
+
+qlib 原生 TopkDropoutStrategy.generate_trade_decision（signal_strategy.py:138-295）第 142 行
+硬编码 `get_step_time(trade_step, shift=1)`：pred=T-1 窗口 → T 日成交（次日成交语义）。
+本策略分钟因子是 T 日 9:40 数据、T 日 9:41 成交，必须 pred[T] → T 日成交（当日成交）→ shift=0。
+
+实现 = 把 generate_trade_decision 全函数体逐字复制，仅 shift=1→shift=0，其余零改动。为何整体复制：
+qlib 没把 shift 暴露成参数，写死在方法体内，无法配置覆盖，只能 override 整个方法。
+test_td0_only_diff_is_shift_zero 守卫"仅 shift 一行差异"。
+"""
+from __future__ import annotations
+
+import copy
+
+import numpy as np
+import pandas as pd
+
+from qlib.backtest.decision import Order, OrderDir, TradeDecisionWO
+from qlib.backtest.position import Position
+from qlib.contrib.strategy.signal_strategy import TopkDropoutStrategy
+
+
+class TopkDropoutStrategyTD0(TopkDropoutStrategy):
+    def generate_trade_decision(self, execute_result=None):
+        # get the number of trading step finished, trade_step can be [0, 1, 2, ..., trade_len - 1]
+        trade_step = self.trade_calendar.get_trade_step()
+        trade_start_time, trade_end_time = self.trade_calendar.get_step_time(trade_step)
+        pred_start_time, pred_end_time = self.trade_calendar.get_step_time(trade_step, shift=0)
+        pred_score = self.signal.get_signal(start_time=pred_start_time, end_time=pred_end_time)
+        # NOTE: the current version of topk dropout strategy can't handle pd.DataFrame(multiple signal)
+        # So it only leverage the first col of signal
+        if isinstance(pred_score, pd.DataFrame):
+            pred_score = pred_score.iloc[:, 0]
+        if pred_score is None:
+            return TradeDecisionWO([], self)
+        if self.only_tradable:
+            # If The strategy only consider tradable stock when make decision
+            # It needs following actions to filter stocks
+            def get_first_n(li, n, reverse=False):
+                cur_n = 0
+                res = []
+                for si in reversed(li) if reverse else li:
+                    if self.trade_exchange.is_stock_tradable(
+                        stock_id=si, start_time=trade_start_time, end_time=trade_end_time
+                    ):
+                        res.append(si)
+                        cur_n += 1
+                        if cur_n >= n:
+                            break
+                return res[::-1] if reverse else res
+
+            def get_last_n(li, n):
+                return get_first_n(li, n, reverse=True)
+
+            def filter_stock(li):
+                return [
+                    si
+                    for si in li
+                    if self.trade_exchange.is_stock_tradable(
+                        stock_id=si, start_time=trade_start_time, end_time=trade_end_time
+                    )
+                ]
+
+        else:
+            # Otherwise, the stock will make decision without the stock tradable info
+            def get_first_n(li, n):
+                return list(li)[:n]
+
+            def get_last_n(li, n):
+                return list(li)[-n:]
+
+            def filter_stock(li):
+                return li
+
+        current_temp: Position = copy.deepcopy(self.trade_position)
+        # generate order list for this adjust date
+        sell_order_list = []
+        buy_order_list = []
+        # load score
+        cash = current_temp.get_cash()
+        current_stock_list = current_temp.get_stock_list()
+        # last position (sorted by score)
+        last = pred_score.reindex(current_stock_list).sort_values(ascending=False).index
+        # The new stocks today want to buy **at most**
+        if self.method_buy == "top":
+            today = get_first_n(
+                pred_score[~pred_score.index.isin(last)].sort_values(ascending=False).index,
+                self.n_drop + self.topk - len(last),
+            )
+        elif self.method_buy == "random":
+            topk_candi = get_first_n(pred_score.sort_values(ascending=False).index, self.topk)
+            candi = list(filter(lambda x: x not in last, topk_candi))
+            n = self.n_drop + self.topk - len(last)
+            try:
+                today = np.random.choice(candi, n, replace=False)
+            except ValueError:
+                today = candi
+        else:
+            raise NotImplementedError(f"This type of input is not supported")
+        # combine(new stocks + last stocks),  we will drop stocks from this list
+        # In case of dropping higher score stock and buying lower score stock.
+        comb = pred_score.reindex(last.union(pd.Index(today))).sort_values(ascending=False).index
+
+        # Get the stock list we really want to sell (After filtering the case that we sell high and buy low)
+        if self.method_sell == "bottom":
+            sell = last[last.isin(get_last_n(comb, self.n_drop))]
+        elif self.method_sell == "random":
+            candi = filter_stock(last)
+            try:
+                sell = pd.Index(np.random.choice(candi, self.n_drop, replace=False) if len(last) else [])
+            except ValueError:  # No enough candidates
+                sell = candi
+        else:
+            raise NotImplementedError(f"This type of input is not supported")
+
+        # Get the stock list we really want to buy
+        buy = today[: len(sell) + self.topk - len(last)]
+        for code in current_stock_list:
+            if not self.trade_exchange.is_stock_tradable(
+                stock_id=code,
+                start_time=trade_start_time,
+                end_time=trade_end_time,
+                direction=None if self.forbid_all_trade_at_limit else OrderDir.SELL,
+            ):
+                continue
+            if code in sell:
+                # check hold limit
+                time_per_step = self.trade_calendar.get_freq()
+                if current_temp.get_stock_count(code, bar=time_per_step) < self.hold_thresh:
+                    continue
+                # sell order
+                sell_amount = current_temp.get_stock_amount(code=code)
+                # sell_amount = self.trade_exchange.round_amount_by_trade_unit(sell_amount, factor)
+                sell_order = Order(
+                    stock_id=code,
+                    amount=sell_amount,
+                    start_time=trade_start_time,
+                    end_time=trade_end_time,
+                    direction=Order.SELL,  # 0 for sell, 1 for buy
+                )
+                # is order executable
+                if self.trade_exchange.check_order(sell_order):
+                    sell_order_list.append(sell_order)
+                    trade_val, trade_cost, trade_price = self.trade_exchange.deal_order(
+                        sell_order, position=current_temp
+                    )
+                    # update cash
+                    cash += trade_val - trade_cost
+        # buy new stock
+        # note the current has been changed
+        # current_stock_list = current_temp.get_stock_list()
+        value = cash * self.risk_degree / len(buy) if len(buy) > 0 else 0
+
+        # open_cost should be considered in the real trading environment, while the backtest in evaluate.py does not
+        # consider it as the aim of demo is to accomplish same strategy as evaluate.py, so comment out this line
+        # value = value / (1+self.trade_exchange.open_cost) # set open_cost limit
+        for code in buy:
+            # check is stock suspended
+            if not self.trade_exchange.is_stock_tradable(
+                stock_id=code,
+                start_time=trade_start_time,
+                end_time=trade_end_time,
+                direction=None if self.forbid_all_trade_at_limit else OrderDir.BUY,
+            ):
+                continue
+            # buy order
+            buy_price = self.trade_exchange.get_deal_price(
+                stock_id=code, start_time=trade_start_time, end_time=trade_end_time, direction=OrderDir.BUY
+            )
+            buy_amount = value / buy_price
+            factor = self.trade_exchange.get_factor(stock_id=code, start_time=trade_start_time, end_time=trade_end_time)
+            buy_amount = self.trade_exchange.round_amount_by_trade_unit(buy_amount, factor)
+            buy_order = Order(
+                stock_id=code,
+                amount=buy_amount,
+                start_time=trade_start_time,
+                end_time=trade_end_time,
+                direction=Order.BUY,  # 1 for buy
+            )
+            buy_order_list.append(buy_order)
+        return TradeDecisionWO(sell_order_list + buy_order_list, self)
+```
+> ⚠️ 实现者**务必**对照 `signal_strategy.py:138-295` 逐行核对（除第 142 行 shift）。`test_td0_only_diff_is_shift_zero` 会自动兜底：若多/少任何一行非 shift 差异，测试报错并打印 diff。
+
+- [ ] **Step 4: 跑测试确认通过**
+
+Run: `conda run -n qlib_ifind_beta python -m pytest tests/test_td0_strategy.py -v`
+Expected: PASS（4 tests）。
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add qlib_ifind_beta/td0_strategy.py tests/test_td0_strategy.py
+git commit -m "feat(strategy): TopkDropoutStrategyTD0 — override shift=1→0 for T-day execution
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+```
+
+---
+
+## Task 7: run.py sys.path 修复 + YAML 五处改动
+
+`python qrun/run.py` 把 `qrun/`（脚本目录）放 sys.path[0]，项目根不在路径上 → handler 的 `module_path: qlib_ifind_beta.highbeta_handler` import 失败。run.py 需显式插入项目根。YAML 改 **五处**：① handler class、② strategy class（→ `TopkDropoutStrategyTD0`，T 日成交）、③ label（9:41 买/T+1 卖）、④ limit_threshold（buy 表达式换 `$change_941`）、⑤ deal_price（→ `$price_941`）。workflow.yaml + workflow_smoke.yaml 各一份。
 
 **Files:**
 - Modify: `qrun/run.py:18-22`（imports 前插 sys.path）
-- Modify: `qrun/workflow.yaml:33-34,62,88-89`
-- Modify: `qrun/workflow_smoke.yaml:22-23,46,71-72`
+- Modify: `qrun/workflow.yaml:33-34,38-39,59-62,88-89`（label / strategy / limit_threshold+deal_price / handler）
+- Modify: `qrun/workflow_smoke.yaml:22-23,27-28,43-47,71-72`（同五处）
 
 - [ ] **Step 1: run.py 插入项目根到 sys.path**
 
@@ -1075,7 +1494,37 @@ from ruamel.yaml import YAML
                 module_path: qlib_ifind_beta.highbeta_handler
 ```
 
-- [ ] **Step 3: workflow.yaml 改 label**
+- [ ] **Step 3: workflow.yaml 改 strategy class（→ TopkDropoutStrategyTD0）**
+
+把 `qrun/workflow.yaml` 的
+```yaml
+    strategy:
+        class: TopkDropoutStrategy
+        module_path: qlib.contrib.strategy.signal_strategy
+```
+改为
+```yaml
+    strategy:
+        class: TopkDropoutStrategyTD0   # 命门：override shift=1→0，T 日 9:41 成交（见 td0_strategy.py）
+        module_path: qlib_ifind_beta.td0_strategy
+```
+
+- [ ] **Step 4: workflow.yaml 改 limit_threshold（buy 表达式换 $change_941）**
+
+把 `qrun/workflow.yaml` 的
+```yaml
+            limit_threshold:
+                - $change >= $limit_up
+                - $change <= $limit_down
+```
+改为
+```yaml
+            limit_threshold:
+                - $change_941 >= $limit_up    # buy 用 9:41 时刻涨跌幅（无前视）；封涨停禁买
+                - $change <= $limit_down      # sell 用全天涨跌幅；封跌停禁卖
+```
+
+- [ ] **Step 5: workflow.yaml 改 label**
 
 把 `qrun/workflow.yaml` 的
 ```yaml
@@ -1096,7 +1545,7 @@ from ruamel.yaml import YAML
         - Ref($close, -1) / $price_941 - 1
 ```
 
-- [ ] **Step 4: workflow.yaml 改 deal_price**
+- [ ] **Step 6: workflow.yaml 改 deal_price**
 
 把 `qrun/workflow.yaml` 的
 ```yaml
@@ -1111,9 +1560,9 @@ from ruamel.yaml import YAML
                                  # 买入 $price_941[T]（T 日 9:41 close）、卖出 $close[T+1]，与 label 完全对齐。
 ```
 
-- [ ] **Step 5: workflow_smoke.yaml 同样三处改动**
+- [ ] **Step 7: workflow_smoke.yaml 同样五处改动**
 
-(5a) handler class：把
+(7a) handler class：把
 ```yaml
                 class: Alpha158
                 module_path: qlib.contrib.data.handler
@@ -1124,7 +1573,18 @@ from ruamel.yaml import YAML
                 module_path: qlib_ifind_beta.highbeta_handler
 ```
 
-(5b) label：把
+(7b) strategy class：把
+```yaml
+        class: TopkDropoutStrategy
+        module_path: qlib.contrib.strategy.signal_strategy
+```
+改为
+```yaml
+        class: TopkDropoutStrategyTD0   # 命门：shift=0，T 日 9:41 成交（见 workflow.yaml）
+        module_path: qlib_ifind_beta.td0_strategy
+```
+
+(7c) label：把
 ```yaml
     # Label：T+1 开盘买、T+2 收盘卖（与 workflow.yaml 一致）。
     label:
@@ -1137,7 +1597,20 @@ from ruamel.yaml import YAML
         - Ref($close, -1) / $price_941 - 1
 ```
 
-(5c) deal_price：把
+(7d) limit_threshold：把
+```yaml
+            limit_threshold:
+                - $change >= $limit_up
+                - $change <= $limit_down
+```
+改为
+```yaml
+            limit_threshold:
+                - $change_941 >= $limit_up    # buy 用 9:41 时刻涨跌幅（无前视）
+                - $change <= $limit_down      # sell 用全天涨跌幅
+```
+
+(7e) deal_price：把
 ```yaml
             deal_price: ["$open", "$close"]
                                  # 买卖不同价（见 workflow.yaml 详解）：买 open[T+1]、卖 close[T+2]，与 label 完全对齐
@@ -1148,16 +1621,37 @@ from ruamel.yaml import YAML
                                  # 买卖不同价（见 workflow.yaml 详解）：买 $price_941[T]（9:41）、卖 $close[T+1]，与 label 对齐
 ```
 
-- [ ] **Step 6: YAML 解析校验**
+- [ ] **Step 8: YAML 解析校验**
 
-Run: `conda run -n qlib_ifind_beta python -c "from ruamel.yaml import YAML; c=YAML(typ='safe',pure=True).load(open('qrun/workflow.yaml')); h=c['task']['dataset']['kwargs']['handler']; print(h['class'], h['module_path'], c['data_handler_config']['label'], c['port_analysis_config']['backtest']['exchange_kwargs']['deal_price'])"`
-Expected: `HighBetaAlpha158 qlib_ifind_beta.highbeta_handler ['Ref($close, -1) / $price_941 - 1'] ['$price_941', '$close']`
+Run:
+```bash
+conda run -n qlib_ifind_beta python -c "
+from ruamel.yaml import YAML
+c=YAML(typ='safe',pure=True).load(open('qrun/workflow.yaml'))
+h=c['task']['dataset']['kwargs']['handler']
+s=c['port_analysis_config']['strategy']
+ek=c['port_analysis_config']['backtest']['exchange_kwargs']
+print('handler:', h['class'], h['module_path'])
+print('strategy:', s['class'], s['module_path'])
+print('label:', c['data_handler_config']['label'])
+print('limit_threshold:', ek['limit_threshold'])
+print('deal_price:', ek['deal_price'])
+"
+```
+Expected（v2 五处全绿）：
+```
+handler: HighBetaAlpha158 qlib_ifind_beta.highbeta_handler
+strategy: TopkDropoutStrategyTD0 qlib_ifind_beta.td0_strategy
+label: ['Ref($close, -1) / $price_941 - 1']
+limit_threshold: ['$change_941 >= $limit_up', '$change <= $limit_down']
+deal_price: ['$price_941', '$close']
+```
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add qrun/run.py qrun/workflow.yaml qrun/workflow_smoke.yaml
-git commit -m "feat(qrun): HighBetaAlpha158 + 9:41 label/deal_price + run.py sys.path fix
+git commit -m "feat(qrun): v2 五处改动 — HighBetaAlpha158 + TopkDropoutStrategyTD0 + 9:41 label/deal_price + \$change_941 涨停拦截
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
@@ -1208,7 +1702,7 @@ Expected:
 - `minute cols present: ['$startup_mom_1m', '$vol_vs_yest']`（`$price_941` 是 deal_price 字段，不在 feature 里——它在 quote_df，不在 handler feature 表）；
 - label 列（最后一列）有非 NaN 值。
 
-- [ ] **Step 3: B2 — 确认 deal_price=$price_941 生效（买入价 = 9:41 close）**
+- [ ] **Step 3: B2-a — 确认 deal_price=$price_941 生效（买入价 = 9:41 close）**
 
 Run（读最新 recorder 的 report_normal，看买入价是否 ≈ 当日 close 而非 open）：
 ```bash
@@ -1225,9 +1719,84 @@ print(rep.head(3).to_string())
 ```
 Expected: `report_normal_1day.pkl` 存在；交易记录的 buy 价格在合理区间（9:41 close ≈ 当日 vwap 附近，介于 open 与 close 之间，**不等于** T 日 open——那是旧 deal_price）。
 
-> B2 是定性核验：只要跑通 + deal_price 配置生效（无报错 + 报告产出）即视为通过；精确逐笔买入价 vs 9:41 close 的对账用 Task 9 全量跑后的 positions_normal 抽样。
+> B2-a 是定性核验：只要跑通 + deal_price 配置生效（无报错 + 报告产出）即视为通过；精确逐笔买入价 vs 9:41 close 的对账用 Task 9 全量跑后的 positions_normal 抽样。
 
-- [ ] **Step 4: Commit（无代码变更，跳过；如烟雾跑中发现需修的 bug，单列 commit）**
+- [ ] **Step 4: B2-b — 确认 TopkDropoutStrategyTD0 的 shift=0 在回测中生效（T 日信号 → T 日 9:41 执行，非 T+1）**
+
+原理（第一性）：`generate_trade_decision` 里 `get_step_time(trade_step, shift)` 决定"执行日 D 用哪天的 pred"——shift=1 用 pred[D-1]（T+1 执行），shift=0 用 pred[D]（T 日执行）。可观测后果：**回测窗口首个交易日（= test 段首个交易日 D0）是否有买入**。shift=0：D0 用 pred[D0]（pred 覆盖 test 段，存在）→ D0 有买入（turnover>0）。shift=1：D0 用 pred[D0-1]（D0-1 属 valid 段，PortAnaRecord 的 pred 不覆盖）→ D0 无买入，首笔买入落在 D0+1。故 **shift=0 ⟺ 回测窗口内首个有买入的交易日 == pred 在该窗口内的首日**。
+
+Run：
+```bash
+conda run -n qlib_ifind_beta python -c "
+import qlib, pandas as pd
+from qlib.workflow import R
+qlib.init(provider_uri='data/qlib_root', region='cn')
+exp = R.get_exp(experiment_name='workflow')
+rec = max(exp.list_recorders(), key=lambda r: r.info.get('start_time', ''))
+rep = rec.load_object('portfolio_analysis/report_normal_1day.pkl')   # DatetimeIndex=交易日, 含 turnover 列
+pred = rec.load_object('pred.pkl')                                   # MultiIndex(instrument,datetime) 或 (datetime,instrument)
+win_start = rep.index.min()
+first_trade = rep[rep['turnover'] > 0].index.min()                   # 首个有换手（买入/卖出）的交易日
+idx = pred.index
+dates = idx.get_level_values('datetime') if isinstance(idx, pd.MultiIndex) and 'datetime' in idx.names else (idx.get_level_values(-1) if isinstance(idx, pd.MultiIndex) else idx)
+pred_dates = pd.DatetimeIndex(dates).unique().sort_values()
+first_pred = pred_dates[pred_dates >= win_start].min()              # pred 在回测窗口内的首日
+print('win_start:', win_start, '| first_trade:', first_trade, '| first_pred:', first_pred)
+print('shift=0 OK (首买入日 == pred 窗口首日):', first_trade == first_pred)
+assert first_trade == first_pred, '仍是 shift=1？首买入日比 pred 首日晚 → 回查 strategy.class 是否真指 TopkDropoutStrategyTD0'
+"
+```
+Expected: 打印 `shift=0 OK ...: True`，且 `first_trade == first_pred == test 段首个交易日`（烟雾配置 ≥ 2025-11-01，实际为该日之后的第一个交易日，如 2025-11-03 周一）。若 `first_trade` 比 `first_pred` 晚一个交易日 → 仍是 shift=1 → 回查 Task 6b 的 `strategy.class`/`module_path` 是否真指到 `TopkDropoutStrategyTD0`。
+
+> 依据：`signal_strategy.generate_trade_decision` 里 `get_step_time(trade_step, shift)` 仅 shift 实参不同（Task 6b 已用 inspect 断言唯一差异）。此步是该源码差异在回测层的**可观测落地核验**。
+
+- [ ] **Step 5: B2-c — 确认涨停拦截生效（9:41 封板的票当日不被买入）**
+
+原理：`limit_threshold[0] = '$change_941 >= $limit_up'`——某票某日 9:41 涨幅 ≥ 板块涨停阈值 → Exchange 标记 `limit_buy=True` → 该票当日**不进买入单**。两段核验：(1) 数据层——表达式在真实 bin 上确有为 True 的票日（证 `$change_941`/`$limit_up` 物化正确、表达式可求值）；(2) 执行层——这些封板票日不出现在当日新买入集合里（证 Exchange 实际拦截）。
+
+Run：
+```bash
+conda run -n qlib_ifind_beta python -c "
+import qlib, pandas as pd
+from qlib.data import D
+from qlib.workflow import R
+qlib.init(provider_uri='data/qlib_root', region='cn')
+# (1) 数据层：烟雾窗口内 9:41 封板样本
+df = D.features(D.instruments(market='highbeta883926'),
+                ['\$change_941', '\$limit_up'],
+                start_time='2025-11-01', end_time='2025-12-31')
+df.columns = ['c941','lup']
+blocked = df[df['c941'] >= df['lup']].dropna()          # (instrument, datetime) 9:41 封板
+print('limit-up-at-9:41 events:', len(blocked))
+assert len(blocked) > 0, '烟雾窗口 9:41 无封板样本→放宽 start_time 到 2025-01-01 重跑本步取样本'
+sample = blocked.head(5).index.tolist()
+print('sample blocked (code,date):', [(c, str(d.date())) for c,d in sample])
+# (2) 执行层：当日新买入集合（positions_normal 隔日 diff）
+exp = R.get_exp(experiment_name='workflow')
+rec = max(exp.list_recorders(), key=lambda r: r.info.get('start_time', ''))
+pos = rec.load_object('portfolio_analysis/positions_normal_1day.pkl')   # {date: Position}
+def held_codes(p):
+    if p is None: return set()
+    for attr in ('stock_amount','positions','holdings'):
+        v = getattr(p, attr, None)
+        if isinstance(v, dict): return set(v.keys())
+    return set()
+bought, prev = {}, set()
+for d in sorted(pos.keys()):
+    cur = held_codes(pos[d])
+    bought[d] = cur - prev
+    prev = cur
+violations = [(c, str(d.date())) for (c, d) in sample if c in bought.get(d, set())]
+print('violations (封板却买入):', violations)
+assert not violations, f'涨停拦截失效：{violations}'
+print('涨停拦截 OK')
+"
+```
+Expected: `limit-up-at-9:41 events: <正整数>`；`sample blocked (...)` 列出 5 个封板样本；`violations: []`；`涨停拦截 OK`。
+
+> 若 `Position` 对象取持仓代码的字段名不同（pyqlib 版本差异），按 `dir(pos[某日])` 实际属性调整 `held_codes`；核心断言不变（封板票 ∉ 当日新买入集合）。数据层断言（`len(blocked)>0`）是硬门，必须过；执行层若 positions 结构难解析，可记一句"执行层延后到 Task 9 positions_normal 大样本核验"放行，但**数据层必须本步过**。
+
+- [ ] **Step 6: Commit（无代码变更，跳过；如烟雾跑中发现需修的 bug，单列 commit）**
 
 烟雾测试是验证步骤，本身无产物进 git。**只有**当本步暴露出代码 bug 并修复时才 commit，消息写明修了什么。
 
