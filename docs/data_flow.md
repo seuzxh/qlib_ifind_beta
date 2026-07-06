@@ -287,7 +287,7 @@ qlib.init(provider_uri = data/qlib_root)    ← overlay：qlib_data 只读视图
 
 **本次全量跑耗时 ~17 秒**——快是因为数据量小：test 段每天约 100 只票，158 特征 × 6198 行，LightGBM 训练 + 61 天回测都很轻。
 
-> ⚠️ 以上 IC≈0、超额为负是 **baseline 快照**，不是最终策略效果——Alpha158 默认周期与日频 label + 高贝塔池当前不匹配，信噪比低。改进方向见 [technical-design.md §8](technical-design.md)（标签周期拉长 / 自定义因子 / `n_drop` 调小 等）。
+> ⚠️ 以上 IC≈0、超额为负是 **baseline 快照**，不是最终策略效果——Alpha158 默认周期与日频 label + 高贝塔池当前不匹配，信噪比低。改进方向见 [technical-design.md §8](technical-design.md)（自定义因子 / `n_drop` 调小 等）。
 
 ---
 
