@@ -3,7 +3,14 @@
 get_feature_config ignores instance state (Alpha158 delegates to Alpha158DL), so we
 can test it via __new__ without qlib.init / data fetch. The full fetch shape (172
 columns in the real df) is verified by the smoke run (Task 8).
+
+L1 前视护栏测试：shared DropnaProcessor(feature) 配置正确、is_for_infer 安全、且只 drop
+feature NaN 行（保留 label NaN 的推理样本），index 结构不变。
 """
+import pandas as pd
+
+from qlib.data.dataset import processor as qlib_processor
+
 from qlib_ifind_beta.config import MINUTE_FACTOR_FIELDS
 from qlib_ifind_beta.highbeta_handler import HighBetaAlpha158
 
@@ -32,3 +39,54 @@ def test_daily158_fields_are_lagged_to_t_minus_1():
         "all 158 Alpha158 fields must be wrapped in Ref(..., 1) to lag to T-1; "
         f"offenders: {[f for f in daily_fields if not (f.startswith('Ref(') and f.endswith(', 1)'))][:3]}"
     )
+
+
+# ---- L1 前视护栏（shared DropnaProcessor(feature)）----
+
+def test_default_shared_processors_has_dropna_feature():
+    """L1: 默认 shared_processors 必须含 DropnaProcessor(feature) — 防 p941 NaN 前视。"""
+    procs = HighBetaAlpha158._DEFAULT_SHARED_PROCESSORS
+    assert any(
+        isinstance(p, dict)
+        and p.get("class") == "DropnaProcessor"
+        and p.get("kwargs", {}).get("fields_group") == "feature"
+        for p in procs
+    ), f"shared_processors must include DropnaProcessor(feature), got {procs}"
+
+
+def test_default_shared_processors_infer_safe():
+    """L1: shared processor 必须 is_for_infer=True，否则 DataHandlerLP._run_proc_l 在
+    shared 段（check_for_infer=True）抛 TypeError。readonly=True 保证不污染原 df。"""
+    from qlib.utils import init_instance_by_config
+
+    for cfg in HighBetaAlpha158._DEFAULT_SHARED_PROCESSORS:
+        proc = init_instance_by_config(cfg, qlib_processor)
+        assert proc.is_for_infer(), f"{cfg} not infer-safe → cannot sit in shared_processors"
+        assert proc.readonly(), f"{cfg} not readonly → shared would mutate raw data"
+
+
+def test_dropna_feature_drops_only_feature_nan_rows():
+    """L1 行为：DropnaProcessor(feature) 只 drop feature 列含 NaN 的行；label NaN 的推理
+    样本必须保留（推理不需要 label）；列 MultiIndex 与 (instrument,datetime) 结构不变。"""
+    cols = pd.MultiIndex.from_tuples(
+        [("feature", "f1"), ("feature", "f2"), ("label", "LABEL0")],
+        names=["col_set", "field"],
+    )
+    idx = pd.MultiIndex.from_tuples(
+        [
+            ("SH001", "2026-07-01"),  # feature NaN → 模拟 p941 NaN 票，应被 drop
+            ("SH002", "2026-07-01"),  # label NaN、feature OK → 推理样本，应保留
+            ("SH003", "2026-07-01"),  # 全 OK → 保留
+        ],
+        names=["instrument", "datetime"],
+    )
+    df = pd.DataFrame(
+        [[None, 1.0, 0.05], [2.0, 3.0, None], [4.0, 5.0, 0.06]],
+        index=idx,
+        columns=cols,
+        dtype="float64",
+    )
+    out = qlib_processor.DropnaProcessor(fields_group="feature")(df)
+    assert list(out.index.get_level_values("instrument")) == ["SH002", "SH003"]
+    assert out.columns.equals(cols), "column MultiIndex structure must be unchanged"
+    assert out.index.names == ["instrument", "datetime"], "row index structure must be unchanged"

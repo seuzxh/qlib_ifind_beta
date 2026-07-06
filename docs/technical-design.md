@@ -105,6 +105,49 @@
 
 ---
 
+## 3.5 · 9:41 NaN 前视护栏（DropnaProcessor，L1，2026-07-06）
+
+**问题**：分钟因子 v2 引入 `deal_price=["$price_941","$close"]`（9:41 买、close 卖）。当某 stock-day 的 `$price_941`（slot 11）为 NaN 时存在**前视漏洞**：
+
+1. 涨跌停检查 `np.greater_equal(NaN, limit_up)` 恒 False → 不拦截买入；
+2. `exchange.py:510-513` 把 NaN 的 `deal_price` 回退到 `$close[T]`（全天收盘 = 买入时刻的未来）。
+
+**根因场景**：2026-07-01 `cn_data_1min` 生产事故——全市场仅 6/5521 只票有 1min 数据，5515 只缺当天 9:41 价 → test 段 5,014 个 p941-NaN stock-day 进回测即触发前视。
+
+**方案（L1，用户 2026-07-06 选定）**：`HighBetaAlpha158._DEFAULT_SHARED_PROCESSORS` 挂 `DropnaProcessor(fields_group="feature")`。PTYPE_A 流程 `_data -[shared]- _shared_df -[infer]- _infer_df -[learn]- _learn_df`，shared 同时喂 infer+learn → 训练 + 推理都 drop feature NaN 行。
+
+**机制**：`$price_941` 不在 feature 组（是 exchange 的 deal_price），但 p941 NaN ⟺ 同源 1min slots 1-10 也 NaN ⟺ 9 个分钟因子（`startup_mom_*`、`accel_*`、`startup_total`）同步全 NaN ⟺ 被 feature 组 drop → 该 stock-day 不进预测表 → 不进交易候选池 → Exchange 永不触发 NaN→close 回退。`DropnaProcessor` 是 `is_for_infer=True`+`readonly=True`，过 shared 段的 `check_for_infer` gate。
+
+### 抽样报告（test 段 2026-04-01→2026-07-02）
+
+| 指标 | 值 | 占比 |
+|---|---|---|
+| 总 stock-day | 311,804 | 100% |
+| **feature 含 NaN（被 L1 drop）** | **19,474** | **6.246%** |
+| ├─ 危险 drop（p941 NaN，防前视，**正确**） | 5,780 | 1.854% |
+| └─ 误杀 drop（p941 非 NaN，边界因子） | 13,694 | 4.392% |
+
+**按天分布**（drop 集中度）：
+- `2026-07-01`：drop 5,018，其中 danger 5,017（p941 NaN，事故日，正确 drop）
+- `2026-07-02`：drop 5,018，其中 danger 0（**全误杀**——`$vol_vs_yest` 依赖 T-1 日量，07-01 事故致 07-02 该因子全局 NaN，连锁误杀）
+- 正常日：drop ~150-218/天
+- **51.5% 的 drop 集中在 07-01/07-02 两天**（事故 + 连锁）
+
+**误杀 NaN 列 Top**（172 feature 中 32 列含 NaN）：
+- 分钟因子部分缺失：`$close_pos_1m`=11,229、`$vol_vs_yest`=11,055、`$close_pos_3m`=8,205、`$close_pos_5m`=7,793、`vol_ratio_*`=5,783-5,790、`startup/accel` 系列=5,780（= p941 同源）
+- 日频边界除零：`ROC60`=2,456、`ROC30`=2,004（停牌/新股不足窗口期）
+
+**已知边界**：当 slots 1-10 完整但 slot 11（p941）**单独**缺失时，14 分钟因子非 NaN、p941 NaN → 不被 feature 组 drop。实测 slot 11 单独缺失为 **0 例**（5,780 个 p941-NaN stock-day 的 9 个 slots1-10 同源因子同步全 NaN，无孤立 case）；兜底由 `exchange_kwargs.limit_threshold` 的 `$change_941` 表达式承担。
+
+### 结论
+
+- **危险 drop（1.854%）是 L1 的本意**——防 p941 NaN 前视，正确且必要。
+- **误杀 drop（4.392%）是 L1 的代价**——整组 drop 会顺带丢「p941 有值但某 feature 边界 NaN」的样本。主因是分钟因子部分缺失（`$close_pos_*`、`$vol_vs_yest`）+ 日频 ROC/STD/CORR 除零；其中 ~5,018 集中在 07-02 单日（07-01 事故的连锁误杀，一次性而非系统问题）。
+- **决策（用户 2026-07-06 定，方案 A）**：**接受 L1 现状**——误杀 4.392% 可接受。理由：危险 drop（防前视本意）100% 覆盖；误杀里 ~5018 是 07-02 单日事故连锁（数据项目修复 07-01 cn_data_1min 后即消失，非系统问题），另一半是停牌/新股 ROC 除零——这些样本因子质量差，drop 对训练未必有害。
+- **精化版（只 drop `$price_941` NaN）**：列 §8 演进备选，**非当前实现**。
+
+---
+
 ## 4. 工程约束（用户硬性，CLAUDE.md）
 
 1. **conda-only**：所有命令 `conda run -n qlib_ifind_beta <cmd>` 前缀；禁直接 `python`（落 base env 报 `No module named 'qlib'`）。
@@ -173,6 +216,7 @@
 | **883926 benchmark 复活** | `883926.TI` 数据口径问题解决 | 启用 [dump_index.py](../qlib_ifind_beta/dump_index.py)，`BENCHMARK` 改回 `SH883926` |
 | **分钟频因子** | 日频 pipeline 成熟后 | 新增 1min provider_uri（消费 `/home/zxh/cn_data_1min`），高频 Handler/Strategy |
 | **换手率调参** | 全量回测产出 PortAnaRecord 换手指标 | `workflow.yaml` 调 `n_drop` 5→2/3 |
+| **L1 精化版（只 drop $price_941 NaN）** | 若误杀 4.392% 在策略上不可接受 | 自定义 Processor 或把 `$price_941` 加进 drop 检查；当前方案 A（整组 drop）保留为默认，见 §3.5 |
 | **git 初始化** | 用户指定时机 | 整库 `git init`（确认 `.gitignore` 已盖 `data/`、`mlruns/`、`.claude/settings.local.json`） |
 | **末日历越界彻底修复** | 需找回 2026-07-02 回测日 | 扩展 `calendars/day.txt` 加未来缓冲日（侵入 qlib_data 口径，需评估） |
 | **Path A · 衍生字段表达式化**（消 materialize） | overlay 维护成本上升时 | 自定义 `Limit` 算子（按代码前缀返回阈值）+ `$change` 走原生表达式；**未 probe、未定**，详见 §8.1 |
