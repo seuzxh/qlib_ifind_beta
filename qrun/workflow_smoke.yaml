@@ -18,14 +18,14 @@ data_handler_config: &data_handler_config
     fit_start_time: 2025-01-01
     fit_end_time: 2025-09-30
     instruments: *market
-    # Label：T+1 开盘买、T+2 收盘卖（与 workflow.yaml 一致）。
+    # Label（分钟因子版）：T 日 9:41 买、T+1 收盘卖（与 workflow.yaml 一致）。
     label:
-        - Ref($close, -2) / Ref($open, -1) - 1
+        - Ref($close, -1) / $price_941 - 1
 
 port_analysis_config: &port_analysis_config
     strategy:
-        class: TopkDropoutStrategy
-        module_path: qlib.contrib.strategy.signal_strategy
+        class: TopkDropoutStrategyTD0   # 命门：shift=0，T 日 9:41 成交（见 workflow.yaml）
+        module_path: qlib_ifind_beta.td0_strategy
         kwargs:
             signal: <PRED>
             topk: 20
@@ -41,10 +41,10 @@ port_analysis_config: &port_analysis_config
         exchange_kwargs:
             freq: day
             limit_threshold:
-                - $change >= $limit_up
-                - $change <= $limit_down
-            deal_price: ["$open", "$close"]
-                                 # 买卖不同价（见 workflow.yaml 详解）：买 open[T+1]、卖 close[T+2]，与 label 完全对齐
+                - $change_941 >= $limit_up    # buy 用 9:41 时刻涨跌幅（无前视）
+                - $change <= $limit_down      # sell 用全天涨跌幅
+            deal_price: ["$price_941", "$close"]
+                                 # 买卖不同价（见 workflow.yaml 详解）：买 $price_941[T]（9:41）、卖 $close[T+1]，与 label 完全对齐
             open_cost: 0.0005
             close_cost: 0.0015
             min_cost: 5
@@ -68,8 +68,8 @@ task:
         module_path: qlib.data.dataset
         kwargs:
             handler:
-                class: Alpha158
-                module_path: qlib.contrib.data.handler
+                class: HighBetaAlpha158
+                module_path: qlib_ifind_beta.highbeta_handler
                 kwargs: *data_handler_config
             segments:
                 train: [2025-01-01, 2025-09-30]

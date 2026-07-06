@@ -25,18 +25,16 @@ data_handler_config: &data_handler_config
     fit_start_time: 2024-01-01
     fit_end_time: 2025-12-31
     instruments: *market
-    # Label（用户指定 2026-07-05）：T+1 开盘买入、T+2 收盘卖出的收益。
-    # 默认 Alpha158 label = Ref($close,-2)/Ref($close,-1)-1（close[T+1]→close[T+2]）；
-    # 此处分母改 $open：T 日收盘出信号 → T+1 开盘成交（买价）、T+2 收盘卖出。
-    # deal_price 已同步为 ["$open","$close"]（见下 exchange_kwargs.deal_price，qlib 原生支持
-    #   买卖不同价 exchange.py:44/157-164）：买入 open[T+1]、卖出 close[T+2]，与本 label 完全对齐。
+    # Label（分钟因子版 2026-07-06）：T 日 9:41 买入、T+1 收盘卖出的收益。
+    # 分钟特征 ≤ T 日 9:40、买入价 $price_941[T]（9:41）、卖出 $close[T+1]，全程无前视。
+    # deal_price 同步为 ["$price_941","$close"]（见下 exchange_kwargs.deal_price）。
     label:
-        - Ref($close, -2) / Ref($open, -1) - 1
+        - Ref($close, -1) / $price_941 - 1
 
 port_analysis_config: &port_analysis_config
     strategy:
-        class: TopkDropoutStrategy
-        module_path: qlib.contrib.strategy.signal_strategy
+        class: TopkDropoutStrategyTD0   # 命门：override shift=1→0，T 日 9:41 成交（见 td0_strategy.py）
+        module_path: qlib_ifind_beta.td0_strategy
         kwargs:
             signal: <PRED>
             topk: 20
@@ -57,11 +55,11 @@ port_analysis_config: &port_analysis_config
             #   sell 表达式 True（$change <= $limit_down，封跌停）→ 禁卖
             # $limit_up/$limit_down 按板块分级物化（主板 0.095 / 创·科 0.195 / 北交所 0.295）。
             limit_threshold:
-                - $change >= $limit_up
-                - $change <= $limit_down
-            deal_price: ["$open", "$close"]
+                - $change_941 >= $limit_up    # buy 用 9:41 时刻涨跌幅（无前视）；封涨停禁买
+                - $change <= $limit_down      # sell 用全天涨跌幅；封跌停禁卖
+            deal_price: ["$price_941", "$close"]
                                  # 买卖不同价（exchange.py:44/157-164 原生支持二元 deal_price）：
-                                 # 买入 open[T+1]、卖出 close[T+2]，与 label 完全对齐。
+                                 # 买入 $price_941[T]（T 日 9:41 close）、卖出 $close[T+1]，与 label 完全对齐。
             open_cost: 0.0005
             close_cost: 0.0015
             min_cost: 5
@@ -85,8 +83,8 @@ task:
         module_path: qlib.data.dataset
         kwargs:
             handler:
-                class: Alpha158            # qlib contrib 原生，零自定义因子，仅依赖 7 字段
-                module_path: qlib.contrib.data.handler
+                class: HighBetaAlpha158    # Alpha158 + 14 分钟因子（qlib_ifind_beta/highbeta_handler.py）
+                module_path: qlib_ifind_beta.highbeta_handler
                 kwargs: *data_handler_config
             segments:
                 train: [2024-01-01, 2025-12-31]

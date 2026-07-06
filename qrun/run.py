@@ -24,6 +24,10 @@ from pathlib import Path
 # 必须在 import qlib / mlflow 前设置
 os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
 
+# 让 handler 的 module_path: qlib_ifind_beta.highbeta_handler 可 import。
+# `python qrun/run.py` 把 qrun/（脚本目录）放 sys.path[0]，项目根不在路径上。
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from ruamel.yaml import YAML
 
 import qlib
