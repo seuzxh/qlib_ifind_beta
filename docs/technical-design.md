@@ -89,11 +89,13 @@
 
 ## 3. Label 与切分
 
-**Label**（用户指定，2026-07-05）：`Ref($close, -2) / Ref($open, -1) - 1`，即 **T+1 开盘买入、T+2 收盘卖出**的收益。这是 Alpha158 默认 label（`Ref($close,-2)/Ref($close,-1)-1`，close[T+1]→close[T+2]）的变体——分母从 `$close[T+1]` 换成 `$open[T+1]`，更贴近「T 日收盘出信号 → T+1 开盘成交」的实际交易节奏。在 `data_handler_config.label` 以 list 形式传入（context7 确认 Alpha158 原生支持）。
+**Label**（2026-07-06 v2 升级，[workflow.yaml](../qrun/workflow.yaml)）：`Ref($close, -1) / $price_941 - 1`——**T+1 日后复权收盘 / T 日 9:41 价 − 1**，即「T 日 9:41 买入、持有到 T+1 收盘卖出」的 ~1.5 天短期收益。`$price_941` 由 [materialize_minute.py](../qlib_ifind_beta/materialize_minute.py) 物化为 T 日 9:41 时刻后复权价（D 方案 V4 校正 ~3% 异常票 raw 价口径，见 backtest-log §13）。在 `data_handler_config.label` 以 list 形式传入（context7 确认 Alpha158 原生支持）。
 
-**deal_price 口径**（用户 2026-07-05 确认；同日升级为二元）：`exchange_kwargs.deal_price=["$open","$close"]`——qlib `Exchange` 原生支持买卖不同价（`exchange.py:44` 签名 `Union[str, Tuple[str,str], List[str]]`，`L157-164` 把 `tuple/list` 拆成 `(buy_price, sell_price)`；非 RL 专属，daily `SimulatorExecutor` 同样支持）。买入 `open[T+1]`、卖出 `close[T+2]`，与本 label **完全对齐**：T 日收盘出信号 → T+1 开盘成交买入，持仓 1 天（`hold_thresh=1`）→ T+2 收盘成交卖出。
+> 演进：2026-07-05 原口径 `Ref($close,-2)/Ref($open,-1)-1`（T+1 开盘买入 / T+2 收盘卖出）；2026-07-06 v2 改 9:41 撮合后同步替换为本口径（决策见 §D6 v3 段 + backtest-log §14）。
 
-✅ **卖价已对齐**（2026-07-05 升级解决）：此前 `deal_price` 为单值时卖价为 `open[T+2]`，与 label 卖价 `close[T+2]` 存在残余不一致（曾记为「固有差异、需自定义 Executor」）。源码核查推翻该判断——qlib `Exchange` 原生支持二元 `deal_price=(buy, sell)`，daily 模式同样适用；改为 `["$open","$close"]` 后，买卖两端均与 label 严格一致，零子类化。
+**deal_price 口径**（2026-07-06 v2）：`exchange_kwargs.deal_price=["$price_941","$close"]`——qlib `Exchange` 原生支持买卖不同价（`exchange.py:44` 签名 `Union[str, Tuple[str,str], List[str]]`，`L157-164` 把 `tuple/list` 拆成 `(buy_price, sell_price)`；非 RL 专属，daily `SimulatorExecutor` 同样支持）。买入 `$price_941[T]`（T 日 9:41 价）、卖出 `$close[T+1]`（T+1 收盘），与本 label **严格对齐**；配 [TopkDropoutStrategyTD0](../qlib_ifind_beta/td0_strategy.py)（shift=1→0，T 日信号 T 日 9:41 执行）。
+
+✅ **买卖两端均与 label 严格对齐**（2026-07-06 v2）：buy=`$price_941[T]` 与 label 分母同源、sell=`$close[T+1]` 与 label 分子同源，零残余差异、零子类化（qlib `Exchange` 原生二元 `deal_price`，daily 适用）。涨跌停拦截 `["$change_941 >= $limit_up", "$change <= $limit_down"]`（buy 用 9:41 时刻涨幅封板、sell 用日涨幅封板，`LT_TP_EXP` 表达式 tuple）。
 
 **切分**（用户指定，仅用 2024-2026，不用 26 年全段）：
 

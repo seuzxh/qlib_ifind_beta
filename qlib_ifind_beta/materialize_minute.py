@@ -252,6 +252,21 @@ def materialize_minute_instrument(code: str) -> bool:
         out[name][rel_v] = fac[name][valid].astype(np.float32)
     out_p941[rel_v] = price_941[valid].astype(np.float32)
 
+    # D 方案 V4 校正（2026-07-06）：~3% 异常票的 1min close bin 被记为不复权 raw 价
+    # （1min_factor 误填 1.0），与 day 后复权 close 口径冲突 → label 爆炸（如 SH600608
+    # factor=51.86 → label=+44.69）。判据：p941 靠近不复权 close/factor 而非后复权 close，
+    # 且 factor>1.5（V1 距离判定 + factor 门槛；排除小 factor 票 unadj≈close 时距离判定
+    # 不稳的误判）。校正：p941 *= factor（仅异常票），还原成后复权 9:41 价。校正后
+    # change_941 自洽、deal_price 同口径；14 分钟因子全为比率（异常票 raw 价分子分母同
+    # 口径）自洽不受影响。详见 backtest-log 2026-07-06-l1-full-backtest.md §13。
+    with np.errstate(invalid="ignore", divide="ignore"):
+        p941_f = out_p941.astype(np.float64)
+        close_f = close_d.astype(np.float64)
+        factor_f = factor_d.astype(np.float64)
+        unadj_d = close_f / factor_f
+        abnormal = (np.abs(p941_f - unadj_d) < np.abs(p941_f - close_f)) & (factor_f > 1.5)
+    out_p941[abnormal] = (p941_f[abnormal] * factor_f[abnormal]).astype(np.float32)
+
     # $change_941 (v2): 9:41 时刻涨跌幅（不复权）vs T-1 不复权收盘 —— 涨跌停 buy 表达式用。
     # day-aligned 空间算：change_941[T]=(price_941[T]/factor[T])/(close[T-1]/factor[T-1])-1。
     # 首日无昨收 → NaN；停牌日 out_p941=NaN → change_941=NaN（NaN-safe）。

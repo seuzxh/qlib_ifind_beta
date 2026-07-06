@@ -1,9 +1,16 @@
-"""HighBetaAlpha158 — Alpha158(全 lag T-1) + 14 materialized minute factors (T-day).
+"""HighBetaAlpha158 — Alpha158(rolling windows [5,10]，全 lag T-1) + 14 minute factors (T-day).
 
-v2 (2026-07-06): wraps all 158 Alpha158 daily fields in Ref(...,1) to lag them to
+v2 (2026-07-06): wraps all Alpha158 daily fields in Ref(...,1) to lag them to
 T-1 — T 日 9:41 撮合只用 T-1 及更早的日频数据，无前视。The 14 minute fields stay
 T-day (they are 9:30-9:40, before the 9:41 buy). qlib reads all as daily overlay;
 no frequency mixing at the Handler layer.
+
+v3 (2026-07-06): rolling windows 砍到 [5,10]（剔除 20/30/60，−87 慢因子）。依据：
+逐因子 IC 显示 87 慢因子无一 |ICIR|>0.3（最强 VMA60 仅 0.21），剔除几乎不损失信号；
+高贝塔短周期 + 9:41 撮合主线偏快周期，20/30/60 日均线/动量与主线无关；降维 172→85
+减 lightgbm 过拟合面（best iter=3 诊断见 backtest-log §14）。走 Alpha158DL config 原生
+扩展点（rolling.windows），不偏离 qlib 机制。因子数 9 kbar + 4 price + 29×2 rolling
+= 71 日频 + 14 分钟 = 85。
 
 label / deal_price via qrun YAML (handler.kwargs.label, exchange_kwargs.deal_price).
 pred[T]→T-day execution needs TopkDropoutStrategyTD0 — see td0_strategy.py.
@@ -48,7 +55,19 @@ class HighBetaAlpha158(Alpha158):
         super().__init__(*args, **kwargs)
 
     def get_feature_config(self):
-        fields, names = super().get_feature_config()          # native 158
-        lag_fields = [f"Ref({f}, 1)" for f in fields]         # v2: lag 158 日频 → T-1
+        # v3 (2026-07-06)：rolling windows 砍到 [5,10]，剔除 20/30/60 共 87 个慢因子。
+        # 走 Alpha158DL 的 config 原生扩展点（rolling.windows）从源头不生成，而非 super()
+        # 的默认 [5,10,20,30,60] 再事后过滤。conf 其余键与 Alpha158.get_feature_config 同
+        # （kbar + price windows=[0] OPEN/HIGH/LOW/VWAP），仅 rolling.windows 不同 → 9 kbar
+        # + 4 price + 29 算子×2 窗口 = 71 日频因子。
+        from qlib.contrib.data.loader import Alpha158DL
+
+        conf = {
+            "kbar": {},
+            "price": {"windows": [0], "feature": ["OPEN", "HIGH", "LOW", "VWAP"]},
+            "rolling": {"windows": [5, 10]},
+        }
+        fields, names = Alpha158DL.get_feature_config(conf)
+        lag_fields = [f"Ref({f}, 1)" for f in fields]         # v2: lag 日频 → T-1
         min_fields = [f"${n}" for n in MINUTE_FACTOR_FIELDS]  # 14 分钟因子，T 日当天不 lag
         return lag_fields + min_fields, names + min_fields
