@@ -1,8 +1,9 @@
 """Materialize 14 minute factors + $price_941 as day.bin into the overlay.
 
 Reads cn_data_1min 1min bins (close/open/high/low/volume) per stock, slices each
-trading day's first 11 real bars (slots 1-11 = 09:30-09:41), computes the 14
-factors + 09:41 close, and writes them as day.bin aligned to qlib_data's day
+trading day's morning window (slots 1-11 = 09:31-09:41: 10 feature bars slots 1-10
++ 1 buy bar slot 11), computes the 14 factors + 09:41 close, and writes them as
+day.bin aligned to qlib_data's day
 calendar (same start_index and length as the stock's daily close.bin, so
 $price_941[T] row-aligns with $close[T]).
 

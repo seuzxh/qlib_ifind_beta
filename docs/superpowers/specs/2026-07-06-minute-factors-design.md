@@ -30,7 +30,7 @@
 |---|---|---|
 | 时序处理 | 混频：分钟用 T 日、日频用 T-1（`Ref(*,1)` lag1） | 两者都 ≤ T 日 9:40，T 日 9:41 撮合无前视 |
 | 因子维度 | 4 维全选：启动动量 / 加速度（避追高）/ 拉升形态 / 量能放量 | + 整段基准 + 跨日量能 = 14 个 |
-| 周期 | 1min / 3min / 5min 滑动窗口 | 落在 9:30~9:40 共 11 根 bar 上 |
+| 周期 | 1min / 3min / 5min 滑动窗口 | 落在 9:30~9:40 共 10 根真实 bar（slot 1-10）上 |
 | 实现方案 | A：物化 day.bin + 子类 Alpha158 | 不用 NestedDataLoader（详见 §物化架构） |
 | 模型 | LGBModel（不变） | HFLGBModel 非多频 model，留作后续可选 |
 | 买入价 | T 日 9:41 close（`$price_941`） | 物化为 day.bin |
@@ -48,10 +48,11 @@
 - 路径：`/home/zxh/cn_data_1min`
 - 1min 日历：`calendars/1min.txt`，1,553,640 行 = 6420 日 × **242 槽**，**标记 start-time**（`YYYY-MM-DD HH:MM:00`）：slot 0 = 09:30、slot 11 = 09:41、slot 241 = 15:00（probe 实证 2026-07-06）。
 - 字段：7 个 `.1min.bin`（close/open/high/low/volume/factor/vwap），与日频一致。
-- **日内槽位**（关键，start-time 标记下）：
-  - slot 0~10 = 9:30~9:40（11 根 bar，**因子输入**）
-  - **slot 11 = 9:41**（**买入价 bar，不参与因子计算**）
-- **数据集头洞（实证，影响物化）**：全池所有票的 1min.bin `start_index` 均为 1407473 = 2024-01-02 09:31（slot 1），`arr.size % 242 = 241` —— 即 **2024-01-02 的 9:30 那根 bar 全池普遍缺失**，其余每日完整 242 根。物化必须按**日历网格对齐**（见 §物化架构）：按绝对日历行散射、不可 `reshape(242)`（会逐日偏移一格）。slot 0 缺失处写 NaN，引用 slot 0 的因子（`startup_total / accel_* / vol_ratio_*` 等）当日为 NaN → DropnaLabel 处理（仅 1 个训练日，可忽略）。
+- **日内槽位（关键，2026-07-06 probe 更正）**：每日日历 242 槽，但**真实 bar 只有 240 根**——slot 0（09:30 集合竞价占位）与 slot 121（13:00 午休边界占位）**全池全日 NaN**（8 票 × 604 日：slot 0 与 slot 121 non-NaN 全为 0；per-day bar-count median = 240.0 吻合）。slot 241（15:00）**有真实数据**（602/604 日非空），不是占位。第一根真实 bar = **slot 1**（覆盖 [09:30,09:31)，开盘连续竞价首根 bar）——`daily_open == minute_open[slot 1]` 8/8 日精确相等。故 `vol_vs_yest` 分母 `/240` 恰好等于全天真实 bar 数（非近似）。
+  - **slot 1~10 = 09:30~09:40（10 根真实 bar，因子输入）**
+  - **slot 11 = 09:41**（**买入价 bar，不参与因子计算**，真实有数 600/604 日）
+- **日历网格对齐（影响物化）**：全池所有票的 1min.bin `start_index` 均为 1407473 = 2024-01-02 09:31（slot 1）。物化必须按**绝对日历行散射**、不可 `reshape(242)`（会逐日偏移）；特征窗口取 **slot 1-10**（跳过全 NaN 的 slot 0）、买入价取 slot 11。引用 slot 0 的因子不再存在（窗口已后移），DropnaLabel 只处理真实停牌/缺格。
+- **volume 单位差异（probe 实证，影响 vol_vs_yest）**：cn_data_1min 分钟 volume 与 qlib_data 日频 volume 单位/复权不一致，跨票比值 1.0~192.7（科创板≈1、茅台 5.84、平安银行 192.7），约等于逐票累计复权因子。凡跨源混用 volume 的因子必须**两边都用 cn_data_1min 分钟量**。
 - day 日历：`calendars/day.txt`（与 qlib_data 一致）。
 - instruments：`all.txt`（与 qlib_data 一致）。
 
@@ -61,9 +62,10 @@ highbeta883926 时变池 5116 只 unique codes，在 cn_data_1min 覆盖 5040 �
 
 ### 符号约定
 
-记 T 日分钟 bar：
-- `c_i / o_i / vol_i / h_i / l_i` = index i 的分钟 close/open/volume/high/low（i = 0..11）
-- index 0..10 = 9:30..9:40（因子输入），index 11 = 9:41（买入价）
+记 T 日分钟 bar（index 已按"窗口后移 1 格"重编号，2026-07-06 更正）：
+- `c_i / o_i / vol_i / h_i / l_i` = index i 的分钟 close/open/volume/high/low（i = 0..10）
+- index i = slot (i+1)：**index 0..9 = slot 1..10 = 09:30..09:40（因子输入，10 根真实 bar）**，**index 10 = slot 11 = 09:41（买入价）**
+- `o_0` = slot 1 open = 日开盘价（probe 实证 == daily_open）
 - `mean(vol_a..b)` = index a 到 b 的 volume 均值；`max(h_a..b) / min(l_a..b)` 同理
 
 ---
@@ -74,10 +76,10 @@ highbeta883926 时变池 5116 只 unique codes，在 cn_data_1min 覆盖 5040 �
 
 | 因子 | 公式 | 语义 |
 |---|---|---|
-| `startup_mom_1m` | `c10/c9 - 1` | 最后 1 分钟涨幅（尾动量） |
-| `startup_mom_3m` | `c10/c7 - 1` | 最后 3 分钟涨幅 |
-| `startup_mom_5m` | `c10/c5 - 1` | 最后 5 分钟涨幅 |
-| `startup_total` | `c10/o0 - 1` | 整段基准：9:30 开盘 → 9:40 累计涨幅 |
+| `startup_mom_1m` | `c9/c8 - 1` | 最后 1 分钟涨幅（尾动量） |
+| `startup_mom_3m` | `c9/c6 - 1` | 最后 3 分钟涨幅 |
+| `startup_mom_5m` | `c9/c4 - 1` | 最后 5 分钟涨幅 |
+| `startup_total` | `c9/o0 - 1` | 整段基准：开盘（o0=slot1 open）→ 9:40 累计涨幅 |
 
 `startup_total` 区分"冲高回落"（total 正、mom 负）与"尾盘发力"（两者都正）两种形态。
 
@@ -87,35 +89,35 @@ highbeta883926 时变池 5116 只 unique codes，在 cn_data_1min 覆盖 5040 �
 
 | 因子 | 前段 | 后段 | 公式 |
 |---|---|---|---|
-| `accel_1m` | index0 | index10 | `(c10/o10-1) - (c0/o0-1)` |
-| `accel_3m` | index0-2 | index8-10 | `(c10/o8-1) - (c2/o0-1)` |
-| `accel_5m` | index0-4 | index6-10 | `(c10/o6-1) - (c4/o0-1)` |
+| `accel_1m` | index0 (slot1) | index9 (slot10) | `(c9/o9-1) - (c0/o0-1)` |
+| `accel_3m` | index0-1 (slot1-2) | index7-9 (slot8-10) | `(c9/o7-1) - (c1/o0-1)` |
+| `accel_5m` | index0-3 (slot1-4) | index5-9 (slot6-10) | `(c9/o5-1) - (c3/o0-1)` |
 
 `>0` → 加速赶顶（追高风险）；`<0` → 减速（健康）。特征不预判方向，交给模型学。
 
 ### C. 拉升形态（收盘在窗口高位还是低位）
 
-`close_pos_W = (c10 - low_W) / (high_W - low_W)`，越接近 1 越收在最高位：
+`close_pos_W = (c9 - low_W) / (high_W - low_W)`，越接近 1 越收在最高位：
 
 | 因子 | 窗口 |
 |---|---|
-| `close_pos_1m` | index10 单根的 h/l |
-| `close_pos_3m` | index8-10 的 max(h)/min(l) |
-| `close_pos_5m` | index6-10 的 max(h)/min(l) |
+| `close_pos_1m` | index9（slot10）单根的 h/l |
+| `close_pos_3m` | index7-9（slot8-10）的 max(h)/min(l) |
+| `close_pos_5m` | index5-9（slot6-10）的 max(h)/min(l) |
 
 ### D. 量能放量（后段均量 / 前段均量）
 
 | 因子 | 公式 |
 |---|---|
-| `vol_ratio_1m` | `vol10 / mean(vol0-9)` |
-| `vol_ratio_3m` | `mean(vol8-10) / mean(vol0-2)` |
-| `vol_ratio_5m` | `mean(vol6-10) / mean(vol0-4)` |
+| `vol_ratio_1m` | `vol9 / mean(vol0-8)`（vol0-8 = slot1-9） |
+| `vol_ratio_3m` | `mean(vol7-9) / mean(vol0-1)`（back slot8-10 / front slot1-2） |
+| `vol_ratio_5m` | `mean(vol5-9) / mean(vol0-3)`（back slot6-10 / front slot1-4） |
 
 ### E. 跨日量能（绝对放量）
 
-`vol_vs_yest = sum(vol0-10) / (Ref($volume,1)/240)`
+`vol_vs_yest = sum(vol0-9) / (prev_day_full_minute_vol / 240)`
 
-前 10 分钟总量 ÷ 昨日全日量折算到每分钟。分子 T 日分钟、分母 `Ref($volume,1)` T-1 日频，**无前视**。
+T 日前 10 分钟（slot 1-10）分钟 volume 之和 ÷ T-1 日全天 240 根分钟 volume 之和折算到每分钟。**分子分母均来自 cn_data_1min 分钟量**（避免与 qlib_data 日频 volume 的单位/复权差异，probe 实证跨票比值 1.0-192.7），T-1 < T **无前视**。
 
 ---
 
@@ -123,11 +125,11 @@ highbeta883926 时变池 5116 只 unique codes，在 cn_data_1min 覆盖 5040 �
 
 ### 方案 A（采用）：独立读 1min.bin，qlib 不挂双频
 
-物化脚本（`materialize_minute.py`）独立用 numpy 解析 cn_data_1min 的 1min.bin（probe 已验证读法：bin 头部 float32 `start_index` + float32 数组），按 **1min 日历的 slot 网格对齐**取数：预计算全局 `min_slots[cal_row]`（0..241），把每只票的 bin 按 `start_index` 散射到全局 `(day, slot)` 网格，取 slot 0-10 / slot 11（9:30-9:41）算 14 因子 + 9:41 close → 写 day.bin 进 overlay。**为什么不 `reshape(242)`**：全池 bin 普遍从 slot 1 起步（2024-01-02 9:30 头洞，见 §数据基础），`arr.reshape(n,242)` 会逐日整体偏移一格、首日错位；日历网格散射按绝对 cal_row 取值，对任意 bin 头洞/缺格鲁棒（缺处 NaN）。
+物化脚本（`materialize_minute.py`）独立用 numpy 解析 cn_data_1min 的 1min.bin（probe 已验证读法：bin 头部 float32 `start_index` + float32 数组），按 **1min 日历的 slot 网格对齐**取数：预计算全局 `min_slots[cal_row]`（0..241），把每只票的 bin 按 `start_index` 散射到全局 `(day, slot)` 网格，**取 slot 1-10 / slot 11**（09:30-09:41，跳过全 NaN 的 slot 0）算 14 因子 + 9:41 close → 写 day.bin 进 overlay。**为什么不 `reshape(242)`**：全池 bin 普遍从 slot 1 起步（slot 0 全池全日 NaN，见 §数据基础），`arr.reshape(n,242)` 会逐日整体偏移一格、首日错位；日历网格散射按绝对 cal_row 取值，对任意 bin 头洞/缺格鲁棒（缺处 NaN）。
 
 qlib 保持 `provider_uri=data/qlib_root, freq=day`（不变），完全不知道分钟数据存在。新增 **15 个 day.bin/票**（14 因子 + `$price_941`）与现有 `change/limit_up/limit_down` 同模式。
 
-**`vol_vs_yest` 特殊处理**：分子 `sum(vol0-10)` 来自分钟 bin，分母 `Ref($volume,1)` 来自日频 bin（qlib_data）。物化脚本同时读 cn_data_1min（分钟）+ qlib_data（日频）两个源算好该因子，落 day.bin。
+**`vol_vs_yest` 特殊处理**：分子分母**均来自 cn_data_1min 分钟 bin**（probe 实证 qlib_data 日频 volume 与分钟 volume 单位/复权不一致，跨票比值 1.0-192.7，不可混用）。物化脚本只读 cn_data_1min：分子 = T 日 slot 1-10 volume 之和，分母 = T-1 日全天 240 根 volume 之和 / 240。
 
 ### 为什么不用 qlib 原生混频（NestedDataLoader / QlibDataLoader freq dict）
 
@@ -150,13 +152,13 @@ context7 查证：qlib 原生 `QlibDataLoader(freq={group:"day", group:"1min"})`
 | 时刻 | 事件 | 数据 |
 |---|---|---|
 | T-1 收盘及更早 | 日频特征就绪 | qlib_data（`Ref(*,1)` lag1） |
-| T 日 9:30~9:40 | 分钟特征就绪 | cn_data_1min index 0-10 |
+| T 日 9:30~9:40 | 分钟特征就绪 | cn_data_1min slot 1-10（index 0-9） |
 | T 日 9:40 | 信号产出（model.predict） | 特征到齐 |
-| **T 日 9:41** | **撮合买入** | `$price_941[T]`（index 11 close） |
+| **T 日 9:41** | **撮合买入** | `$price_941[T]`（index 10 = slot 11 close） |
 | T+1 收盘 | 撮合卖出 | `$close[T+1]` |
 
 **无前视核查**：
-- 分钟特征最晚 index 10（9:40）< 撮合价 index 11（9:41）✓
+- 分钟特征最晚 index 9（slot 10 = 9:40）< 撮合价 index 10（slot 11 = 9:41）✓
 - 日频特征 lag1（T-1）< T 日 9:41 ✓
 - label 用 T+1 数据，但 label 只作训练 target，**不进特征** ✓
 - Exchange 不校验撮合时刻 ≥ 信号时刻，只读 `$price_941[T]` 字段值；数值上 9:41 ≥ 特征 9:40 即无前视 ✓

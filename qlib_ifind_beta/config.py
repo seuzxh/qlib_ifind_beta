@@ -46,16 +46,17 @@ DAY_CAL = QLIB_DATA / "calendars" / "day.txt"
 # Source: /home/zxh/cn_data_1min (readonly, 1min bins, 242 slots/day).
 # Slot map (probe-verified 2026-07-06): slot 0 (09:30) is universally NaN
 # pool-wide — every day, every stock (call-auction placeholder, 0/604 non-NaN).
-# First REAL bar = slot 1 (covers [09:30,09:41), the open-auction minute); daily
+# First REAL bar = slot 1 (covers [09:30,09:31), the open continuous-bid minute); daily
 # open == minute_open[slot 1] exactly (8/8 days verified). 240 real bars/day
-# (slots 1-240); slot 241 (15:00 close) is also a NaN placeholder.
+# (242 − slot 0 − slot 121); slot 121 (13:00 mid-day break) is also universally NaN;
+# slot 241 (15:00) has real data (602/604 days).
 CN_DATA_1MIN = Path("/home/zxh/cn_data_1min")
 FEATURES_1MIN_SRC = CN_DATA_1MIN / "features"
 MIN_CAL = CN_DATA_1MIN / "calendars" / "1min.txt"
 SLOTS_PER_DAY = 242          # cn_data_1min calendar: 242 slots/day (09:30-15:00)
 FIRST_FEATURE_SLOT = 1       # slot 1 = first REAL bar (covers [09:30,09:31) open auction);
                              # slot 0 (09:30) is universally NaN pool-wide (probe 2026-07-06)
-FEATURE_SLOT_COUNT = 10      # slots 1-10 = 09:30-09:40 factor input (10 real bars)
+FEATURE_SLOT_COUNT = 10      # slots 1-10 = 09:31-09:40 factor input (10 real bars)
 BUY_SLOT = 11                # slot 11 = 09:41 close → $price_941 buy price
 
 # 14 minute factors materialized as <name>.day.bin per stock.

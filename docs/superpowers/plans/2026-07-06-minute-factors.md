@@ -10,6 +10,14 @@
 
 **Source of truth:** [docs/superpowers/specs/2026-07-06-minute-factors-design.md](../specs/2026-07-06-minute-factors-design.md)（定稿）。本计划是它的 TDD 拆解，不引入新设计决策。
 
+> ⚠️ **Option A 修正（2026-07-06，用户拍板，覆盖全篇旧 slot 假设）**
+>
+> 实现期第一性原理 probe 证伪了原「slot 0 (09:30) 仅 2024-01-02 一个 head-hole」假设。实证：**slot 0 每天、每只票都 NaN**（slot 241/15:00 亦然）→ **每日真实 bar = 240 根（slot 1–240）**。标记口径：`daily_open == minute_open[slot 1]`（slot 1 = 覆盖 [09:30,09:31) 的集合竞价/首根 bar = 真实开盘）。量纲陷阱：sum(分钟 vol)/日 vol 因股异（≈ 复权 factor），vol_vs_yest 两侧都必须用 cn_data_1min 分钟量。详见 spec §数据基础 + Get笔记 [2026-07-06]。
+>
+> **窗口后移 1 格**：特征窗口 slots 0–10 → **slots 1–10**（10 根真实 bar，09:31–09:40）；买入价维持 slot 11 (09:41)。14 公式重写规则：老 index i (≥1) → 新 index (i-1)；slice [a:b] → [max(a-1,0):b-1]。config 常量改为 `FIRST_FEATURE_SLOT=1` / `FEATURE_SLOT_COUNT=10` / `BUY_SLOT=11`（`SLOTS_PER_DAY=242` 不变）；旧 `FACTOR_INPUT_SLOTS`/`PRICE_941_SLOT` 已删。
+>
+> 本计划下文 Task 1–4 的正文仍含旧 slot 假设（已落实的 Task 1–4 实际按 Option A 重做，commit `7edcf60`）。**冲突时一律以 spec + 本横幅为准**。Task 5–9 派发时由 controller 从 spec 派生正确文本。
+
 ---
 
 ## File Structure
@@ -46,16 +54,18 @@
 
 ```python
 
-# --- minute-frequency factors (T-day 9:30-9:40, materialized as day.bin) ------
+# --- minute-frequency factors (T-day 9:31-9:40, materialized as day.bin) ------
 # Source: /home/zxh/cn_data_1min (readonly, 1min bins, 242 slots/day).
-# Slot map (probe-verified): index 0-10 = 9:30-9:40 (factor input),
-# index 11 = 9:41 (buy-price bar, NOT used in factors). See spec §数据基础.
+# Option A (2026-07-06, probe-verified): slot 0 (09:30) universally NaN every day
+# → 240 real bars/day (slots 1-240). daily_open == minute_open[slot 1] (集合竞价/
+# 首根 bar = 真实开盘). Features use slots 1-10 (09:31-09:40); buy = slot 11 (09:41).
 CN_DATA_1MIN = Path("/home/zxh/cn_data_1min")
 FEATURES_1MIN_SRC = CN_DATA_1MIN / "features"
 MIN_CAL = CN_DATA_1MIN / "calendars" / "1min.txt"
-SLOTS_PER_DAY = 242          # cn_data_1min: 9:30-15:00 = 242 1min bars/trading day
-FACTOR_INPUT_SLOTS = 11      # slots 0-10 (9:30-9:40) feed the 14 factors
-PRICE_941_SLOT = 11          # slot 11 = 9:41 close → $price_941 buy price
+SLOTS_PER_DAY = 242          # cn_data_1min: 9:30-15:00 = 242 1min slots/trading day
+FIRST_FEATURE_SLOT = 1       # slot 1 (09:31) = first feature bar (real open)
+FEATURE_SLOT_COUNT = 10      # slots 1-10 (09:31-09:40) feed the 14 factors
+BUY_SLOT = 11                # slot 11 (09:41) close → $price_941 buy price
 
 # 14 minute factors materialized as <name>.day.bin per stock.
 MINUTE_FACTOR_FIELDS = (
