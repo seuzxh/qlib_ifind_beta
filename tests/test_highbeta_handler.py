@@ -21,3 +21,14 @@ def test_minute_fields_present():
     for mf in MINUTE_FACTOR_FIELDS:
         assert f"${mf}" in names, mf
         assert f"${mf}" in fields, mf
+
+
+def test_daily158_fields_are_lagged_to_t_minus_1():
+    """v2: 158 Alpha158 日频 field 必须全包 Ref(...,1) → 压到 T-1，避免 9:41 撮合前视。"""
+    h = HighBetaAlpha158.__new__(HighBetaAlpha158)
+    fields, names = h.get_feature_config()
+    daily_fields = fields[:158]
+    assert all(f.startswith("Ref(") and f.endswith(", 1)") for f in daily_fields), (
+        "all 158 Alpha158 fields must be wrapped in Ref(..., 1) to lag to T-1; "
+        f"offenders: {[f for f in daily_fields if not (f.startswith('Ref(') and f.endswith(', 1)'))][:3]}"
+    )
