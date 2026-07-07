@@ -1168,3 +1168,97 @@ train 2024-01→2024-12 / valid 2025-01→03 / **test 2025-04→07**（reg15 调
 - **正向价值**：排除「模型正则化可破墙」假设 → 五重因子墙 + 本模型墙共同确认：**champion 在 topk=20/n_drop=15 下已达该因子集的结构性超额天花板**，墙非模型欠拟合、非因子不足，是边界结构本身（rank16-20 vs 21-25 实现 96% 断崖但预测不可靠分离）。两窗超额均 +96~100% arith 年化 → **墙是「超额上限」非「可行性」**，策略本身盈利。
 - 入库文件：`qrun/workflow_minute_enhanced_mdl_{cap,huber,reg,reg15,reg20}.yaml`（W1 模型层 5 变体）+ `qrun/workflow_minute_enhanced_{w2,mdl_reg15_w2}.yaml`（W2 OOS 验证 2 窗）。recorder：W1 champion eid907625868975691204 run b8b187d6 / reg15 eid148551552510143393 run 1ec846a9；**W2 champion eid449239398769286298 run dcd756bb** / **reg15 eid968255313638515434 run 982fba5e**。对比脚本 `/tmp/{sweep_compare,sweep_reconcile,full_compare,reg15_robust,w2_compare,w2_deep}.py`。
 - **明早需用户决策**（详见 morning report）：① 接受天花板、champion 定稿、转扩段（26 年全数据）+ 报告产出 ——**推荐**；② 横截面 regime/共振 因子（用户领域模型「指数大势×T-1 K线→共振/启动/高潮」，因子墙 5 重未涉的**非纯个股因子**方向，可能是真正未探索杠杆）；③ 模型层其它（loss/stacking/特征选择）——正则化线已证伪、预期收益低，不推荐。
+
+---
+
+## §28 日频情绪 + 上证指数共振因子（用户领域模型方向）→ 因子层 + 策略层双证伪（第 8 重墙）
+
+> 对应 spec [2026-07-07-daily-index-factors-design.md](../superpowers/specs/2026-07-07-daily-index-factors-design.md) + plan [2026-07-07-daily-index-factors.md](../superpowers/plans/2026-07-07-daily-index-factors.md)。
+> 目标：用户 `/loop` 任务「添加日频因子（分析个股情绪阶段 启动/发酵/高潮，避免拥挤度过高接盘）+ 上证指数因子（判断个股&指数共振、冰点/沸点判断高 beta 风险）」。**这是 §27 morning report 选项 ②「真正未探索的杠杆」的实做。**
+
+### 28.0 背景与两条实现路径
+
+用户领域模型有两层语义，对应两种**独立的**因子应用方式：
+
+| 路径 | 用户原话 | 朴素实现 | 测试位置 |
+|---|---|---|---|
+| **A. 因子层**（横截面 ranking 特征） | "结合指数（大势）和 T-1 之前的 K 线判断个股是否共振/启动/高潮" | 12 个日频/指数 `Ref(expr,1)` 因子并入 Handler，参与 LGB 横截面排序 | §28.1-28.3（Step A/B） |
+| **B. 策略层**（择时/仓位 risk-on/off） | "根据上证指数情绪（冰点、沸点）辅助判断高 beta 类个股**风险**" | regime 信号做组合 gate（沸点空仓/减仓） | §28.4（纯分析） |
+
+两条路径都做了。**两条都证伪。** 详见下。
+
+### 28.1 因子层实现（Step A 独立 12 + Step B 合并 30）
+
+- **数据/口径冻结**：label `Ref($close,-1)/$price_941-1`、deal_price `["$price_941","$close"]`、limit_threshold 分级、n_drop=15、benchmark SH000300 ——**全不变**。仅动 handler feature 集。
+- **上证指数接入**：qlib 原生 `ChangeInstrument('SH000001', $close)`（ops.py:64，跨 instrument 引用），返回 SH000001 行情；T 日 9:41 决策时 T 日日频数据未到 → **全部因子 `Ref(expr,1)`（T 行 = T-1 close 算的值，无前视）**，与分钟因子（9:30-9:40 当日已知）在 9:41 决策点同时可得。test_no_lookahead_truncation_invariance（mask T 及之后，factor[T] 不变）PASS。
+- **12 因子**（[index_daily_handler.py](../../qlib_ifind_beta/index_daily_handler.py)）：个股情绪 7 个（bias_5/bias_20/vol_ratio_20/run_up_5/rsv_9/dist_to_limit/accel_mom）+ 指数共振 5 个（idx_bias_20/idx_run_5/idx_rsv_9/idx_vol_ratio_20/beta_20）。corr_20 因 qlib `Corr._load_internal` 的 `np.isclose` 广播在个股历(621行)≠指数历(624行)时崩（296/5114 股）剔除，由 beta_20（Cov/Var 无 override）覆盖共振。
+- **两步走**（spec §6 Q1）：Step A = `IndexDailyHandler`（仅 12 个日频/指数因子，无分钟因子）→ 独立验证因子带信号（**注意：无分钟因子→p941→minute→drop 链断→回测护栏弱，回测数字不与 champion 直接比，只看 IC**）；Step B = `EnhancedWithDailyIndex`（完整 18 分钟 + 12 日频/指数 = 30，护栏与 champion 等价，IC + 超额都直接比）。
+- **测试**：[tests/test_index_factors.py](../../tests/test_index_factors.py) 19/19 PASS（1.75s）—— 12 因子表达式 vs 手算 pandas rolling 逐值对齐 + 前视截断不变性 + handler config 契约。
+- **W2 OOS 窗**：[gen_enh_daily_w2.py](../../tmp/gen_enh_daily_w2.py) 把 test 平移回 2025-04→07（train/valid 同步回退 1 年），窗口与 champion W2（§27 已跑）逐字段核对一致，仅 handler + experiment_name 不同。
+
+### 28.2 因子层 W1 结果：IC +12%（ saga 中**首见真涨**，但超额仍平）
+
+[test 2026-04→07] 同口径对比（[daily_index_compare.py](../../tmp/daily_index_compare.py)）：
+
+| config | IC_test | ICIR | RankIC | RankICIR | excess(ann) |
+|---|---|---|---|---|---|
+| champion enhanced(18) | 0.0545 | 0.92 | 0.0677 | 0.540 | +194.5% |
+| **Step B enh_daily(30)** | **0.0611 (+12%)** | 1.03 | **0.0840 (+24%)** | **0.719 (+33%)** | +194.9% (+0.4pp 平) |
+| Step A daily_index(12) | 0.0366 | — | — | 0.366 | +116.5%（护栏弱，不比） |
+
+Step A 独立 IC 0.0366 > m14 baseline 0.0341、RankICIR 0.366 → **standalone gate 实质通过**（12 因子带信号）。Step B 合并后 IC/RankIC/RankICIR **三升且超额不降** —— 这是 §23-27 五重因子墙 + 一重模型墙后**第一次看到 IC 真涨**，形似强 champion 候选。**但超额仍撞墙（+0.4pp）**，与 §27 reg15 W1 同形（IC 边际变化与超额解耦）。
+
+### 28.3 因子层 W2 OOS 证伪：IC −15% / 超额 −69.6pp / 配对 p=0.443
+
+[test 2025-04→07，真 OOS]（[enh_daily_w2_deep.py](../../tmp/enh_daily_w2_deep.py)）：
+
+| config (W2) | IC | RankIC | excess(ann) | median/d | win |
+|---|---|---|---|---|---|
+| champion enhanced(18) | **0.0718** | 0.1177 | **+96.7%** | — | — |
+| Step B enh_daily(30) | 0.0611 (**−15%**) | 0.0972 | +27.1% (**−69.6pp**) | **−0.095%** | **48%** |
+
+- **配对统计**：日 IC 差（enh − champ）paired t=−0.77，**p=0.443**；enh 更高仅 29/62 天（47%）。**与 champion 统计不可区分（偏劣）。**
+- **缓存 bug 排查**（[verify_w2_window.py](../../tmp/verify_w2_window.py)）：enh_daily W1/W2 IC 均恰 ≈0.0611 形似缓存复用，但实测 W2 ic 索引 2025-04-01→2025-07-02（n=62）≠ W1（2026 窗 n=61），head3 完全不同（W2 [0.24,−0.01,−0.09] vs W1 [0.16,0.01,0.11]）→ **非缓存 bug**。enh_daily 的 IC 恰好两窗稳定在 0.0611，而 champion 在高信号窗 W2 上 IC 更高（0.0718）。
+- **机制（scale 错配）**：12 日频/指数因子用 5/9/20 日 rolling 窗口，但 label 尺度 ≈1.5 天（T 9:41→T+1 close）。慢因子在高 beta 牛市 regime（W1 2026）恰与短 label 共对齐 → 过拟合；换 regime（W2 2025）即失效。**与 Alpha158/full(85)（§D6、§19.1）同病**：日频尺度因子对短 label 天然不稳。
+- **判定**：W1 IC +12% 为**窗口过拟合**，与 §27 reg15 同病。因子层路径（A）证伪。
+
+### 28.4 策略层 regime-gating 纯分析：相关≈0、gate 毁收益（路径 B 证伪）
+
+用户原意「判断**风险**」= 择时/仓位，是策略层杠杆。n_drop/topk/label 冻结，但仓位/择时是不同杠杆、未冻结。**不修改策略代码、不新跑回测**，纯分析验证假设：SH000001 情绪（lag1，T 9:41 已知）能否解释/预测 champion 逐日超额？（[regime_strategy_layer.py](../../tmp/regime_strategy_layer.py)）
+
+**① 相关性几乎为零**（POOLED n=122，regime[T] vs excess[T]，T+1 对齐同样≈0）：
+
+| regime 信号 | W1 pear | W2 pear | POOLED pear (p) |
+|---|---|---|---|
+| idx_bias_20 | +0.086 | −0.060 | +0.019 (0.837) |
+| idx_rsv_9 | +0.133 | **−0.158** | −0.008 (0.931) |
+| idx_run_5 | +0.104 | −0.106 | −0.009 (0.923) |
+| idx_vol_ratio_20 | +0.257 | −0.037 | +0.087 (0.341) |
+
+**符号跨窗不一致**（rsv：W1 +0.133 / W2 −0.158）→ **噪声特征，非信号**。n=122 足以排除中大幅效应。
+
+**② 五分位 bucket 非单调（U 型，假设方向反）**：Pooled idx_rsv_9 → Q1冰点 +1.025%/d、Q2 +0.008%、Q3 +0.642%、Q4 +0.282%、**Q5沸点 +1.016%/d**。假设预测「沸点（高 beta 过热）应转负」，实际**沸点是第二高分位**。两窗均为 U 型、无单调性。
+
+**③ gate 模拟全部毁收益**：剔除 top-X% 沸点空仓 → 实现年化超额 Δ：top-20% Δ=**−50pp**(pooled)/−55pp(W1)/−15pp(W2)；top-30% −59pp；top-40% −64pp。**沸点日实为好日，砍掉反亏。**
+
+**判定**：策略层 regime-gating 路径（B）证伪。用户的「冰点/沸点判断高 beta 风险」领域模型，在 7 字段日频数据 + 9:41 撮合 + 1.5 天 label 的设定下，对超额**无 exploitable 预测内容**（横截面无、时序也无）。
+
+### 28.5 机制归因（第一性原理）
+
+- **因子层（§28.1-3）**：scale 错配 —— 慢日频（5/9/20d）因子对 ~1.5d label，单 regime 过拟合、换 regime 即崩。与 Alpha158/full(85)/§27 reg15 同机制。
+- **策略层（§28.4）**：regime 对**该高 beta 池在该 label 尺度**的超额无预测力。可能因：(a) champion 已在 highbeta883926 池内选股，池内个股 beta 同质化、regime 横截面区分度被池预筛消耗；(b) 1.5d 持仓太短，日频 regime 的均值回复/动量来不及表达；(c) 7 字段缺 breadth/dispersion/涨跌停数等更有效的 regime 代理。**注意**：证伪的是「7 字段 + 标准冰点/沸点代理（RSV/bias/动量/量比）」这一具体实现，非「regime 对高 beta 全无意义」这一通则——但本设定下已无 exploitable 边际。
+
+### 28.6 判定与入库
+
+- **FAIL（双路径）**：因子层 W2 OOS IC −15%/超额 −69.6pp/p=0.443；策略层相关≈0、gate 毁收益。**champion enhanced(18)@n_drop=15 维持不变**，A/B 隔离，本实验双负结果归档。
+- **正向价值（saga 收束）**：至此 **factor + model + strategy 三层全部测过、全部撞墙** —— §23-26（5 重因子墙）+ §27（模型正则化墙）+ §28（因子层日频/指数墙 + 策略层 regime-gating 墙）= **8 重独立验证**。在用户冻结的 label/策略/切分下，champion topk=20/n_drop=15 的超额天花板是**结构性**的，**既非因子不足、非模型欠拟合、也非择时缺位**。两窗超额均 +96~100% arith 年化 → 墙是「超额上限」非「可行性」，策略本身盈利。
+- **saga 结论**：用户目标「提升超额」在本冻结设定下**已穷尽三层杠杆、确认不可破**。用户领域模型（共振/冰点沸点）方向经双实现证伪——**idea 不该再当因子层或简单择时层杠杆重试**；如要继续，唯一原则性未测方向是**分钟尺度 regime 特征**（匹配 1.5d label，非 20d）或**更宽 universe/更长 label**（后者被用户冻结）。
+- 入库文件：handler [index_daily_handler.py](../../qlib_ifind_beta/index_daily_handler.py)(12) + [enhanced_daily_index_handler.py](../../qlib_ifind_beta/enhanced_daily_index_handler.py)(30)；workflow [workflow_daily_index.yaml](../../qrun/workflow_daily_index.yaml)(StepA) + [workflow_enhanced_daily_index.yaml](../../qrun/workflow_enhanced_daily_index.yaml)(StepB W1) + [workflow_enhanced_daily_index_w2.yaml](../../qrun/workflow_enhanced_daily_index_w2.yaml)(StepB W2)；test [test_index_factors.py](../../tests/test_index_factors.py) 19/19；对比脚本 `/tmp/{daily_index_compare,gen_enh_daily_w2,enh_daily_w2_deep,verify_w2_window,regime_strategy_layer}.py`。
+- recorder：Step A daily_index W1 eid662327455819139151 run da720637；Step B enhanced_daily_index W1 eid872817226661043202 run 3fe0f249 / **W2 eid749049631274766161 run 2df506a4**；对照 champion W1 eid907625868975691204 run b8b187d6 / W2 eid449239398769286298 run dcd756bb。
+
+### 28.7 待用户决策（详见 morning report v3）
+
+1. **接受天花板、champion 定稿** → 转扩段（26 年全数据稳健性）+ 正式报告产出 ——**推荐**（三层已穷尽，再挖边际递减）。
+2. **分钟尺度 regime 特征** —— 唯一原则性未测方向（日频 regime 已证伪、§28.5 机制指向 label 尺度匹配）。需新因子工程（9:30-9:40 内指数/个股共振的分钟代理），预期工作量大、收益不确定。
+3. **regime 作风控 overlay（非超额最大化）** —— 用 idx_rsv 高分位做**回撤控制**（沸点降仓位降风险），代价是收益让步、超额不升反降。仅当用户优先级从「超额」转向「Sharpe/回撤」时才合理。
+4. **接受 champion、转实战对接** —— 策略已两窗盈利，可直接进实盘/纸面跟踪，边跑边观察 OOS 稳健性。
