@@ -113,3 +113,31 @@ MINUTE_FACTOR_TAIL_FIELDS = (
     "tail_vol_ratio_t1",      # 尾盘量比 vol[9]/vol[0:9].mean → 主力介入/出逃
     "tail_accel_t1",          # 尾盘加速度 → 高潮见顶/惯性持续
 )
+
+# 26th-30th / 31st-35th materialized bins — T-1 / T-2 开盘族（2026-07-08，goal「扩展不同区间的
+# 1min 因子」迭代）。复用 champion 早盘 5 公式（startup_mom_5m/startup_total/accel_5m/close_pos_5m/
+# vol_ratio_5m，slot 1-10），shift 1 / 2 → T 行 bin = T-1 / T-2 开盘。
+#
+# 破墙假设（详见 docs/superpowers/specs/2026-07-08-t1-opening-factors-design.md）：§25 尾盘失败因
+# T-1 尾盘与 T 日开盘是不同 regime（正交 |corr|<0.07）→ 重排 topk=20 边界。T-1/T-2 **开盘**与
+# T 日开盘**同 regime**（仅时间平移）→ 若高贝塔开盘动量跨日持续则**共线强化**（锐化边界而非重排），
+# 可能破 IC→超额墙；若跨日反转则正交 → 复刻 §25 失败。无论胜败都有结构结论。对齐用户心法
+# （T-1 之前 K 线判共振/启动/高潮/惯性 → regime 检测，树模型给齐 T-day+T-1 因子自动学交互）。
+#
+# 物化：raw 值已由 materialize A-D 段算进 fac（startup_mom_5m 等），此处 copy 到 _t1/_t2 key 再 shift。
+# shift-1/2 在 min-cal 空间 → 无前视（T-1 9:40 / T-2 9:40 远早于 T 日 9:41 决策）。与 §25 尾盘 shift1
+# 同构。handler $field 直接消费（与 14 分钟因子零 Ref 模式统一）。
+MINUTE_FACTOR_OPENING_T1_FIELDS = (
+    "startup_mom_5m_t1",      # shift1(c[9]/c[4]-1)：T-1 开盘 5min 动量
+    "startup_total_t1",       # shift1(c[9]/o[0]-1)：T-1 开盘整体涨幅（共振强度代理）
+    "accel_5m_t1",            # shift1((c[9]/o[5]-1)-(c[3]/o[0]-1))：T-1 开盘加速度
+    "close_pos_5m_t1",        # shift1((c[9]-l5)/(h5-l5))：T-1 开盘收盘在振幅位置
+    "vol_ratio_5m_t1",        # shift1(v[5:10].mean/v[0:4].mean)：T-1 开盘量比
+)
+MINUTE_FACTOR_OPENING_T2_FIELDS = (
+    "startup_mom_5m_t2",      # shift2 同上 5 公式：T-2 开盘（测动量持续 2 日 vs 1 日，更深 regime）
+    "startup_total_t2",
+    "accel_5m_t2",
+    "close_pos_5m_t2",
+    "vol_ratio_5m_t2",
+)

@@ -1,12 +1,15 @@
 """Materialize minute factors + $price_941 as day.bin into the overlay.
 
-Writes 25 day.bins/stock: 14 baseline minute factors (MINUTE_FACTOR_FIELDS) + 4
+Writes 35 day.bins/stock: 14 baseline minute factors (MINUTE_FACTOR_FIELDS) + 4
 enhanced extras (MINUTE_FACTOR_EXTRA_FIELDS: vol_vs_yest_t2/t3/t5 +
 overnight_gap) + 5 T-1 tail factors (MINUTE_FACTOR_TAIL_FIELDS, goal 2026-07-07) +
-$price_941 (deal price) + $change_941 (涨跌停拦截用). The 14 baseline are frozen
-for m14 reproducibility; the 4 extras feed MinuteEnhancedHandler (14 + 4 = 18-factor
-champion, backtest-log §22); the 5 tail factors feed MinuteEnhancedTailHandler
-(T-1 尾盘族, 23 因子, goal 因子优化).
+5 T-1 opening + 5 T-2 opening factors (MINUTE_FACTOR_OPENING_T1_FIELDS /
+_T2_FIELDS, goal 2026-07-08「扩展不同区间 1min 因子」) + $price_941 (deal price)
++ $change_941 (涨跌停拦截用). The 14 baseline are frozen for m14 reproducibility;
+the 4 extras feed MinuteEnhancedHandler (14 + 4 = 18-factor champion, backtest-log
+§22); the 5 tail factors feed MinuteEnhancedTailHandler (T-1 尾盘族, 23 因子);
+the 10 opening-T1/T2 factors feed MinuteEnhancedOpeningT1Handler (T-1/T-2 开盘族,
+破 IC→超额墙「同 regime 滞后」假设, spec 2026-07-08-t1-opening-factors-design).
 
 Reads cn_data_1min 1min bins (close/open/high/low/volume) per stock, slices each
 trading day's morning window (slots 1-11 = 09:31-09:41: 10 feature bars slots 1-10
@@ -45,7 +48,8 @@ from .binio import read_bin, write_bin
 from .config import (
     BUY_SLOT, DAY_CAL, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FREQ,
     FIRST_FEATURE_SLOT, MIN_CAL, MINUTE_CHANGE_941_FIELD, MINUTE_DEAL_PRICE_FIELD,
-    MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS, MINUTE_FACTOR_TAIL_FIELDS,
+    MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS, MINUTE_FACTOR_OPENING_T1_FIELDS,
+    MINUTE_FACTOR_OPENING_T2_FIELDS, MINUTE_FACTOR_TAIL_FIELDS,
     REAL_BARS_PER_DAY, SLOTS_PER_DAY, TAIL_FIRST_SLOT, TAIL_SLOT_COUNT,
 )
 
@@ -65,6 +69,16 @@ _MORNING_WINDOW = BUY_SLOT - FIRST_FEATURE_SLOT + 1   # 11
 # _EXTRA_MINUTE_SPACE 同组性质。slots TAIL_FIRST_SLOT..(TAIL_FIRST_SLOT+TAIL_SLOT_COUNT-1) = 232-241。
 _TAIL_SPACE = tuple(MINUTE_FACTOR_TAIL_FIELDS)
 _TAIL_WINDOW = TAIL_SLOT_COUNT   # 10
+# T-1 / T-2 开盘族（goal 2026-07-08）：复用 champion 早盘 5 公式（startup_mom_5m/startup_total/
+# accel_5m/close_pos_5m/vol_ratio_5m，已在 fac A-D 段算），shift 1 / 2 → T 行 bin = T-1 / T-2 开盘。
+# 命名约定：每个 _t1/_t2 field = "<champion_raw>_t1"/"_t2"，去后缀（fname[:-3]）→ champion baseline 名。
+# import 期校验：确保去后缀后落在 MINUTE_FACTOR_FIELDS（champion 已算），否则 copy 会 KeyError。
+_OPENING_T1_SPACE = tuple(MINUTE_FACTOR_OPENING_T1_FIELDS)
+_OPENING_T2_SPACE = tuple(MINUTE_FACTOR_OPENING_T2_FIELDS)
+for _f in _OPENING_T1_SPACE + _OPENING_T2_SPACE:
+    assert _f.endswith(("_t1", "_t2")), f"opening lag field 命名不符 _t1/_t2 约定: {_f}"
+    assert _f[:-3] in MINUTE_FACTOR_FIELDS, (
+        f"opening lag field {_f} 去后缀 → {_f[:-3]} 不在 champion MINUTE_FACTOR_FIELDS，无法复用公式")
 _cal_cache: dict = {}
 
 
@@ -141,9 +155,9 @@ def _read_1min_fields(code: str):
 
 
 def materialize_minute_instrument(code: str) -> bool:
-    """Read 1min + daily bins for `code`, write 20 day.bins: 14 baseline minute
-    factors + 4 enhanced extras (vol_vs_yest_t2/t3/t5 + overnight_gap) +
-    $price_941 + $change_941.
+    """Read 1min + daily bins for `code`, write 35 day.bins: 14 baseline minute
+    factors + 4 enhanced extras (vol_vs_yest_t2/t3/t5 + overnight_gap) + 5 T-1
+    tail + 5 T-1 opening + 5 T-2 opening factors + $price_941 + $change_941.
 
     Returns True on success; False if the 1min source is missing/misaligned, or the
     daily close/factor/open bin is missing/misaligned (caller treats as "no minute
@@ -323,20 +337,34 @@ def materialize_minute_instrument(code: str) -> bool:
         fac["tail_accel_t1"] = (ct[:, 9] / ct[:, 8] - 1.0) - (ct[:, 1] / ct[:, 0] - 1.0)
     price_941 = c[:, 10]
 
-    # T-1 尾盘族 shift 1（min-cal 空间）：T 行 bin = T-1 尾盘（无前视：T-1 15:00 收盘，T 日
-    # 9:41 决策已知）。仿 vol_vs_yest_t2 的 pv[k:]=full_day_vol[:-k]；shift 1 → 首 min-cal 日 NaN。
-    # shift 后 fac[fname] 仍长 n_min_days，与 scatter 的 valid（基于 rel/day_rows，均 n_min_days 长）对齐。
-    for fname in _TAIL_SPACE:
+    # T-1 / T-2 开盘族 copy（goal 2026-07-08）：复用 champion 早盘 5 公式（已在 fac，min-cal 日 d
+    # 当天值）→ copy 到 _t1/_t2 key（fname[:-3] 去 _t1/_t2 后缀 = champion baseline 名，import 期已校验）。
+    # zero 额外读盘/重算：仅指针复制。copy 后 _t1/_t2 持有 day-d 值，下方 shift 改成 day d-1/d-2。
+    for fname in _OPENING_T1_SPACE + _OPENING_T2_SPACE:
+        fac[fname] = fac[fname[:-3]]
+
+    # shift（min-cal 空间）：TAIL + OPENING_T1 shift 1（T 行 bin = T-1 值）；OPENING_T2 shift 2
+    # （T 行 bin = T-2 值）。无前视：T-1 9:40 / T-2 9:40 ≪ T 日 9:41 决策（与 §25 尾盘 shift1 同构）。
+    # 仿 vol_vs_yest_t2 的 pv[k:]=full_day_vol[:-k]；shift k → 首 k 个 min-cal 日 NaN。shift 后 fac
+    # 仍长 n_min_days，与 scatter 的 valid（基于 rel/day_rows，均 n_min_days 长）对齐。
+    for fname in _TAIL_SPACE + _OPENING_T1_SPACE:
         raw = fac[fname]
         shifted = np.full(n_min_days, np.nan, dtype=np.float64)
         if n_min_days > 1:
             shifted[1:] = raw[:-1]
+        fac[fname] = shifted
+    for fname in _OPENING_T2_SPACE:
+        raw = fac[fname]
+        shifted = np.full(n_min_days, np.nan, dtype=np.float64)
+        if n_min_days > 2:
+            shifted[2:] = raw[:-2]
         fac[fname] = shifted
 
     # scatter into day-aligned output (length = daily close.bin length)
     n_out = close_d.size
     _scatter_fields = (
         list(MINUTE_FACTOR_FIELDS) + list(_EXTRA_MINUTE_SPACE) + list(_TAIL_SPACE)
+        + list(_OPENING_T1_SPACE) + list(_OPENING_T2_SPACE)
     )
     out = {name: np.full(n_out, np.nan, dtype=np.float32) for name in _scatter_fields}
     out_p941 = np.full(n_out, np.nan, dtype=np.float32)

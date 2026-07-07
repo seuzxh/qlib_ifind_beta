@@ -1033,3 +1033,73 @@ IC 正交、RankICIR 持平——但**头部、超额、回撤、IR 四口径全
 - 入库文件：`qlib_ifind_beta/minute_enhanced_tail_handler.py` / `qrun/workflow_minute_enhanced_tail.yaml` / `tests/test_minute_enhanced_tail_handler.py`（4/4 PASS）/ `qlib_ifind_beta/materialize_minute.py`（5 尾盘 bin 物化 + shift-1）/ `qlib_ifind_beta/config.py`（`MINUTE_FACTOR_TAIL_FIELDS` + `TAIL_FIRST_SLOT/TAIL_SLOT_COUNT`）/ `tests/test_materialize_minute.py`（3 尾盘测试）。
 - recorder：`mlruns/882574446881966247/f49261b7c66f4934a286653c57cf6ef1`；头对头分析脚本 `/tmp/tail_head_cmp.py`。
 - champion（enhanced(18)@n_drop=15）**不变**，A/B 隔离，本实验纯负结果归档。三重墙定论后，因子优化 thread 收口，转向 OOS 稳健性验证。
+
+## §26 T-1/T-2 开盘因子族（champion 18 + 2 同-regime 滞后开盘因子）— FAIL，第 4/5 次 IC→超额墙确认（2026-07-08，overnight autonomous）
+
+### 26.1 背景：goal「扩展不同区间的 1min 因子」，测「同 regime 滞后」破墙假设
+
+§25 尾盘失败的关键洞察：T-1 **尾盘**是与 T 日开盘**不同 regime**（正交 |corr|<0.07）→ 正交因子重排 topk=20 边界。本族反过来测「**同 regime 滞后**」假设：T-1/T-2 **开盘**（slot 1-10，与 T 日开盘同 regime、仅时间平移 1/2 天）。若高贝塔开盘动量**跨日持续**（真启动/共振/惯性），则 T-1 开盘与 T 日开盘**共线强化**（reinforcing，非正交重排）→ 可能不重排边界而是**锐化**它，从而破墙。若跨日**反转**则正交 → 复刻 §25 失败。
+
+对齐用户 /goal 心法：「结合指数（大势）和 **T-1 之前的 K 线**判断个股是否共振、启动、高潮或惯性冲高」。树模型给齐 T 日 + T-1 开盘因子后，自动通过 splits 学交互（T-day × T-1 开盘 = 共振强度）。
+
+**IC 基线校准（第一性原理，全段 2024-2026，5038 股 × 600 天，15 因子单变量 Spearman rank IC vs `Ref($close,-1)/$price_941-1`）**：
+- **vol_ratio 族跨日持续（共线信号，假设直接验证）**：`vol_ratio_5m_t2` +0.0297（全部 15 因子 **#1**，ICIR 0.224）/ `vol_ratio_5m`（baseline）+0.0252（#2）/ `vol_ratio_5m_t1` +0.0187（#4，ICIR 0.138）→ 全正、单调 → 开盘量比是真实跨日持续边际。
+- accel / startup_mom / startup_total 族**不持续**：T-1/T-2 lag 全段 |IC|<0.003（噪声）。
+- 单因子全段 |IC|<0.03 是 baseline 常态（champion signal IC 0.0545 来自 LGBM 非线性组合 18 因子）。
+
+→ 先验乐观：vol_ratio 族跨日持续 + 共线 + 对齐用户心法 → 该共线强化边界。**结果证伪**。
+
+### 26.2 实验（与 champion 逐字一致，唯一变量 = feature 18→20）
+
+- 物化 10 个 T-1/T-2 开盘 day.bin（`materialize_minute.py`）：复用 champion 早盘 5 公式（已在 `fac`），copy 到 `_t1`/`_t2` key → 进 shift 循环（TAIL+OPENING_T1 shift-1、OPENING_T2 shift-2，**min-cal 空间**）→ scatter。**零额外读盘**（5 公式只算一次，copy+shift）。shift-1/2 in min-cal space：T 行 bin = T-1/T-2 的 9:31-9:40，无前视（T-1/T-2 9:40 ≪ T 日 9:41 决策）；与 §25 尾盘 shift-1 前视论证完全同构。
+- Handler 两变体（`minute_enhanced_opening_handler.py`，均继承 MinuteEnhancedHandler，仅 override `get_feature_config` 追加 `$field`，复用 champion 18 + L1 前视护栏）：
+  - **V1b（IC 驱动，最强共线信号）**：18 + `[vol_ratio_5m_t1, vol_ratio_5m_t2]` = 20。两条持续量比 lag → 直接测「持续开盘量比共线强化 topk=20 边界」（破墙的最强检验）。
+  - **V1（§25 头对头，设计忠实）**：18 + `[vol_ratio_5m_t1, accel_5m_t1]` = 20（T-1 开盘 |mean_ic| top-2）。同 count、同 shift-1、仅 regime 不同（开盘 vs 尾盘）→ 隔离「同 regime 滞后 vs 不同 regime」。
+- label / deal_price / 涨跌停拦截 / 切分 / 模型超参 / 归一化口径——**全冻结**，唯一变量 feature 18→20。
+- 测试：`tests/test_materialize_minute.py` 加 `test_opening_t1_t2_factors_crosscheck`（手算 oracle 逐字复刻 5 公式 + shift-1/2 对齐判别 + NaN-safe + bin 计数 25→35）→ 全量 **17/17 PASS**。全量物化 5040 ok / 76 missing（退市/停牌，预期）。
+
+### 26.3 结果（test 2026-04→07，两变体均 FAIL）
+
+| 口径 | champion (enhanced 18) | V1b（+2 共线量比） | V1（+2 共线开盘 top2） | 判定 |
+|---|---|---|---|---|
+| 信号 IC | 0.0545 | **0.0574（+5.3%）↑** | **0.0585（+7.3%）↑** | 两变体 IC 均↑ |
+| Rank IC | ~0.067 | 0.0709 ↑ | 0.0740 ↑ | ↑ |
+| ICIR | ~0.49 | 0.533 ↑ | 0.510 ↑ | ↑ |
+| Rank ICIR | ~0.51 | 0.606 ↑ | 0.586 ↑ | ↑ |
+| **超额含成本年化** | **+158.86%** | **+145.78%（−13.08pp）↓** | **+125.38%（−33.48pp）↓↓** | **两变体均 FAIL** |
+| 超额不含成本年化 | — | +178.32% | +157.97% | — |
+| 回撤（含成本） | −5.44% | −5.42%（≈持平） | −5.30%（略好） | 非 Δ 主因 |
+| benchmark（SH000300） | +44.11% | +44.11% | +44.11% | — |
+
+**核心反直觉**：两变体 **IC / Rank IC / ICIR / Rank ICIR 四信号口径全↑**（V1 更是历史最高 IC +7.3%），但**超额含成本年化全↓**——V1（IC 最高）的超额反而**跌得最狠（−33.48pp）**。**IC 与超额在此边界处解耦甚至反向**。
+
+### 26.4 失败机制（IC↑ 但超额↓——「共线」也未破墙，机制同 §25）
+
+两变体信号 IC 提升、vol_ratio 族跨日持续（共线假设在因子-IC 层成立），但**头部超额仍退化**。机制与 §25 同构：新增因子（即使共线、即使提升平均排序质量 IC）**仍重排 topk=20 边界**——把 champion 原本落在边界的头部赢家挤出，腾出 rank 给开盘量比强但次日收益平庸的票。「共线强化边界」假设在**组合层证伪**：因子-IC 持续 ≠ 边界强化。
+
+**§26 的独立新结论（超越 §25）**：§25 是「IC↓ + 超额↓」（可辩称因子本身弱）；§26 是「**IC↑ + 超额↓**」且「**IC 越高、超额跌越狠**」（V1 IC +7.3% → 超额 −33.48pp，甚于 V1b IC +5.3% → −13.08pp）。→ **墙不依赖 IC 方向**：无论加的因子提升还是降低平均 IC，只要扰动 topk=20 边界，超额就退化。IC 是**全截面平均排序质量**，超额是**top-20 边界处的尖峰实现**——两者在 champion 当前 18 因子 + topk=20 结构下解耦。
+
+### 26.5 五重墙定论（goal「扩展区间 1min 因子」thread 收口）
+
+| 实验 | 改动 | IC | 超额含成本年化 | 机制 |
+|---|---|---|---|---|
+| §23 Step B | +12 日频/指数→30 | 0.0611（+12%）↑ | +159.27% ≈平 | IC↑不传导头部 |
+| §24 CSRank | 18 横截面归一化 | 0.0526 ↓ | +143.14% ↓ | 边界摧毁 |
+| §25 tail | +2 **正交**尾盘→20 | 0.0457 ↓ | +139.60% ↓ | 边界腰斩+尖峰压平 |
+| **§26 V1b** | **+2 共线开盘量比→20** | **0.0574（+5.3%）↑** | **+145.78% ↓** | **IC↑但边界重排** |
+| **§26 V1** | **+2 共线开盘 top2→20** | **0.0585（+7.3%）↑** | **+125.38% ↓↓** | **IC↑且最高，超额跌最狠** |
+
+**五重独立证伪，覆盖全部 regime × IC 方向组合**：
+- **不同 regime（正交）**：§25 T-1 尾盘 → 墙。
+- **同 regime（共线）**：§26 T-1/T-2 开盘 → 墙。
+- **IC↓**（§24/§25）、**IC≈平**（§23）、**IC↑**（§26 V1b/V1）→ 全部墙。
+
+→ 共同结构结论铁证：**champion enhanced(18)@n_drop=15 的 18 因子已在 topk=20 边界处达强局部最优**。任何加因子（正交/共线、提 IC/降 IC）都重排并退化该边界。**「扩展不同区间的 1min 因子」方向已穷尽**——无论选哪个区间、哪个 regime、多强 IC，加进 champion 都退化超额。
+
+### 26.6 判定与入库
+
+- **FAIL**（两变体超额含成本年化均 < champion−10pp 拒绝线；V1 −33.48pp、V1b −13.08pp）。T-1/T-2 开盘因子族（champion+2 共线滞后）在此构造下死。
+- 入库文件：`qlib_ifind_beta/minute_enhanced_opening_handler.py`（V1 `MinuteEnhancedOpeningT1Handler` + V1b `MinuteEnhancedOpeningVolHandler`）/ `qrun/workflow_minute_enhanced_opening_t1.yaml` + `workflow_minute_enhanced_opening_vol.yaml` / `qlib_ifind_beta/materialize_minute.py`（10 T-1/T-2 开盘 bin 物化 + shift-1/2）/ `qlib_ifind_beta/config.py`（`MINUTE_FACTOR_OPENING_T1_FIELDS` / `MINUTE_FACTOR_OPENING_T2_FIELDS`）/ `tests/test_materialize_minute.py`（T-1/T-2 开盘交叉验证，17/17 PASS）/ 设计 `docs/superpowers/specs/2026-07-08-t1-opening-factors-design.md`。
+- recorder：V1 `ecf50b7250d143e0a3be9edcc675416b` / V1b `de4c265a623c4070a770e66d0e2ef664`（见 `/tmp/v1.log` `/tmp/v1b.log` 末行）；IC 校准 `/tmp/ic_calib_opening.py` → `/tmp/ic_calib_opening.json`。
+- champion（enhanced(18)@n_drop=15）**不变**，A/B 隔离，本实验纯负结果归档。
+- **明早需用户决策**（详见 morning report）：① 接受五重墙、转向 OOS walk-forward 稳健性验证（sliding 设计已批、paused）——**推荐**；② V4 replacement（丢 2 弱 champion + 加 2 开盘 = 18，测「count-dilution vs boundary-optimality」唯一未涉结构假设）需用户授权动 §D6 冻结口径；③ 调 topk/n_drop（策略层始终冻结，只记录）。
