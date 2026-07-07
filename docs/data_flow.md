@@ -2,6 +2,8 @@
 
 > 本项目怎么从「原始行情 + 成分股名单」一步步变成「回测报告」。
 > 配套文档：架构见 [architecture.md](architecture.md)，技术决策见 [technical-design.md](technical-design.md)。
+>
+> ⚠️ **本文是 MVP baseline 时期的通俗版叙述**（日频 `Alpha158` 158 因子 + 旧 label `Ref($close,-2)/Ref($open,-1)-1`，IC≈0 baseline）。项目已演进到 **champion = enhanced(18)@n_drop=15**（14 个 T 日 9:30-9:40 分钟因子 + 4 extra，test 2026-04→07 +158.86% w/cost / IC 0.0545 / ICIR 5.12），**label 冻结为 `Ref($close,-1)/$price_941-1`**（T+1 收盘 / T 日 9:41 价 − 1）、`deal_price=["$price_941","$close"]`、策略换 `TopkDropoutStrategyTD0`（9:41 成交）、overlay 每股 30 bins。下文带 ⚡ 的为演进后现状，完整 champion 流程见 [backtest-log §22](backtest-log/2026-07-06-l1-full-backtest.md)。
 
 ## 全链路一张图
 
@@ -37,6 +39,8 @@
               mlruns/ 产物：IC / 净值曲线 / 换手率 / 报告
 ```
 
+> ⚡ 上图是 **MVP baseline 视角**（Alpha158 + 旧 label `Ref($close,-2)/Ref($open,-1)-1` + `deal_price=[$open,$close]` + 每股 10 bin）。**champion 视角**：因子 = MinuteEnhancedHandler 的 18 个 T 日分钟因子、label = `Ref($close,-1)/$price_941-1`、deal_price = `[$price_941,$close]`、策略 = TopkDropoutStrategyTD0（9:41 成交）、overlay 每股 30 bins。详见 [backtest-log §22](backtest-log/2026-07-06-l1-full-backtest.md)。
+
 下面按环节拆开讲。
 
 ---
@@ -46,6 +50,7 @@
 | 来源 | 内容 | 怎么访问 |
 |---|---|---|
 | `/home/zxh/qlib_data` | 7 字段（open/high/low/close/volume/factor/vwap）× 6419 天（2000-01-04 → 2026-07-02），全 A 股 + 主要指数 | 文件系统，**只读** |
+| `/home/zxh/cn_data_1min` | ⚡ 1min 行情（分钟因子源，champion 用） | 文件系统，**只读** |
 | iFinD `p03473` 接口 | 883926 每日的成分股名单（每日约 100 只） | HTTPS + token |
 
 本项目不生产行情数据，行情全部来自 qlib_data。iFinD 只用来取 883926 的成分股名单。
@@ -106,7 +111,7 @@ qlib 只认一个数据根目录（`provider_uri`）。但 qlib_data 是只读�
 | `calendars/` | symlink → qlib_data | 交易日历，整目录复用 |
 | `instruments/all.txt` | symlink → qlib_data | 全 A 股名单，复用 |
 | `instruments/highbeta883926.txt` | **真实文件** | 883926 时变股池（第 2 节产物） |
-| `features/<每只票>/` | **真实目录** | 7 个 base bin 是 symlink 指回 qlib_data，3 个衍生 bin 是真实文件 |
+| `features/<每只票>/` | **真实目录** | ⚡ 每股 30 bins：7 base bin symlink 指回 qlib_data + 23 个真实 bin（3 衍生 + 14 分钟因子 + 4 extra + price_941 + change_941） |
 | `features/sh000300/` | symlink → qlib_data | 沪深300 基准行情，整目录复用 |
 
 为什么 `features/<票>/` 是真实目录、里面再 symlink？因为要往同一个目录里塞衍生 bin，目录必须可写；而 7 个 base bin 不重写，用 symlink 零拷贝复用。
@@ -150,6 +155,8 @@ limit_threshold: ["$change >= $limit_up", "$change <= $limit_down"]
 ---
 
 ## 6. 因子计算（Alpha158）
+
+> ⚡ **champion 已演进**：本节原写 MVP baseline（Alpha158 158 因子，IC≈0）。champion = [MinuteEnhancedHandler](../qlib_ifind_beta/minute_enhanced_handler.py) 的 **18 个 T 日 9:30-9:40 分钟因子**（14 baseline：startup_mom/accel/close_pos/vol_ratio ×{1,3,5} + vol_vs_yest；+ 4 extra：vol_vs_yest_t2/t3/t5 + overnight_gap），**label 冻结为 `Ref($close,-1)/$price_941-1`**（T+1 收盘 / T 日 9:41 价 − 1，~1.5 天 horizon），见下方 §6.2 历史口径对照。下文 6.1/6.2 保留 MVP 原文，champion 完整结果见 [backtest-log §22](backtest-log/2026-07-06-l1-full-backtest.md)。
 
 ### 6.1 用什么因子
 
@@ -196,6 +203,8 @@ deal_price: ["$open", "$close"]   # 买入用开盘、卖出用收盘
 
 qlib 原生支持买卖不同价（[exchange.py:44/157-164](file:///home/zxh/miniconda3/envs/qlib_ifind_beta/lib/python3.12/site-packages/qlib/backtest/exchange.py)）。这样回测的买卖点和 label 完全一致：买在 open[T+1]、卖在 close[T+2]。
 
+> ⚡ **champion 撮合口径（冻结，禁止修改）**：`deal_price=["$price_941","$close"]`——买入用 **T 日 9:41 价**、卖出用 **T+1 收盘**；策略换 [TopkDropoutStrategyTD0](../qlib_ifind_beta/td0_strategy.py)（`shift=1→0` 实现 T 日 9:41 成交），与冻结 label `Ref($close,-1)/$price_941-1` 完全对齐。本节 `$open/$close` 口径是 MVP baseline 历史。
+
 策略：`TopkDropoutStrategy(topk=20, n_drop=5, hold_thresh=1, forbid_all_trade_at_limit=true)`
 - topk=20：每天选预测分最高的 20 只
 - hold_thresh=1：持仓至少 1 天，原生强制 A 股 T+1
@@ -208,6 +217,8 @@ qlib 原生支持买卖不同价（[exchange.py:44/157-164](file:///home/zxh/min
 ---
 
 ## 全流程图（本次全量跑，~17 秒）
+
+> ⚡ **历史快照**（recorder `79d912a4`，2026-07-05 MVP baseline）——下图是 **Alpha158 + 旧 label（IC≈0）** 时期的实跑记录，保留作 baseline 对照。当前 champion（enhanced(18)@n_drop=15，test +158.86% w/cost / IC 0.0545 / ICIR 5.12）的完整流程与指标见 [backtest-log §22](backtest-log/2026-07-06-l1-full-backtest.md)。
 
 > 上面「全链路一张图」是**数据视角**（数据怎么流进来）；下面这张是**配置执行视角**——`workflow.yaml` 从 init 到报告产物的完整执行链，并附本次实跑（recorder `79d912a4`，2026-07-05）的关键指标。
 
@@ -295,11 +306,18 @@ qlib.init(provider_uri = data/qlib_root)    ← overlay：qlib_data 只读视图
 
 | 文件 | 作用 |
 |---|---|
-| [config.py](../qlib_ifind_beta/config.py) | 集中配置：路径、字段、代码、URL |
+| [config.py](../qlib_ifind_beta/config.py) | 集中配置：路径、字段、代码、URL、分钟 slot 映射 |
 | [universe.py](../qlib_ifind_beta/universe.py) | 883926 时变股池（p03473 拉取 + T-1 lag） |
 | [overlay.py](../qlib_ifind_beta/overlay.py) | symlink 叠加层构建 |
 | [materialize.py](../qlib_ifind_beta/materialize.py) | 3 个衍生字段物化（涨跌停用） |
+| [minute_factors.py](../qlib_ifind_beta/minute_factors.py) | ⚡ 14 个 T 日 9:30-9:40 分钟因子（纯函数） |
+| [materialize_minute.py](../qlib_ifind_beta/materialize_minute.py) | ⚡ 分钟因子 + price_941/change_941 物化 |
+| [highbeta_handler.py](../qlib_ifind_beta/highbeta_handler.py) | ⚡ HighBetaAlpha158（Alpha158 子类 + L1 前视护栏） |
+| [minute_enhanced_handler.py](../qlib_ifind_beta/minute_enhanced_handler.py) | ⚡ ★ champion Handler（18 因子） |
+| [td0_strategy.py](../qlib_ifind_beta/td0_strategy.py) | ⚡ TopkDropoutStrategyTD0（shift=0，9:41 成交） |
 | [ifind.py](../qlib_ifind_beta/ifind.py) | iFinD HTTP 客户端 + token |
 | [scripts/build_overlay.py](../scripts/build_overlay.py) | 一次性编排：端到端建 overlay |
-| [qrun/workflow.yaml](../qrun/workflow.yaml) | 全量回测配置 |
+| [scripts/materialize_minute.py](../scripts/materialize_minute.py) | ⚡ 仅重物化分钟因子（改公式后免重拉 universe） |
+| [qrun/workflow.yaml](../qrun/workflow.yaml) | MVP 全量回测配置（Alpha158） |
+| [qrun/workflow_minute_enhanced.yaml](../qrun/workflow_minute_enhanced.yaml) | ⚡ ★ champion 配置（enhanced(18)@n_drop=15） |
 | [qrun/workflow_smoke.yaml](../qrun/workflow_smoke.yaml) | 烟雾测试配置（2025 子窗口） |

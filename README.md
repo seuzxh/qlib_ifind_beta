@@ -1,10 +1,10 @@
 # qlib_ifind_beta
 
 > 基于 [qlib](https://github.com/microsoft/qlib) 的 A 股因子挖掘 MVP。
-> 标的：**883926（同花顺高贝塔值指数）成分股**；形态：日频 `Alpha158` 全链路（因子 → 模型 → 回测 → 报告）。
-> 数据：**只读消费** [`/home/zxh/qlib_data`](../../qlib_data)（7 字段 × 26 年），不生产行情数据。
+> 标的：**883926（同花顺高贝塔值指数）成分股**；形态：日频 baseline（`Alpha158`，IC≈0）→ **champion = enhanced(18)@n_drop=15**（14 个 T 日 9:30-9:40 分钟因子 + 4 extra，9:41 成交），全链路（因子 → 模型 → 回测 → 报告）。详见 [backtest-log §22](docs/backtest-log/2026-07-06-l1-full-backtest.md)。
+> 数据：**只读消费** [`/home/zxh/qlib_data`](../../qlib_data)（7 字段 × 26 年，日频）+ [`/home/zxh/cn_data_1min`](../../cn_data_1min)（1min，分钟因子源），不生产行情数据。
 
-**状态**：搭建/设计阶段，MVP 已端到端跑通（已本地 git 初始化，master，未接远端）。
+**状态**：MVP 已端到端跑通 → 已演进到 **champion = enhanced(18)@n_drop=15**（test 2026-04→07 +158.86% w/cost / IC 0.0545 / ICIR 5.12 / drawdown −5.44%，详见 backtest-log §22）；本地 git 初始化（`feat/minute-factors` 分支，未接远端）。
 
 ---
 
@@ -25,6 +25,10 @@ conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_smoke.yaml
 # 3. 全量 MVP（train 2024-01-01→2025-12-31 / valid 2026-Q1 / test 2026-04-01→2026-07-02）
 conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow.yaml
 #    产物 → mlruns/<experiment_id>/<recorder_id>/{pred.pkl, label.pkl, IC, nav, …}
+
+# 4. 【champion 复现】物化分钟因子（14 baseline + 4 extra + price_941/change_941）→ 跑 enhanced
+conda run -n qlib_ifind_beta python scripts/materialize_minute.py
+conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced.yaml   # n_drop=15
 ```
 
 ---
@@ -35,7 +39,7 @@ conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow.yaml
 |---|---|
 | qlib 全链路因子挖掘 MVP（数据工程 + 因子 + 模型 + 回测 + 报告） | 行情数据生产者（行情由独立的 `qlib_data` 项目维护） |
 | 只读消费 qlib_data + 最小 overlay 叠加 | 拷贝/重建 qlib_data |
-| 纯 `qlib.contrib` 原生类全链路 | 自定义 Handler/Strategy/Exchange 子类（MVP 零子类化） |
+| `qlib.contrib` 全链路 + 因子/策略子类化 | 自定义 Exchange 子类（涨跌停用原生 `LT_TP_EXP` 表达式，零子类化） |
 
 ---
 
@@ -48,7 +52,7 @@ conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow.yaml
 | `data/qlib_root/`（生成本项目） | overlay provider_uri | build_overlay 产出，`.gitignore` |
 
 **7 字段**：`open / high / low / close / volume / factor / vwap`（后复权；无 `$turn/$amount/$change/$pct_chg/$pre_close`）。
-**衍生 3 字段**（本项目物化，供 qlib Exchange 涨跌停拦截）：`change / limit_up / limit_down`。
+**overlay 每股 30 bins** = 7 base（symlink qlib_data）+ 3 衍生（`change / limit_up / limit_down`，供 Exchange 涨跌停）+ 14 分钟因子 + 4 enhanced extra（`vol_vs_yest_t2/t3/t5` + `overnight_gap`）+ `price_941`（9:41 成交价）+ `change_941`（9:41 涨跌幅，涨跌停 buy 表达式）。
 
 ---
 
@@ -56,33 +60,40 @@ conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow.yaml
 
 ```
 3.qlib_ifind_beta/
-├── qlib_ifind_beta/        # 数据工程包（自研，唯一业务代码）
-│   ├── config.py           #   集中配置（路径/字段/代码/URL）
-│   ├── overlay.py          #   symlink farm
-│   ├── materialize.py      #   衍生字段物化（涨跌停依赖）
-│   ├── universe.py         #   883926 时变成分股（iFinD p03473，T-1 lag）
-│   ├── ifind.py            #   iFinD HTTP client + token
-│   ├── binio.py            #   .day.bin 原始读写
-│   └── dump_index.py       #   SH883926 dump（当前未启用，见技术方案 §5）
-├── scripts/build_overlay.py  # 一次性编排：建 overlay 端到端
-├── qrun/                    # 全链路入口
-│   ├── workflow.yaml       #   全量配置
-│   ├── workflow_smoke.yaml #   烟雾测试
-│   └── run.py              #   qrun 等价入口（绕本机坑）
-├── docs/                    # 架构 / 技术方案文档
-├── data/qlib_root/          # 生成的 overlay（.gitignore）
-└── mlruns/                  # qlib 实验产物（.gitignore）
+├── qlib_ifind_beta/               # 数据工程 + 因子/策略包（自研）
+│   ├── config.py                  #   集中配置（路径/字段/分钟 slot 映射）
+│   ├── overlay.py                 #   symlink farm
+│   ├── materialize.py             #   衍生字段物化（change/limit_up/limit_down）
+│   ├── materialize_minute.py      #   14 分钟因子 + 4 extra + price_941/change_941 物化
+│   ├── minute_factors.py          #   T 日 9:30-9:40 分钟因子定义
+│   ├── universe.py                #   883926 时变成分股（iFinD p03473，T-1 lag）
+│   ├── highbeta_handler.py        #   HighBetaAlpha158（Alpha158 子类，v3 rolling + L1 护栏）
+│   ├── minute_only_handler.py     #   MinuteOnlyHandler（m14 实验分支）
+│   ├── minute_enhanced_handler.py #   MinuteEnhancedHandler（★ champion，18 因子）
+│   ├── td0_strategy.py            #   TopkDropoutStrategyTD0（shift=1→0，9:41 成交）
+│   ├── ifind.py / binio.py / dump_index.py   #  iFinD client / bin 读写 / index dump
+├── scripts/build_overlay.py       # 一次性编排：overlay 端到端
+├── scripts/materialize_minute.py  # 仅重物化分钟因子（改公式后免重拉 universe）
+├── scripts/make_report.py         # 回测报告汇总
+├── qrun/                          # 全链路入口
+│   ├── workflow.yaml              #   MVP（Alpha158）
+│   ├── workflow_minute_enhanced.yaml   # ★ champion（enhanced(18)@n_drop=15）
+│   ├── workflow_smoke.yaml        #   烟雾测试
+│   └── run.py                     #   qrun 等价入口（绕本机坑）
+├── docs/                          # 架构 / 技术方案 / backtest-log
+├── data/qlib_root/                # 生成的 overlay（.gitignore）
+└── mlruns/                        # qlib 实验产物（.gitignore）
 ```
 
 ---
 
 ## 核心设计（详见 [docs/technical-design.md](docs/technical-design.md)）
 
-- **纯 `qlib.contrib` 原生类**：`Alpha158` / `LGBModel` / `TopkDropoutStrategy` / `SimulatorExecutor` / `SignalRecord-SigAnaRecord-PortAnaRecord`，零自定义子类。
-- **Overlay symlink farm**：只读 qlib_data 之上逐文件 symlink 7 base bin + 真实目录写 3 衍生 bin，最小写入面。
+- **`qlib.contrib` 全链路 + 因子/策略子类化**：模型/执行/记录仍原生（`LGBModel` / `SimulatorExecutor` / `SignalRecord-SigAnaRecord-PortAnaRecord`）；因子层 `Alpha158 → HighBetaAlpha158 → MinuteEnhancedHandler`（champion，含 L1 前视护栏）、策略层 `TopkDropoutStrategy → TopkDropoutStrategyTD0`（9:41 成交）。Exchange 用原生 `LT_TP_EXP` 不子类化。
+- **Overlay symlink farm**：只读 qlib_data 之上逐文件 symlink 7 base bin + 自有目录写 23 个衍生/分钟 bin（每股 30 bins），最小写入面。
 - **板块分级涨跌停**：原生 `LT_TP_EXP` 表达式 tuple（`$change >= $limit_up` / `<= $limit_down`）+ 按代码前缀物化阈值（主板 0.095 / 创·科 0.195 / 北交所 0.295），不子类化 Exchange。
-- **A 股 T+1**：`TopkDropoutStrategy(hold_thresh=1, forbid_all_trade_at_limit=True)`，daily 模式原生强制。
-- **Label + 撮合价**：label = `Ref($close, -2) / Ref($open, -1) - 1`（T+1 开盘买、T+2 收盘卖，用户指定）；回测 `deal_price=["$open","$close"]`（qlib 原生支持买卖不同价）——买入 open[T+1]、卖出 close[T+2]，与 label 完全对齐。
+- **A 股 T+1**：`TopkDropoutStrategyTD0(hold_thresh=1, forbid_all_trade_at_limit=True)`，daily 模式原生强制。
+- **Label + 撮合价**（**冻结口径，禁止修改**）：label = `Ref($close, -1) / $price_941 - 1`（T+1 收盘 / T 日 9:41 价 − 1，~1.5 天 horizon）；回测 `deal_price=["$price_941","$close"]`——买入 9:41 价[T]、卖出 close[T+1]，`TopkDropoutStrategyTD0` shift=1→0 实现 T 日 9:41 成交，与 label 完全对齐。
 - **Benchmark**：`SH000300`（复用 qlib_data 干净 bin；883926.TI 因 iFinD history_data 序列不连贯暂搁置，第一性原理 probe 详见技术方案 §2 D5）。
 
 ---

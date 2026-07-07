@@ -1,8 +1,9 @@
 # 架构文档 · qlib_ifind_beta
 
-> 标的：**883926（同花顺高贝塔值指数）成分股**增强策略 MVP。
-> 形态：日频 `Alpha158` 全链路（因子 → 模型 → 回测 → 报告）。
+> 标的：**883926（同花顺高贝塔值指数）成分股**增强策略。
+> 形态：日频 baseline（`Alpha158`）→ **champion = enhanced(18)@n_drop=15**（14 个 T 日 9:30-9:40 分钟因子 + 4 extra，T 日 9:41 成交）。详见 [backtest-log §22](backtest-log/2026-07-06-l1-full-backtest.md)。
 > 本文档描述**当前已实现的 as-is 架构**（基于实际代码，非设计稿）。技术选型与决策依据见 [technical-design.md](technical-design.md)。
+> ⚠️ 本文部分段落仍为 MVP 期（日频 Alpha158 / 零子类化）as-is 快照；带 ⚡ 的为 2026-07-06 起分钟因子 + 子类化演进后现状。演进脉络见 technical-design §D1/§D6。
 
 ---
 
@@ -10,11 +11,11 @@
 
 一个**数据工程极薄、模型/回测全用 qlib.contrib 原生类**的 A 股因子挖掘 MVP：
 
-- **数据**：只读消费 [`/home/zxh/qlib_data`](../../../qlib_data)（日频，7 字段，26 年深度），不生产行情数据。
-- **唯一自研代码**：把只读 qlib_data 之上**叠加一层最小 overlay**（symlink 复用 + 自有衍生 bin），满足 qlib `Exchange` 涨跌停拦截对 `$change / $limit_up / $limit_down` 的字段依赖。
-- **因子/模型/策略/执行/记录**：全部 `qlib.contrib` 原生类，零自定义子类。
+- **数据**：只读消费 [`/home/zxh/qlib_data`](../../../qlib_data)（日频，7 字段，26 年深度）+ [`/home/zxh/cn_data_1min`](../../../cn_data_1min)（1min，分钟因子源），不生产行情数据。
+- **自研代码**：在只读 qlib_data 之上**叠加 overlay**（symlink 7 base bin + 自有衍生 bin + 分钟因子 bin，每股 30 bins），满足 qlib `Exchange` 涨跌停拦截 + 分钟因子 + 9:41 成交价需求。
+- **因子/策略**：⚡ 因子层子类化（`Alpha158 → HighBetaAlpha158 → MinuteEnhancedHandler`）、策略层子类化（`TopkDropoutStrategy → TopkDropoutStrategyTD0`）；模型/执行/记录仍 `qlib.contrib` 原生，Exchange 用原生 `LT_TP_EXP` 不子类化。
 
-> 项目状态：**搭建/设计阶段已完成 MVP 跑通**（已本地 git 初始化，master，未接远端）。已知妥协与后续方向见技术方案文档第 5、8 节。
+> 项目状态：MVP 跑通 → 已演进到 **champion = enhanced(18)@n_drop=15**（test 2026-04→07 +158.86% w/cost / IC 0.0545 / ICIR 5.12，详见 backtest-log §22）；本地 git（`feat/minute-factors` 分支，未接远端）。演进脉络 + 已知妥协见 technical-design §D1/§D6 + §5/§8。
 
 ---
 
@@ -58,37 +59,49 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+> ⚡ **演进后现状**（上图 as-is 仍为 MVP 期）：数据工程层扩为 **14 模块 ~1580 行**（含 minute_factors / materialize_minute / handler 族 / td0_strategy）；overlay 每股 **30 bins**（7 base + 3 衍生 + 14 分钟 + 4 extra + price_941 + change_941）；qrun 链 `MinuteEnhancedHandler → LGBModel → TopkDropoutStrategyTD0`。真实清单见下方 §3 目录 + §4 模块详解 + §6 overlay 结构。
+
 ---
 
 ## 3. 目录结构
 
 ```
 3.qlib_ifind_beta/
-├── qlib_ifind_beta/              # 数据工程包（自研，唯一业务代码）
+├── qlib_ifind_beta/              # 数据工程 + 分钟因子 + 因子 Handler + 策略（自研）
 │   ├── __init__.py              #  12 行 · 包说明 + __version__
-│   ├── config.py                #  43 行 · 集中配置（路径/字段/代码/URL）
+│   ├── config.py                #  90 行 · 集中配置（路径/字段/分钟 slot 映射）
 │   ├── binio.py                 #  53 行 · .day.bin 原始读写（FileFeatureStorage 布局）
 │   ├── overlay.py               # 103 行 · symlink farm 构建
 │   ├── materialize.py           #  89 行 · 衍生字段物化（change/limit_up/limit_down）
-│   ├── universe.py              #  98 行 · 883926 成分股（iFinD p03473）
+│   ├── materialize_minute.py    # 325 行 · 14 分钟因子 + 4 extra + price_941/change_941 物化
+│   ├── minute_factors.py        #  73 行 · 14 分钟因子纯函数定义（T 日 9:30-9:40）
+│   ├── universe.py              # 216 行 · 883926 成分股（iFinD p03473，T-1 lag）
 │   ├── dump_index.py            #  97 行 · SH883926 行情 dump（当前未启用，见技术方案 §5）
-│   └── ifind.py                 # 211 行 · iFinD HTTP client + token 管理
+│   ├── ifind.py                 # 211 行 · iFinD HTTP client + token 管理
+│   ├── highbeta_handler.py      #  73 行 · HighBetaAlpha158（Alpha158 子类，v3 rolling[5,10] + L1 护栏）
+│   ├── minute_only_handler.py   #  21 行 · MinuteOnlyHandler（m14 实验分支）
+│   ├── minute_enhanced_handler.py#  36 行 · MinuteEnhancedHandler（★ champion，18 因子）
+│   └── td0_strategy.py          # 181 行 · TopkDropoutStrategyTD0（shift=1→0，9:41 成交）
 ├── scripts/
-│   └── build_overlay.py         #  75 行 · 一次性编排（建 overlay 端到端）
+│   ├── build_overlay.py         #  87 行 · 一次性编排（建 overlay 端到端）
+│   ├── materialize_minute.py    #  51 行 · 仅重物化分钟因子（改公式后免重拉 universe）
+│   └── make_report.py           # 116 行 · 回测报告汇总
 ├── qrun/
-│   ├── workflow.yaml            # 全量配置（2024-01-01 → 2026-07-02）
-│   ├── workflow_smoke.yaml      # 烟雾测试（2025 子窗口）
-│   └── run.py                   #  80 行 · qrun 等价入口（绕两个本机坑）
+│   ├── workflow.yaml            # 101 行 · MVP 全量配置（Alpha158）
+│   ├── workflow_minute_enhanced.yaml # 88 行 · ★ champion（enhanced(18)@n_drop=15）
+│   ├── workflow_minute_only.yaml #  86 行 · m14 实验配置
+│   ├── workflow_smoke.yaml      #  86 行 · 烟雾测试（2025 子窗口）
+│   └── run.py                   #  84 行 · qrun 等价入口（绕两个本机坑）
 ├── data/qlib_root/              # 生成的 overlay（.gitignore，build_overlay 可重建）
 ├── mlruns/                      # qlib 实验产物（.gitignore）
-├── docs/                        # 本文档所在
+├── docs/                        # 本文档 + technical-design / data_flow / backtest-log
 ├── CLAUDE.md                    # 项目工程约束（conda-only / context7 / sequential-thinking）
 └── .gitignore
 ```
 
 ---
 
-## 4. 数据工程包模块详解（`qlib_ifind_beta/`）
+## 4. `qlib_ifind_beta/` 模块详解（数据工程 · 分钟因子 · 因子 Handler · 策略）
 
 ### 4.1 [config.py](../qlib_ifind_beta/config.py) — 集中配置
 所有路径、字段口径、标的代码、iFinD URL 的单一事实源。关键常量：
@@ -104,8 +117,14 @@
 | `UNIVERSE_MARKET` | `highbeta883926` | qrun `market` 名 |
 | `BENCHMARK` | `SH000300` | qrun `benchmark`（决策见技术方案 §2 D5） |
 | `INDEX_CODE_IFIND` / `INDEX_CODE_QLIB` | `883926.TI` / `SH883926` | 标的代码（备用） |
-| `FREQ` | `day` | 日频 |
+| `FREQ` | `day` | 日频（分钟因子也物化为 day.bin，Handler 层不混频） |
 | `IFIND_TOKEN_FILE` | `/home/zxh/qlib_data/.ifind_token` | token 缓存（复用，secret） |
+| `CN_DATA_1MIN` / `FEATURES_1MIN_SRC` / `MIN_CAL` | `/home/zxh/cn_data_1min`（+ features / calendars/1min.txt） | 1min 分钟因子源（只读） |
+| `SLOTS_PER_DAY` / `REAL_BARS_PER_DAY` | `242` / `240` | 1min 日历槽位（slot 0=09:30、slot 121=13:00 全市场 NaN） |
+| `FEATURE_SLOT_COUNT` / `BUY_SLOT` | `10` / `11` | slots 1-10=09:31-09:40 因子窗 / slot 11=09:41 买入 bar |
+| `MINUTE_FACTOR_FIELDS` | 14 元组 | startup_mom/accel/close_pos/vol_ratio × {1m,3m,5m} + vol_vs_yest |
+| `MINUTE_FACTOR_EXTRA_FIELDS` | 4 元组 | vol_vs_yest_t2/t3/t5 + overnight_gap（champion 4 extra） |
+| `MINUTE_DEAL_PRICE_FIELD` / `MINUTE_CHANGE_941_FIELD` | `price_941` / `change_941` | 9:41 成交价 / 9:41 涨跌幅（涨跌停 buy 表达式） |
 
 ### 4.2 [binio.py](../qlib_ifind_beta/binio.py) — 底层 bin 读写
 直接读写 pyqlib `FileFeatureStorage` 的原始字节布局（qlib 0.9.7 无 `DumpBinAll` helper）：
@@ -164,6 +183,34 @@
 - **`fetch_history_data(code,start,end,indicators,cps="0")`**：单标的（>10 标的会被截断），返回 long DF `[symbol,date,...]`。
 - **`fetch_data_pool(reportname,functionpara,outputpara,field_map)`**：报表查询。
 
+### 4.8 [minute_factors.py](../qlib_ifind_beta/minute_factors.py) — 14 分钟因子定义（纯函数，73 行）
+T 日 9:30-9:40 分钟因子的纯计算（无 IO），由 materialize_minute 每日调用写 day.bin。输入 11 长度 slot 数组（index 0-9 = slots 1-10 = 09:31-09:40 因子窗，index 10 = slot 11 = 09:41 买入 bar；slot 0=09:30 全市场 NaN 故从 slot 1 起）：
+
+- `compute_day_factors(c,o,h,l,vol,prev_day_minute_vol) → dict`：14 因子 + `price_941`
+  - A. **startup momentum**（`startup_mom_1m/3m/5m` + `startup_total`）：slot 10 收盘相对前 1/3/5 分钟 / 开盘的收益
+  - B. **acceleration**（`accel_1m/3m/5m`）：尾段收益 − 头段收益（启动加速）
+  - C. **close position in window**（`close_pos_1m/3m/5m`）：slot 10 收盘在窗内 high-low 的分位
+  - D. **volume ratio**（`vol_ratio_1m/3m/5m`）：尾段均量 / 头段均量
+  - E. **cross-day volume**（`vol_vs_yest`）：前 10 bar 累积量 /（T-1 全天分钟量 / 240）
+  - `price_941` = slot 11 收盘（9:41 买入价，**非因子**，供 Exchange deal_price）
+
+### 4.9 [materialize_minute.py](../qlib_ifind_beta/materialize_minute.py) — 分钟因子物化（325 行）
+读 cn_data_1min 的 1min bin，按日调 `minute_factors.compute_day_factors`，把 14 baseline 因子 + 4 enhanced extra（`vol_vs_yest_t2/t3/t5`、`overnight_gap`）+ `price_941` + `change_941` 写成每股 day.bin（day 日历空间，与 7 base 同频，Handler 层不混频）。`change_941 = (price_941[T]/factor[T])/(close[T-1]/factor[T-1])-1`（不复权，涨跌停 buy 表达式用）。`scripts/materialize_minute.py` 仅重物化本层（改公式后免重拉 universe）。
+
+### 4.10 [highbeta_handler.py](../qlib_ifind_beta/highbeta_handler.py) — HighBetaAlpha158（Alpha158 子类，73 行）
+- **v3 rolling windows 砍到 [5,10]**（剔 20/30/60 共 87 慢因子）→ 9 kbar + 4 price + 29×2 rolling = **71 日频**。
+- **v2**：日频字段全 `Ref(...,1)` lag 到 T-1（T 日 9:41 撮合只用 T-1 及更早日频，无前视）；**14 分钟因子**保持 T 日当天（9:30-9:40 早于 9:41 买入）。总 85 因子。走 `Alpha158DL.rolling.windows` 原生扩展点。
+- **L1 前视护栏**：`_DEFAULT_SHARED_PROCESSORS=[DropnaProcessor(feature)]`——9:41 数据缺失致 14 分钟因子全 NaN 时，shared drop 把该 stock-day 排除出预测表，杜绝 Exchange 把 NaN deal_price 回退 `$close[T]`（未来函数）。详见 technical-design §3.5。
+
+### 4.11 [minute_only_handler.py](../qlib_ifind_beta/minute_only_handler.py) — MinuteOnlyHandler（m14 实验分支，21 行）
+继承 HighBetaAlpha158（复用 L1 护栏），override `get_feature_config` 丢弃 71 日频、只返回 14 分钟因子。验证「纯短周期分钟因子是否够预测 9:41 label」（m14，被 enhanced 超越，详见 backtest-log）。
+
+### 4.12 [minute_enhanced_handler.py](../qlib_ifind_beta/minute_enhanced_handler.py) — MinuteEnhancedHandler（★ champion，36 行）
+继承 HighBetaAlpha158，`ENHANCED_FIELDS = 14 baseline + 4 extra`（`vol_vs_yest_t2/t3/t5` 多日族 + `overnight_gap` 不复权开盘跳空）= **18 因子**。n_drop=15 时 test IC 0.0545 / ICIR 5.12 / +158.86%（backtest-log §22）。对应 `qrun/workflow_minute_enhanced.yaml`。
+
+### 4.13 [td0_strategy.py](../qlib_ifind_beta/td0_strategy.py) — TopkDropoutStrategyTD0（策略子类，181 行）
+qlib 原生 `TopkDropoutStrategy.generate_trade_decision` 硬编码 `shift=1`（pred=T-1 → T 日次日成交）。分钟因子是 T 日 9:40 数据、9:41 成交，需 pred[T] → T 日当日成交 → **shift=0**。实现 = 逐字复制原生方法体仅 `shift=1→0`（qlib 未暴露 shift 参数，无法配置覆盖）。`test_td0_only_diff_is_shift_zero` 守卫"仅 shift 一行差异"。
+
 ---
 
 ## 5. 数据流
@@ -187,18 +234,19 @@ flowchart TD
 
 - `DUMP_START/DUMP_END = 2024-01-01 / 2026-07-02`（覆盖 train/valid/test 全窗）。
 - 幂等：`_symlink` 替换既有节点；可安全重跑。
+- ⚡ **分钟因子物化（champion 复现时额外一步）**：`conda run -n qlib_ifind_beta python scripts/materialize_minute.py` 把 14 baseline + 4 extra + price_941/change_941 写入每股 overlay bin。**独立于 build_overlay**（不重拉 universe），改公式后可单跑；build_overlay 只建 7 base + 3 衍生，分钟层是后接的第二步。
 
-### 5.2 在线训练-回测流（`qrun/run.py qrun/workflow.yaml`）
+### 5.2 在线训练-回测流（`qrun/run.py qrun/workflow_minute_enhanced.yaml`，champion；MVP baseline 用 workflow.yaml）
 
 ```mermaid
 flowchart LR
     A["run.py<br/>设 MLFLOW_ALLOW_FILE_STORE<br/>加载 YAML<br/>limit_threshold list→tuple"] --> B["qlib.init<br/>provider_uri=data/qlib_root"]
     B --> C["task_train(config)"]
-    C --> D["DatasetH + Alpha158<br/>读 overlay features<br/>（7 base + 3 衍生 → 158 因子）"]
+    C --> D["DatasetH + MinuteEnhancedHandler<br/>读 overlay features<br/>（7 base + 23 分钟/衍生 → 18 因子）"]
     D --> E["LGBModel<br/>train→valid 早停<br/>→test pred"]
     E --> F["SignalRecord<br/>pred.pkl/label.pkl"]
     F --> G["SigAnaRecord<br/>IC / RankIC / ICIR"]
-    E --> H["PortAnaRecord<br/>TopkDropoutStrategy<br/>+ SimulatorExecutor<br/>+ LT_TP_EXP 涨跌停"]
+    E --> H["PortAnaRecord<br/>TopkDropoutStrategyTD0<br/>（shift=0，9:41 成交）<br/>+ SimulatorExecutor<br/>+ LT_TP_EXP 涨跌停"]
     H --> I["nav / 回撤 / 换手 / 年化"]
     F --> J[("mlruns/")]
     G --> J
@@ -219,21 +267,21 @@ data/qlib_root/
 │   ├── all.txt           → symlink → qlib_data/instruments/all.txt
 │   └── highbeta883926.txt  （真实，TSV，例：SZ000536  2020-01-02  2026-07-02）
 └── features/             （真实目录，104+ 子目录）
-    ├── <每只成分股>/       （真实目录）
-    │   ├── open.day.bin    → symlink qlib_data
-    │   ├── high.day.bin    → symlink
-    │   ├── low.day.bin     → symlink
-    │   ├── close.day.bin   → symlink
-    │   ├── volume.day.bin  → symlink
-    │   ├── factor.day.bin  → symlink
-    │   ├── vwap.day.bin    → symlink
-    │   ├── change.day.bin    （真实，materialize 写）
-    │   ├── limit_up.day.bin  （真实，板块常量）
-    │   └── limit_down.day.bin（真实，板块常量）
-    └── sh000300/          （benchmark，同上：7 symlink + 3 真实）
+    ├── <每只成分股>/              （真实目录，30 bins/股）
+    │   ├── open/high/low/close/volume/factor/vwap.day.bin  → symlink qlib_data（7 base）
+    │   ├── change.day.bin        （真实 · materialize 写，涨跌停依赖）
+    │   ├── limit_up.day.bin      （真实 · 板块常量）
+    │   ├── limit_down.day.bin    （真实 · 板块常量）
+    │   ├── <14 分钟因子>.day.bin  （真实 · materialize_minute 写，T 日 9:30-9:40）
+    │   │     startup_mom_{1m,3m,5m} + startup_total
+    │   │     accel_{1m,3m,5m} / close_pos_{1m,3m,5m} / vol_ratio_{1m,3m,5m} / vol_vs_yest
+    │   ├── vol_vs_yest_t{2,3,5}.day.bin + overnight_gap.day.bin  （真实 · 4 enhanced extra）
+    │   ├── price_941.day.bin     （真实 · 9:41 成交价，Exchange deal_price）
+    │   └── change_941.day.bin    （真实 · 9:41 涨跌幅，涨跌停 buy 表达式）
+    └── sh000300/            （benchmark：7 symlink + 3 真实，无分钟因子）
 ```
 
-**为何混合 symlink + 真实**：7 个 base 字段直接复用 qlib_data（零拷贝、永远与源同步）；3 个衍生字段是本项目计算产物，必须写在自有可写目录里。qlib `FileFeatureStorage` 对缺失 bin 鲁棒（返回空 Series），但 `FileInstrumentStorage.check()` 要求 market 文件必须存在 → `highbeta883926.txt` 必须先生成。
+**为何混合 symlink + 真实**：7 个 base 字段直接复用 qlib_data（零拷贝、永远与源同步）；**23 个分钟/衍生 bin**（3 衍生 + 14 分钟因子 + 4 extra + price_941 + change_941）是本项目计算产物，必须写在自有可写目录里。分钟因子虽源自 1min，但物化为 **day 频**（day.txt 日历空间），Handler 层不混频。qlib `FileFeatureStorage` 对缺失 bin 鲁棒（返回空 Series），但 `FileInstrumentStorage.check()` 要求 market 文件必须存在 → `highbeta883926.txt` 必须先生成。
 
 ---
 
@@ -242,9 +290,10 @@ data/qlib_root/
 | 依赖 | 角色 | 访问方式 |
 |---|---|---|
 | `/home/zxh/qlib_data` | 只读行情（7 字段 × 6419 天）、instruments、calendars | 文件系统（symlink 复用） |
+| `/home/zxh/cn_data_1min` | 只读 1min 行情（分钟因子源） | 文件系统（materialize_minute 读） |
 | iFinD `quantapi.51ifind.com` | 成分股（p03473）/ 行情（history_data，备用） | HTTPS + access_token；token 复用 `/home/zxh/qlib_data/.ifind_token` |
 | conda env `qlib_ifind_beta` | 运行环境（Python 3.12.13 + pyqlib 0.9.7） | `conda run -n qlib_ifind_beta …`（CLAUDE.md 硬约束） |
-| `qlib.contrib` | Alpha158 / LGBModel / TopkDropoutStrategy / SimulatorExecutor / Record | import（零子类化） |
+| `qlib.contrib` | Alpha158(基类) / LGBModel / TopkDropoutStrategy(基类) / SimulatorExecutor / Record | import + 因子/策略子类化（见 §4.10-4.13），Exchange 用原生 `LT_TP_EXP` 不子类化 |
 | lightgbm 4.6 / pandas 2.3 / numpy 2.4 | 模型与数据计算 | conda env 内 |
 
 ---
@@ -257,16 +306,27 @@ flowchart TD
     binio[binio.py]
     overlay[overlay.py]
     materialize[materialize.py]
+    materialize_minute["materialize_minute.py<br/>⚡325行"]
+    minute_factors["minute_factors.py<br/>⚡"]
     ifind[ifind.py]
     universe[universe.py]
     dump_index[dump_index.py<br/>未启用]
+    highbeta_handler["highbeta_handler.py<br/>⚡Alpha158子类"]
+    minute_only_handler["minute_only_handler.py<br/>⚡实验"]
+    minute_enhanced_handler["minute_enhanced_handler.py<br/>⚡★champion"]
+    td0_strategy["td0_strategy.py<br/>⚡策略子类"]
     build_overlay[scripts/build_overlay.py]
+    mat_minute_script["scripts/materialize_minute.py<br/>⚡"]
+    make_report[scripts/make_report.py]
     run[qrun/run.py]
 
     binio --> config
     overlay --> config
     materialize --> binio
     materialize --> config
+    materialize_minute --> minute_factors
+    materialize_minute --> binio
+    materialize_minute --> config
     ifind --> config
     universe --> ifind
     universe --> overlay
@@ -275,16 +335,24 @@ flowchart TD
     dump_index --> ifind
     dump_index --> config
 
+    highbeta_handler --> config
+    minute_only_handler --> highbeta_handler
+    minute_enhanced_handler --> highbeta_handler
+    td0_strategy -.继承.-> topk[qlib TopkDropoutStrategy]
+
     build_overlay --> overlay
     build_overlay --> materialize
     build_overlay --> universe
     build_overlay --> config
+    mat_minute_script --> materialize_minute
 
-    run -.读.-> qyaml[workflow.yaml]
+    run -.读.-> qyaml1[workflow.yaml<br/>MVP]
+    run -.读.-> qyaml2[workflow_minute_enhanced.yaml<br/>★champion]
     run --> qlibrt[qlib runtime]
 ```
 
-- 包内单向依赖，无循环：`config` 是叶子；`binio/ifind` 仅依赖 `config`；`overlay/materialize` 依赖 `config/binio`；`universe` 依赖 `ifind/overlay`。
+- 包内单向依赖，无循环：`config` 是叶子；`binio/ifind` 仅依赖 `config`；`overlay/materialize` 依赖 `config/binio`；`materialize_minute` 依赖 `minute_factors/binio/config`；`universe` 依赖 `ifind/overlay`。
+- ⚡ Handler 族继承链 `Alpha158(qlib) → HighBetaAlpha158 → {MinuteOnlyHandler, MinuteEnhancedHandler}`；策略 `TopkDropoutStrategy(qlib) → TopkDropoutStrategyTD0`。Handler 只依赖 `config`（因子字段名），不读 IO；IO 在 `materialize_minute` 物化阶段完成。
 - `dump_index` 与 `universe` 之间是**惰性**耦合（`universe.fetch_constituents` 默认 `iv_date` 时才 `from .dump_index import load_day_calendar`），故移除 dump_index 不影响当前 pipeline。
 
 ---
@@ -301,9 +369,13 @@ conda run -n qlib_ifind_beta python -m scripts.build_overlay
 # 2a. 烟雾测试（2025 子窗口，快速跑通全链路）
 conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_smoke.yaml
 
-# 2b. 全量 MVP（2024-01-01 → 2026-07-02）
+# 2b. 全量 MVP（2024-01-01 → 2026-07-02，Alpha158 baseline）
 conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow.yaml
 #    产物 → mlruns/<experiment_id>/<recorder_id>/{pred.pkl, label.pkl, …}
+
+# 3. 【★ champion 复现】enhanced(18)@n_drop=15（test 2026-04→07 +158.86% w/cost / IC 0.0545 / ICIR 5.12）
+conda run -n qlib_ifind_beta python scripts/materialize_minute.py              # 物化分钟因子（一次性，独立于 build_overlay）
+conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced.yaml   # n_drop=15
 ```
 
 > 两个 qlib 本机坑由 `run.py` 兜底（`limit_threshold` list→tuple、`MLFLOW_ALLOW_FILE_STORE=true`），详见技术方案文档 §6。
