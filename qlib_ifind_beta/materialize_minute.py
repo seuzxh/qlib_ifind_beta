@@ -1,10 +1,12 @@
 """Materialize minute factors + $price_941 as day.bin into the overlay.
 
-Writes 20 day.bins/stock: 14 baseline minute factors (MINUTE_FACTOR_FIELDS) + 4
+Writes 25 day.bins/stock: 14 baseline minute factors (MINUTE_FACTOR_FIELDS) + 4
 enhanced extras (MINUTE_FACTOR_EXTRA_FIELDS: vol_vs_yest_t2/t3/t5 +
-overnight_gap) + $price_941 (deal price) + $change_941 (涨跌停拦截用). The 14
-baseline are frozen for m14 reproducibility; the 4 extras feed MinuteEnhancedHandler
-(14 + 4 = 18-factor champion, backtest-log §22).
+overnight_gap) + 5 T-1 tail factors (MINUTE_FACTOR_TAIL_FIELDS, goal 2026-07-07) +
+$price_941 (deal price) + $change_941 (涨跌停拦截用). The 14 baseline are frozen
+for m14 reproducibility; the 4 extras feed MinuteEnhancedHandler (14 + 4 = 18-factor
+champion, backtest-log §22); the 5 tail factors feed MinuteEnhancedTailHandler
+(T-1 尾盘族, 23 因子, goal 因子优化).
 
 Reads cn_data_1min 1min bins (close/open/high/low/volume) per stock, slices each
 trading day's morning window (slots 1-11 = 09:31-09:41: 10 feature bars slots 1-10
@@ -43,7 +45,8 @@ from .binio import read_bin, write_bin
 from .config import (
     BUY_SLOT, DAY_CAL, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FREQ,
     FIRST_FEATURE_SLOT, MIN_CAL, MINUTE_CHANGE_941_FIELD, MINUTE_DEAL_PRICE_FIELD,
-    MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS, REAL_BARS_PER_DAY, SLOTS_PER_DAY,
+    MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS, MINUTE_FACTOR_TAIL_FIELDS,
+    REAL_BARS_PER_DAY, SLOTS_PER_DAY, TAIL_FIRST_SLOT, TAIL_SLOT_COUNT,
 )
 
 _1MIN_FIELDS = ("close", "open", "high", "low", "volume")
@@ -58,6 +61,10 @@ assert set(_EXTRA_MINUTE_SPACE) | set(_EXTRA_DAY_SPACE) == set(MINUTE_FACTOR_EXT
 _OVERNIGHT_GAP_FIELD = "overnight_gap"
 # Morning window: slots FIRST_FEATURE_SLOT..BUY_SLOT inclusive = 11 calendar rows.
 _MORNING_WINDOW = BUY_SLOT - FIRST_FEATURE_SLOT + 1   # 11
+# T-1 尾盘族（goal 因子优化，2026-07-07）：全在 min-cal 空间（shift 1 后随 fac scatter），与
+# _EXTRA_MINUTE_SPACE 同组性质。slots TAIL_FIRST_SLOT..(TAIL_FIRST_SLOT+TAIL_SLOT_COUNT-1) = 232-241。
+_TAIL_SPACE = tuple(MINUTE_FACTOR_TAIL_FIELDS)
+_TAIL_WINDOW = TAIL_SLOT_COUNT   # 10
 _cal_cache: dict = {}
 
 
@@ -197,6 +204,36 @@ def materialize_minute_instrument(code: str) -> bool:
     c, o, h, l, v = (morning2d("close"), morning2d("open"), morning2d("high"),
                      morning2d("low"), morning2d("volume"))
 
+    # T-1 尾盘窗（goal 因子优化，2026-07-07）：slot 232-241（14:51-15:00 时刻 bar，覆盖
+    # [14:50,15:00)），与早盘 slot 1-10 严格对称。tail2d 复用 morning2d 的 calendar-grid
+    # scatter 模式，提取 10 根/天（NaN-safe：停牌/半日休市/未上市 → NaN）。
+    tail_rows = np.where(
+        (min_slots >= TAIL_FIRST_SLOT)
+        & (min_slots < TAIL_FIRST_SLOT + _TAIL_WINDOW)
+    )[0]   # 10 rows/day (slots 232-241), ordered
+    assert (
+        tail_rows.size % _TAIL_WINDOW == 0
+        and tail_rows.size // _TAIL_WINDOW == n_min_days
+    ), (
+        f"1min calendar malformed: tail_rows={tail_rows.size} not "
+        f"{_TAIL_WINDOW}*{n_min_days} (slots/day={SLOTS_PER_DAY})"
+    )
+
+    def tail2d(field):
+        """Stock's tail bars (slot 232-241) on the global grid → (n_min_days, _TAIL_WINDOW).
+
+        Column j = calendar slot TAIL_FIRST_SLOT+j (232..241 = 14:51-15:00 时刻 bar)。
+        NaN where the stock has no bar at that calendar row (suspension / pre-listing /
+        early-close). 与 morning2d 同构，仅窗口不同。
+        """
+        arr = m[field]
+        flat = np.full(tail_rows.size, np.nan, dtype=np.float64)
+        valid = (tail_rows >= si_m) & (tail_rows < si_m + arr.size)
+        flat[valid] = arr[tail_rows[valid] - si_m].astype(np.float64)
+        return flat.reshape(n_min_days, _TAIL_WINDOW)
+
+    ct, ht, lt, vt = (tail2d("close"), tail2d("high"), tail2d("low"), tail2d("volume"))
+
     # vol_vs_yest denominator (minute-only both sides): per-day FULL-DAY minute
     # volume from cn_data_1min, summed across all real (non-NaN) slots that day.
     # Computed from the scattered grid (uses the WHOLE volume bin, not just the
@@ -269,11 +306,38 @@ def materialize_minute_instrument(code: str) -> bool:
                 pv[k:] = full_day_vol[:-k]
             pv_safe = np.where(pv > 0, pv, np.nan)
             fac[fname] = morning_vol_sum / (pv_safe / float(REAL_BARS_PER_DAY))
+        # F. T-1 尾盘族（goal 因子优化，2026-07-07）：尾盘 slot 232-241 刻画 T-1 收盘前 10min
+        #    主力资金最终态度 → 次日惯性/高潮/启动领先信号。NaN-safe（除零 guard 同 vol_ratio 族）。
+        #    ⚠️ 时间口径：此处 fac[d] 算的是 min-cal 日 d 当天的尾盘；下方 shift 1 后 fac[d]=d-1
+        #    尾盘 → scatter 到 day-cal 行 day_rows[d]（日历日 d 的行）存"d-1 尾盘" = T 行=T-1 尾盘。
+        tail_h_max = ht.max(axis=1)
+        tail_l_min = lt.min(axis=1)
+        tail_range = tail_h_max - tail_l_min
+        tail_d1 = vt[:, 0:9].mean(axis=1)
+        fac["tail_mom_t1"] = ct[:, 9] / ct[:, 0] - 1.0
+        fac["tail_mom_last5_t1"] = ct[:, 9] / ct[:, 5] - 1.0
+        fac["tail_close_pos_t1"] = np.full(n, np.nan)
+        np.divide(ct[:, 9] - tail_l_min, tail_range, out=fac["tail_close_pos_t1"], where=(tail_range > 0))
+        fac["tail_vol_ratio_t1"] = np.full(n, np.nan)
+        np.divide(vt[:, 9], tail_d1, out=fac["tail_vol_ratio_t1"], where=(tail_d1 > 0))
+        fac["tail_accel_t1"] = (ct[:, 9] / ct[:, 8] - 1.0) - (ct[:, 1] / ct[:, 0] - 1.0)
     price_941 = c[:, 10]
+
+    # T-1 尾盘族 shift 1（min-cal 空间）：T 行 bin = T-1 尾盘（无前视：T-1 15:00 收盘，T 日
+    # 9:41 决策已知）。仿 vol_vs_yest_t2 的 pv[k:]=full_day_vol[:-k]；shift 1 → 首 min-cal 日 NaN。
+    # shift 后 fac[fname] 仍长 n_min_days，与 scatter 的 valid（基于 rel/day_rows，均 n_min_days 长）对齐。
+    for fname in _TAIL_SPACE:
+        raw = fac[fname]
+        shifted = np.full(n_min_days, np.nan, dtype=np.float64)
+        if n_min_days > 1:
+            shifted[1:] = raw[:-1]
+        fac[fname] = shifted
 
     # scatter into day-aligned output (length = daily close.bin length)
     n_out = close_d.size
-    _scatter_fields = list(MINUTE_FACTOR_FIELDS) + list(_EXTRA_MINUTE_SPACE)
+    _scatter_fields = (
+        list(MINUTE_FACTOR_FIELDS) + list(_EXTRA_MINUTE_SPACE) + list(_TAIL_SPACE)
+    )
     out = {name: np.full(n_out, np.nan, dtype=np.float32) for name in _scatter_fields}
     out_p941 = np.full(n_out, np.nan, dtype=np.float32)
     valid = (rel >= 0) & (rel < n_out) & (day_rows >= 0)

@@ -34,6 +34,13 @@ UNIVERSE_MARKET = "highbeta883926"    # instruments market name for qrun
 # functionpara/CPS has zero effect. User decision: use 000300 for now.
 BENCHMARK = "SH000300"
 
+# Index sources referenced by ChangeInstrument in daily/index factors (NOT benchmark).
+# 上证综指 SH000001 = 用户语义「上证指数」（共振 + 冰点/沸点因子引用源）。区别于 benchmark
+# (SH000300，回测基准冻结)。这些指数的 7 base bin 在 build_overlay step6 被 link 进 overlay
+# （仅 link，不 materialize——指数不交易，无需 change/limit 衍生）。qlib_data/features/sh000001/
+# 已实测与 sh000300 同构（7 base bin × 6296 bytes，26 年深度；amount 8 bytes 空文件不用）。
+INDEX_FACTOR_SOURCES = ("SH000001",)
+
 # --- fields ------------------------------------------------------------------
 BASE_FIELDS = ("open", "high", "low", "close", "volume", "factor", "vwap")
 DERIVED_FIELDS = ("change", "limit_up", "limit_down")
@@ -87,4 +94,22 @@ MINUTE_CHANGE_941_FIELD = "change_941"
 MINUTE_FACTOR_EXTRA_FIELDS = (
     "vol_vs_yest_t2", "vol_vs_yest_t3", "vol_vs_yest_t5",
     "overnight_gap",
+)
+
+# 21st-25th materialized bins — T-1 尾盘分钟族（2026-07-07，goal 因子优化迭代）。
+# 破局 Step B「IC +12% 不传导组合」：此前 T-1 全天分钟结构完全未用作因子（vol_vs_yest 分母
+# 仅把 T-1 全天量压成聚合标量，丢结构）。尾盘 slot 232-241 是次日惯性/高潮/启动最强领先信号。
+# 与早盘 slot 1-10 严格对称（slot 映射：slot N 下午覆盖 [13:00+(N-122), 13:00+(N-121))，
+# 故 slot 232 = [14:50,14:51) = 14:51 时刻 bar，slot 241 = [14:59,15:00) = 15:00 时刻 bar，
+# slot 232-241 覆盖 [14:50,15:00) 共 10 根）。物化时 shift 1（min-cal 空间）→ T 行 bin =
+# T-1 尾盘，handler $field 直接消费（与 14 分钟因子零 Ref 模式统一）。无前视（T-1 15:00
+# 收盘，T 日 9:41 决策已知）。详见 backtest-log（goal 设计）。
+TAIL_FIRST_SLOT = 232         # 尾盘 10min 窗首 slot（14:51 时刻 bar，覆盖 [14:50,14:51)）
+TAIL_SLOT_COUNT = 10          # slots 232-241 = 14:51-15:00 时刻 bar，覆盖 [14:50,15:00)
+MINUTE_FACTOR_TAIL_FIELDS = (
+    "tail_mom_t1",            # 尾盘 10 根整体动量 close[9]/close[0]-1 → 惯性冲高/高潮
+    "tail_mom_last5_t1",      # 14:55-15:00 收盘竞价动量 close[9]/close[5]-1
+    "tail_close_pos_t1",      # 收盘在尾盘振幅位置 → 收盘强弱
+    "tail_vol_ratio_t1",      # 尾盘量比 vol[9]/vol[0:9].mean → 主力介入/出逃
+    "tail_accel_t1",          # 尾盘加速度 → 高潮见顶/惯性持续
 )

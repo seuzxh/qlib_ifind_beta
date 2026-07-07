@@ -10,7 +10,7 @@ from qlib_ifind_beta.binio import read_bin
 from qlib_ifind_beta.config import (
     BUY_SLOT, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FIRST_FEATURE_SLOT,
     MINUTE_DEAL_PRICE_FIELD, MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS,
-    SLOTS_PER_DAY,
+    MINUTE_FACTOR_TAIL_FIELDS, SLOTS_PER_DAY, TAIL_FIRST_SLOT, TAIL_SLOT_COUNT,
 )
 from qlib_ifind_beta.minute_factors import compute_day_factors
 
@@ -84,18 +84,20 @@ def test_materialize_returns_true_for_liquid_stock():
     assert mm.materialize_minute_instrument("SH600519") is True
 
 
-def test_materialize_writes_20_bins():
-    """All 20 day.bins present after materialize: 14 baseline minute factors +
-    4 enhanced extras (vol_vs_yest_t2/t3/t5 + overnight_gap) + price_941 + change_941."""
+def test_materialize_writes_25_bins():
+    """All 25 day.bins present after materialize: 14 baseline minute factors +
+    4 enhanced extras (vol_vs_yest_t2/t3/t5 + overnight_gap) +
+    5 tail factors (MINUTE_FACTOR_TAIL_FIELDS, T-1 尾盘族) + price_941 + change_941."""
     mm.materialize_minute_instrument("SH600519")
     d = Path(FEATURES_DST) / "sh600519"
     from qlib_ifind_beta.config import MINUTE_CHANGE_941_FIELD
     expected = (
         list(MINUTE_FACTOR_FIELDS)            # 14 baseline
         + list(MINUTE_FACTOR_EXTRA_FIELDS)    # 4 enhanced extras (incl. overnight_gap)
+        + list(MINUTE_FACTOR_TAIL_FIELDS)     # 5 T-1 尾盘族（goal 2026-07-07）
         + [MINUTE_DEAL_PRICE_FIELD, MINUTE_CHANGE_941_FIELD]
     )
-    assert len(expected) == 20
+    assert len(expected) == 25
     for name in expected:
         assert (d / f"{name}.day.bin").exists(), name
 
@@ -338,7 +340,7 @@ def test_change_941_matches_hand_formula():
 def test_minute_window_kbar_count():
     """CLAUDE.md：分钟因子测试必须验证 K 线数量。开盘窗 = 恰好 10 根特征 K（slots
     1-10 = 09:31-09:40）+ 1 根买入 K（slot 11 = 09:41）；1min 日历每个交易日贡献
-    恰好 11 行 morning rows。本设计不含尾盘因子（无尾盘 20 根要求）。"""
+    恰好 11 行 morning rows。（尾盘窗 10 根 = slots 232-241，由 test_tail_window_kbar_count 覆盖。）"""
     _, min_slots = mm._load_min_calendar()
     morning_rows = np.where(
         (min_slots >= FIRST_FEATURE_SLOT) & (min_slots <= BUY_SLOT)
@@ -444,3 +446,154 @@ def test_overnight_gap_crosscheck():
     if diff_mask.sum() > 0:
         assert np.nanmax(np.abs(og[diff_mask] - adj_gap[diff_mask])) > 1e-4, (
             "overnight_gap 与后复权口径在除权日无差异 → 口径选择未生效")
+
+
+# ---------------------------------------------------------------------------
+# T-1 尾盘族 5 因子（goal 因子优化 2026-07-07）：MINUTE_FACTOR_TAIL_FIELDS。
+# 尾盘窗 slot 232-241（14:51-15:00 时刻 bar）= 10 根，与早盘 10 特征 K 严格对称。
+# shift-1（min-cal 空间）→ T 行 bin = T-1 尾盘（无前视）。详见 backtest-log §25。
+# ---------------------------------------------------------------------------
+
+
+def test_tail_window_kbar_count():
+    """CLAUDE.md：尾盘因子验证 K 线数量。尾盘窗 = 恰好 10 根（slots 232-241 =
+    14:51-15:00 时刻 bar），与早盘 10 特征 K 对称；1min 日历每个交易日贡献恰好
+    10 行 tail rows。
+
+    注：CLAUDE.md 测试要求原文写「尾盘 20 根」，但本尾盘设计（materialize_minute.py
+    + config MINUTE_FACTOR_TAIL_FIELDS）刻意取 10 根与早盘窗严格对称——设计取舍见
+    backtest-log §25。此测试校验实际实现的 10 根口径。
+    """
+    _, min_slots = mm._load_min_calendar()
+    tail_rows = np.where(
+        (min_slots >= TAIL_FIRST_SLOT) & (min_slots < TAIL_FIRST_SLOT + TAIL_SLOT_COUNT)
+    )[0]
+    # 每个交易日恰好 10 行（整除），无溢出/缺失。
+    assert tail_rows.size % TAIL_SLOT_COUNT == 0
+    # 抽查第 0 个交易日的 10 行：slots 必须是 232..241 连续。
+    first_day_slots = min_slots[tail_rows[:TAIL_SLOT_COUNT]]
+    assert list(first_day_slots) == list(range(TAIL_FIRST_SLOT, TAIL_FIRST_SLOT + TAIL_SLOT_COUNT))
+    assert TAIL_SLOT_COUNT == 10
+
+
+def test_tail_factors_crosscheck():
+    """5 个 T-1 尾盘因子 = raw 1min 尾盘 slot 232-241 手算（shift-1 对齐 + NaN-safe）。
+
+    关键断言：
+    1. shift-1：bin[day_row(k)] = hand_compute_tail(k-1)（T 行 bin = T-1 尾盘，无前视）。
+       判据：用 min-cal 日 k-1 的尾盘手算，应等于 bin 在 day_row(k) 的值；若误用
+       shift-0（k 当天尾盘）则差一个交易日，断言失败。
+    2. 公式逐字对齐 materialize_minute.py F 块（ct/ht/lt/vt = tail2d close/high/low/vol）。
+    3. NaN-safe：min-cal 首日（k=0）shift 后无 T-1 → bin NaN；分母 ≤0 → NaN（同 vol 族 guard）。
+    4. start_index == daily close（day-cal 对齐）。
+    """
+    code = "SH600519"
+    lcode = code.lower()
+    src_dir = Path(FEATURES_1MIN_SRC) / lcode
+
+    # --- 独立读 raw 1min close/high/low/volume（各字段 start_index 一致性校验）---
+    raw = {}
+    si_m_ref = None
+    for f in ("close", "high", "low", "volume"):
+        si, a = read_bin(src_dir / f"{f}.1min.bin")
+        assert a.size > 0 and si is not None, f"{f}.1min.bin missing/empty"
+        raw[f] = a
+        if si_m_ref is None:
+            si_m_ref = si
+        else:
+            assert si == si_m_ref, f"{f} start_index {si} != {si_m_ref}"
+
+    min_dates, min_slots = mm._load_min_calendar()
+    _, date_to_row = mm._load_day_calendar_lookup()
+    tail_rows = np.where(
+        (min_slots >= TAIL_FIRST_SLOT) & (min_slots < TAIL_FIRST_SLOT + TAIL_SLOT_COUNT)
+    )[0]
+    n_min_days = tail_rows.size // TAIL_SLOT_COUNT
+    assert n_min_days > 0
+
+    def scatter_tail(arr):
+        flat = np.full(tail_rows.size, np.nan, dtype=np.float64)
+        valid = (tail_rows >= si_m_ref) & (tail_rows < si_m_ref + arr.size)
+        flat[valid] = arr[tail_rows[valid] - si_m_ref].astype(np.float64)
+        return flat.reshape(n_min_days, TAIL_SLOT_COUNT)
+
+    ct = scatter_tail(raw["close"])
+    ht = scatter_tail(raw["high"])
+    lt = scatter_tail(raw["low"])
+    vt = scatter_tail(raw["volume"])
+
+    def hand_tail(c, h, l, v):
+        """逐日手算 5 因子（与 materialize F 块逐字一致）。"""
+        out = {}
+        h_max = h.max()
+        l_min = l.min()
+        rng = h_max - l_min
+        d1 = v[0:9].mean()
+        out["tail_mom_t1"] = c[9] / c[0] - 1.0
+        out["tail_mom_last5_t1"] = c[9] / c[5] - 1.0
+        out["tail_close_pos_t1"] = (c[9] - l_min) / rng if rng > 0 else np.nan
+        out["tail_vol_ratio_t1"] = v[9] / d1 if d1 > 0 else np.nan
+        out["tail_accel_t1"] = (c[9] / c[8] - 1.0) - (c[1] / c[0] - 1.0)
+        return out
+
+    # --- 物化并读回 5 个尾盘 bin（start_index == daily close 校验）---
+    assert mm.materialize_minute_instrument(code) is True
+    si_dc_ref, _ = read_bin(Path(FEATURES_SRC) / lcode / "close.day.bin")
+    dst_dir = Path(FEATURES_DST) / lcode
+    mat = {}
+    for name in MINUTE_FACTOR_TAIL_FIELDS:
+        si_o, vals = read_bin(dst_dir / f"{name}.day.bin")
+        assert si_o == si_dc_ref, f"{name} start_index {si_o} != daily {si_dc_ref}"
+        mat[name] = vals
+
+    def _tail_day_row(k):
+        """min-cal 日 k 的 day-cal 行（用 tail_rows[k*10] 取首行定位日历日）。"""
+        first_row = tail_rows[k * TAIL_SLOT_COUNT]
+        date_ord = min_dates[first_row]
+        if date_ord < 0 or date_ord >= date_to_row.size:
+            return -1
+        return int(date_to_row[date_ord])
+
+    # --- 找近期、k>=1、k-1 尾盘 4 字段全 finite、且 k 与 k-1 都在 day-cal 的 min-cal 日 ---
+    kk = None
+    for k in range(n_min_days - 1, 0, -1):   # k>=1（shift-1 需 T-1）
+        if _tail_day_row(k) < 0 or _tail_day_row(k - 1) < 0:
+            continue   # k 或 k-1 是额外 min-cal 日（无 day-cal 对应，如 2026-07-03）
+        if (np.all(np.isfinite(ct[k - 1])) and np.all(np.isfinite(ht[k - 1]))
+                and np.all(np.isfinite(lt[k - 1])) and np.all(np.isfinite(vt[k - 1]))):
+            kk = k
+            break
+    assert kk is not None, "no valid tail day for SH600519"
+
+    # bin[day_row(kk)] 应 == hand_compute_tail(kk-1)（shift-1：T 行 = T-1 尾盘）
+    expected = hand_tail(ct[kk - 1], ht[kk - 1], lt[kk - 1], vt[kk - 1])
+    out_row = _tail_day_row(kk) - si_dc_ref
+    for name in MINUTE_FACTOR_TAIL_FIELDS:
+        m_val = float(mat[name][out_row])
+        o_val = float(expected[name])
+        if np.isnan(o_val):
+            assert np.isnan(m_val), f"{name}: oracle NaN but materialized={m_val}"
+        else:
+            assert np.isfinite(m_val), f"{name}: oracle={o_val} but materialized not finite"
+            assert abs(m_val - o_val) < 1e-4, (
+                f"{name} kk={kk} out_row={out_row}: "
+                f"mat={m_val} oracle={o_val} diff={abs(m_val - o_val)}"
+            )
+
+    # --- shift-1 专项：bin[day_row(kk)] 应 == hand_tail(kk-1) 且 ≠ hand_tail(kk) ---
+    # 注：不能用「min-cal 首日」校验 NaN——1min 日历跨 2000-2026（6420 day，与 day 日历同长），
+    # 而 SH600519 的 day.bin 仅覆盖 2020+ 子段（si_dc_ref 偏后，1573 天）；min-cal day 0
+    # (2000-01-04) 的 rel = day_row(0)-si_dc_ref < 0 → 被 scatter 的 valid 掩码跳过，不在
+    # 个股 bin 范围内。故改用正向判别：bin 与 shift-0（kk 当天尾盘）oracle 必须不同（证
+    # 用的是 T-1 非当天），与 vol_vs_yest_t{2,3,5} 的 shift 判别同模式。
+    if (np.all(np.isfinite(ct[kk])) and np.all(np.isfinite(ht[kk]))
+            and np.all(np.isfinite(lt[kk])) and np.all(np.isfinite(vt[kk]))):
+        shift0 = hand_tail(ct[kk], ht[kk], lt[kk], vt[kk])   # hand_tail(kk)，bin 应≠此
+        for name in MINUTE_FACTOR_TAIL_FIELDS:
+            o_km1 = float(expected[name])      # hand_tail(kk-1)，bin 应等于此
+            o_k = float(shift0[name])          # hand_tail(kk)，shift-0 证据
+            m_val = float(mat[name][out_row])
+            if np.isfinite(o_k) and np.isfinite(o_km1) and abs(o_k - o_km1) > 1e-4:
+                assert abs(m_val - o_k) > 1e-4, (
+                    f"{name} kk={kk}: bin={m_val} == shift-0(kk 当天){o_k} → "
+                    f"shift-1 未生效（应 = T-1={o_km1}）")

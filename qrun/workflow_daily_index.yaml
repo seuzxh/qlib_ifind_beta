@@ -1,0 +1,94 @@
+# 883926 高贝塔 · 日频情绪 + 上证指数共振因子 Step A（2026-07-07）
+# 运行：conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_daily_index.yaml
+#
+# 目的（用户 /loop 2026-07-07）：在 champion=enhanced(18)@n_drop=15 基础上验证新因子能否提升预测准确性。
+# Step A = 单独 12 因子（7 日频情绪 + 5 上证指数共振），先验证 IC>0，再决定是否进 Step B 合体。
+# 注：原设计 13 因子含 corr_20，因 qlib Corr._load_internal np.isclose 广播 bug（个股621≠指数624 崩）
+#     已移除——共振由 beta_20 覆盖。详见 index_daily_handler.py docstring。
+#
+# ⚠️ Step A 已知局限（详见 index_daily_handler.py docstring）：本 handler 无分钟因子 → L1 护栏的
+#   p941 联动断链，exchange 回退 $close[T] 前视路径风险存在。**主看 IC/ICIR（SigAnaRecord 不走
+#   exchange，干净）**；回测数字仅供参考，不直接与 champion 回测对比。Step B 合体 30 因子后护栏才等价。
+#
+# label / deal_price / 涨跌停拦截 / 模型超参 / 切分全部与 workflow_minute_enhanced.yaml 一致
+# → 与 champion 严格可比（IC 层面），唯一变量是 feature 18 分钟 → 12 日频/指数。
+# Handler = IndexDailyHandler（HighBetaAlpha158 子类，仅 override get_feature_config 返回 12 因子）。
+qlib_init:
+    provider_uri: /home/zxh/projects/3.qlib_ifind_beta/data/qlib_root
+    region: cn
+
+experiment_name: daily_index
+
+market: &market highbeta883926
+benchmark: &benchmark SH000300
+
+data_handler_config: &data_handler_config
+    start_time: 2024-01-01
+    end_time: 2026-07-02
+    fit_start_time: 2024-01-01
+    fit_end_time: 2025-12-31
+    instruments: *market
+    # Label（与 champion 一致，FROZEN）：T 日 9:41 买入、T+1 收盘卖出的收益。
+    label:
+        - Ref($close, -1) / $price_941 - 1
+
+port_analysis_config: &port_analysis_config
+    strategy:
+        class: TopkDropoutStrategyTD0
+        module_path: qlib_ifind_beta.td0_strategy
+        kwargs:
+            signal: <PRED>
+            topk: 20
+            n_drop: 15        # 与 champion 一致（FROZEN）
+            hold_thresh: 1
+            forbid_all_trade_at_limit: true
+    backtest:
+        start_time: 2026-04-01
+        end_time: 2026-07-01
+        account: 100000000
+        benchmark: *benchmark
+        exchange_kwargs:
+            freq: day
+            limit_threshold:
+                - $change_941 >= $limit_up
+                - $change <= $limit_down
+            deal_price: ["$price_941", "$close"]
+            open_cost: 0.0005
+            close_cost: 0.0015
+            min_cost: 5
+
+task:
+    model:
+        class: LGBModel
+        module_path: qlib.contrib.model.gbdt
+        kwargs:
+            loss: mse
+            learning_rate: 0.05
+            max_depth: 6
+            num_leaves: 64
+            num_threads: 20
+            lambda_l1: 5.0
+            lambda_l2: 10.0
+            num_boost_round: 200
+            early_stopping_rounds: 20
+    dataset:
+        class: DatasetH
+        module_path: qlib.data.dataset
+        kwargs:
+            handler:
+                class: IndexDailyHandler    # HighBetaAlpha158 子类，12 因子（7 日频 + 5 指数）
+                module_path: qlib_ifind_beta.index_daily_handler
+                kwargs: *data_handler_config
+            segments:
+                train: [2024-01-01, 2025-12-31]
+                valid: [2026-01-01, 2026-03-31]
+                test:  [2026-04-01, 2026-07-02]
+    record:
+        - class: SignalRecord
+          module_path: qlib.workflow.record_temp
+        - class: SigAnaRecord
+          module_path: qlib.workflow.record_temp
+        - class: PortAnaRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+              config: *port_analysis_config

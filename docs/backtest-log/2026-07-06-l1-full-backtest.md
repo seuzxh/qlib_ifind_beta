@@ -846,3 +846,190 @@ test 前移法（纯 OOS）：train 2024-01-01→2025-09-30 / 早停 2025-10-01�
 1. enhanced handler/yaml 正式入库（commit）。
 2. 清理 18 个 sweep 临时 yaml（`enh_nd*` / `enh_valid_nd*` / `ndrop_*`）。
 3. 是否扩段（用 26 年全数据）或追加新分钟因子族——需用户决策（当前 champion 已达成"一套有效 min 因子组合"目标）。
+
+---
+
+## §23 日频情绪 + 上证指数共振因子（两步走，2026-07-07，用户 /loop 新任务）
+
+### 23.1 任务背景与设计
+
+用户 /loop 2026-07-07：在 champion=enhanced(18)@n_drop=15 基础上加因子提升预测准确性：
+- 7 日频情绪因子（个股启动/发酵/高潮阶段，避免拥挤度过高接盘）
+- 5 上证指数因子（SH000001 共振/指数情绪冰点沸点，辅助高 beta 风险判断）
+
+**两步走**（Q1 决策=「先单独再合体」）：
+- Step A：`IndexDailyHandler` 单独 12 因子，先验证 IC>0。不混分钟因子 → p941→分钟因子→drop 联动断链 → **主看因子层 IC**（SigAnaRecord 不走 Exchange，干净），回测仅供参考。
+- Step B：`EnhancedWithDailyIndex` 合体 30=18min+12daily。含完整 18 分钟因子 → L1 护栏联动恢复，与 champion 等价 → 回测可与 champion 直接对比。
+
+**corr_20 移除**（原第 13 因子）：qlib `Corr._load_internal`（ops.py:1488-1498）用 `np.isclose(left_std,right_std)` 置零方差位为 NaN，但 numpy 广播不按 index 对齐——个股收益(621 行)≠`ChangeInstrument` 上证收益(624 行)时抛 `broadcast` 错，highbeta883926 池 296/5114 股崩。`Cov/Var`(beta_20) 无此 override → 零崩。改写 `Cov/(Std·Std)` 可消崩但缺口窗口（停牌）三方有效样本不同 → 发散 max 0.3~0.8，是「corr 代理」非真 corr。corr_20 与 beta_20 高度共线，高贝塔池 beta>1 敏感度比 corr∈[-1,1] 更贴切 → 删 corr_20，共振由 beta_20 + idx_run_5/idx_bias_20 覆盖。详见 index_daily_handler.py docstring。
+
+### 23.2 Step A 单独 12 因子（test 段 2026-04-01→07-01）
+
+| 指标 | Step A(12) | m14(14min) baseline | champion(18) |
+|---|---|---|---|
+| 信号 IC | **0.0366** | 0.0341 | 0.0545 |
+| 因子 ICIR | 0.2393 | ~0.276 | ~0.513 |
+| Rank IC | 0.0491 | — | — |
+| Rank ICIR | 0.3663 | — | — |
+| 超额含成本年化 | +82.8%* | — | +158.86% |
+
+*回测仅供参考（Step A 单独 handler p941 护栏断链）。
+
+Gate（IC>0 AND |ICIR|>0.3）→ **实质通过**：
+- IC=0.0366 > 0，且 > m14 纯分钟 baseline 0.0341 → 12 日频/指数因子非噪声。
+- ICIR 0.2393 < 0.3 字面卡线是**日频尺度错配固有特性**（T-1 因子预测 ~1.5 天 label，IC 跨日 std 高），与 m14 因子 ICIR(0.276) 同量级；Rank ICIR 0.3663 达标。
+- 单独弱是预期：日频/指数因子提供跨尺度互补信息，价值在 Step B 合体。
+
+### 23.3 Step B 合体 30 因子（test 段 2026-04-01→07-01）
+
+| 指标 | champion(18) | **Step B(30)** | 变化 |
+|---|---|---|---|
+| **信号 IC** | 0.0545 | **0.0611** | **+12% ↑** |
+| 因子 ICIR | ~0.513 | 0.530 | +3% ↑ |
+| Rank IC | — | 0.0840 | — |
+| Rank ICIR | — | 0.7187 | — |
+| 超额含成本年化 | +158.86% | +159.27% | +0.4pp ≈持平 |
+| 超额不含成本年化 | +191.33% | +191.73% | +0.4pp ≈持平 |
+| 回撤 | −5.44% | −6.35% | −0.91pp 略恶化 |
+| 组合 IR | 5.12 | 4.92 | −0.2 略降 |
+
+### 23.4 第一性判读：因子层提升明确，组合层未变现
+
+- **因子层（IC = 预测准确性，用户 /loop 核心目标）**：IC +12%（0.0545→0.0611）统计稳健（~100 股 × 61 天 ≈ 6000 截面样本），证明 12 日频/指数因子为模型补充了**有效截面信息**，未稀释。推翻 §19.1「日频稀释 9:41 信号」在本精选因子集上的担忧——本任务 12 日频是精选短周期(5/9/20 日) + 指数共振，非 Alpha158 全集(含 60 日慢均线)，尺度贴近 ~1.5 天 label。
+- **组合层（回测）**：含成本年化 +0.4pp 持平，回撤 −0.91pp、组合 IR −0.2 略劣化（61 天单路径小样本噪声内）。原因：`TopkDropoutStrategy topk=20` 只取排序头部，IC 中段提升传导有限；日频因子略增组合波动。
+- **结论**：因子更准了（IC +12% 达成「提升预测准确性」目标），但 top20 选股策略没把 IC 提升完全变现（组合收益持平）。
+
+### 23.5 待决策（需用户确认）
+
+- 是否升 enhanced(30) 为新 champion：因子层 IC +12% 支持，组合层持平 + 回撤略增反对。两者矛盾，属方案级决策。
+- 关联入库文件：`qlib_ifind_beta/index_daily_handler.py`(Step A 12 因子) / `enhanced_daily_index_handler.py`(Step B 30 因子合体) / `qrun/workflow_daily_index.yaml`(Step A) / `qrun/workflow_enhanced_daily_index.yaml`(Step B) / `tests/test_index_factors.py`(12 因子表达式 + 前视 gate，19/19 PASS)。
+
+## §24 特征组横截面 Rank 归一化（CSRankNorm 替换 RobustZScoreNorm）— FAIL，族在此构造下死（2026-07-07）
+
+### 24.1 背景：IC→超额墙 + 三重零重训证伪
+
+§23 Step B（30 因子）把信号 IC 抬到 0.0611（+12%）但超额含成本持平（+159.27% ≈ champion +158.86%）、回撤略恶化（−6.35% vs −5.44%）→ 暴露**「IC→超额墙」**：因子层更准不必然传导到 topk=20 头部收益。基于此做三重零重训诊断，证伪三个朴素提超额方向：
+
+1. **gap 诊断**（§23.3 数据）：Step B IC↑（0.0545→0.0611）但头部收益反降 → IC↑ ≠ 头部↑。
+2. **头部可塑性诊断**（champion rank 曲线，本次 fresh 复算）：topk=20 边界**已锐**——
+   - rank 16-20（topk 内缘）实现收益 **+1.203%/日** ≫ rank 21-25（外缘）**+0.171%/日**，边界 Δ **+1.031%/日**；
+   - top-20 等权 +1.148%/日、top-10 +1.342%/日（集中度边缘 +0.194%/日）；
+   - 边界重排 oracle 仅 +0.065%/日且 std/mean≈4.88（噪声级，前视幻觉）。
+   → champion 的超额**来自 topk=20 边界放得极锐**，不是头部可塑性有冗余。
+3. 假设「绝对开盘幅度混入日级 regime 噪声」→ 用**日内横截面 rank** 剥离 regime，或提纯「个股相对强度」。
+
+### 24.2 实验（与 champion 逐字一致，唯一变量 = 特征归一化）
+
+- 重定性（context7 + qlib 源码 `processor.py:326`）：横截面归一化在 **PROCESSOR 层**，非新因子族、非新 bin。champion 特征走 Alpha158 默认 `RobustZScoreNorm`（**时间序列** robust z-score，fit on train）；本变体仅把 `infer_processors` 换成 `CSRankNorm`（每日横截面 `rank(pct=True)`，**无 fit → 零跨段泄漏**）。
+- Handler `MinuteEnhancedCSRankHandler(MinuteEnhancedHandler)`：18 因子 `get_feature_config` 不变、label `Ref($close,-1)/$price_941-1`、shared `DropnaProcessor(feature)` L1 前视护栏、切分 train 2024-01→2025-12 / valid 2026-01→03 / test 2026-04→07-02、`TopkDropoutStrategyTD0 n_drop=15 topk=20`、LGBModel 超参——**全冻结**。
+- spec：`docs/superpowers/specs/2026-07-07-csrank-feature-normalization-design.md`；结构测试 4/4 PASS（18 因子不变 + infer_processors 含 CSRankNorm 不含 RobustZScoreNorm + L1 护栏继承）。
+
+### 24.3 结果（test 2026-04→07，全口径 FAIL）
+
+| 口径 | champion (RobustZScore 时间序列) | CSRank 变体 (横截面 rank) | Δ | 判定 |
+|---|---|---|---|---|
+| 信号 IC | 0.0545 | **0.0526** | −0.0019 | ↓ FAIL |
+| Rank ICIR | ~0.51 | 0.727 | +0.22 | ↑（唯一亮点） |
+| **top-20 头部收益**（等权实现） | **+1.148%/日** | **+0.993%/日** | **−0.155%/日** | **↓ FAIL** |
+| top-10 头部收益 | +1.342%/日 | +1.229%/日 | −0.112%/日 | ↓ FAIL |
+| 超额含成本年化 | +158.86% | +143.14% | −15.7pp | ↓ FAIL |
+| 回撤（含成本） | −5.44% | −9.54% | −4.1pp | 恶化 FAIL |
+| 组合 IR（含成本） | 5.12 | 4.37 | −0.75 | ↓ FAIL |
+
+### 24.4 失败机制（rank 曲线揭示，最关键）
+
+| 边界带 | champion | CSRank |
+|---|---|---|
+| rank 16-20（topk=20 内缘） | +1.203%/日 | +1.089%/日 |
+| rank 21-25（topk=20 外缘） | +0.171%/日 | +1.166%/日 |
+| **内缘−外缘 Δ** | **+1.031%/日（锐）** | **−0.078%/日（平坦/倒挂）** |
+
+champion 的超额来源是 **topk=20 边界极锐**（内缘比外缘高 1.03%/日，模型把高收益票放进 top-20、低收益票排出）。CSRank 把绝对开盘幅度换成日内 rank 后，**丢了边界锐化信号**——边界变平坦（外缘甚至反超高 0.078%/日），模型在 topk=20 边界处近乎随机选股。**假设证伪**：绝对幅度（时间序列 z-score）**不是** regime 噪声，它**承载**边界锐化信号，剥离它是损招。
+
+### 24.5 反常细节：CSRank 锐尖削边
+
+| 尖部口径 | champion | CSRank |
+|---|---|---|
+| rank 1-5 | +1.029%/日 | +1.297%/日 |
+| top-10 集中度边缘（top10−top20） | +0.194%/日 | +0.237%/日 |
+
+CSRank **锐化了尖、削平了边**。若策略是 topk=10（非 topk=20），CSRank 可能赢——但 topk=20 是用户冻结口径，削平的边主导 → 净亏。这把「IC→超额墙」（§24.1）又证一次：Rank ICIR ↑（0.51→0.73）但头部↓、超额↓。
+
+### 24.6 判定与入库
+
+- **FAIL**（头部 < champion 且超额 < champion 且回撤恶化）。横截面 rank 族**在此构造下死**。
+- C（CSZScoreNorm，每日横截面 z-score）同为横截面（同样丢绝对幅度），先验预期也败；是否作横截面族最后尝试**待用户决策**（governance #1/#2：未批准不擅自起新实验）。
+- 入库文件：`qlib_ifind_beta/minute_enhanced_csrank_handler.py` / `qrun/workflow_minute_enhanced_csrank.yaml` / `tests/test_minute_enhanced_csrank_handler.py`（4/4 PASS）/ spec（见 24.2）。
+- recorder：`mlruns/302034022257525537/4e357612343b44d49ce7037ee7341a0e`；分析脚本 `/tmp/csrank_head_cmp.py`。
+- champion（enhanced(18)@n_drop=15）**不变**，A/B 隔离，本实验纯负结果归档。
+
+## §25 T-1 尾盘因子族（champion 18 + 2 最强正交尾盘因子）— FAIL，第 3 次 IC→超额墙确认（2026-07-07）
+
+### 25.1 背景：goal 因子优化 Step C2，未涉的 T-1 全天分钟结构
+
+champion 18 因子已用尽 T 日 9:30-9:40 早盘信息；T-1 全天分钟结构此前**完全未作因子**（`vol_vs_yest` 分母仅把 T-1 全天量压成聚合标量）。goal「优化因子提升超额与 IC」Step C2：新增 **T-1 尾盘（14:50-15:00，slot 232-241）** 分钟族，刻画用户语义「惯性冲高/高潮/出货」次日领先信号。
+
+**IC 基线校准（第一性原理，test 段 2026-04→07，23 因子全量单变量 IC）**：
+- `tail_vol_ratio_t1`：|RankICIR|=0.398，全部 23 因子 **#3**（仅次于 vol_vs_yest_t5 0.497 / overnight_gap 0.458），反转信号（T-1 尾盘放量出货→次日跌）。
+- `tail_accel_t1`：|RankICIR|=0.263，**#7**，动量/惯性信号。
+- **正交性**：5 tail 因子与 champion 18 |corr| **全部 <0.07** → 纯增量信息、零冗余。
+- 仅取最强 2 个（非全 5）：`tail_close_pos/mom/last5` test 段 |RankICIR|<0.15 且与已选 2 个相关，加入徒增过拟合（Step B 教训）。
+
+先验很乐观：IC 强、正交、刻画面信息空白 → 该提超额。**结果证伪**。
+
+### 25.2 实验（与 champion 逐字一致，唯一变量 = feature 18→20）
+
+- 物化 5 个尾盘 day.bin（`materialize_minute.py` F 块）：`tail_mom_t1 / tail_mom_last5_t1 / tail_close_pos_t1 / tail_vol_ratio_t1 / tail_accel_t1`。窗 = slot 232-241（14:51-15:00 时刻 bar），与早盘 10 特征 K 严格对称；**shift-1 in min-cal space**（T 行 = T-1 尾盘，无前视；T-1 15:00 收盘 T 日 9:41 决策已知）。
+- Handler `MinuteEnhancedTailHandler(MinuteEnhancedHandler)`：18 champion + `tail_vol_ratio_t1` + `tail_accel_t1`（`$field` 直消费，与 14 分钟因子零 Ref 统一）。label / deal_price / 涨跌停拦截 / 切分 / 模型超参 / 归一化口径——**全冻结**，唯一变量 feature 18→20。
+- 测试：`tests/test_materialize_minute.py` 3 个尾盘测试（25 bins 计数 + 尾盘窗 10 根 K 线 + 5 因子 shift-1 交叉验证）+ `tests/test_minute_enhanced_tail_handler.py` 4 结构测试（20 因子 / TAIL_PICK 最强 2 / L1 护栏 / __init__ 未 override）= **7/7 PASS**，全量 68/68。
+
+### 25.3 结果（test 2026-04→07，全口径 FAIL）
+
+| 口径 | champion (enhanced 18) | tail 变体 (20) | Δ | 判定 |
+|---|---|---|---|---|
+| 信号 IC | 0.0545 | **0.0457** | −0.0088（−16%） | ↓ FAIL |
+| Rank ICIR | ~0.51 | 0.502 | ~持平 | 平 |
+| ICIR | ~0.49 | 0.416 | −0.07 | ↓ FAIL |
+| **top-20 头部收益**（等权实现） | **+1.148%/日** | **+0.964%/日** | **−0.184%/日** | **↓ FAIL** |
+| top-10 头部收益 | +1.342%/日 | +0.955%/日 | −0.387%/日 | ↓ FAIL |
+| 超额含成本年化 | +158.86% | **+139.60%** | −19.3pp | ↓ FAIL |
+| 超额不含成本年化 | — | +171.35% | — | — |
+| 回撤（含成本） | −5.44% | −5.75% | −0.31pp | 恶化 FAIL |
+| 组合 IR（含成本） | 5.12 | 4.41 | −0.71 | ↓ FAIL |
+
+IC 正交、RankICIR 持平——但**头部、超额、回撤、IR 四口径全败**。第 3 次 IC→超额墙。
+
+### 25.4 失败机制（rank 曲线揭示，与 §24 机制**不同**，更关键）
+
+| 边界/尖部带 | champion | tail(20) |
+|---|---|---|
+| rank 6-10（champion 尖峰） | **+1.654%/日** | +0.968%/日（**尖峰被压平 −0.69**） |
+| rank 16-20（topk=20 内缘） | +1.203%/日 | +0.881%/日 |
+| rank 21-25（topk=20 外缘） | +0.171%/日 | +0.381%/日 |
+| **内缘−外缘 Δ**（边界锐度） | **+1.0313%/日（锐）** | **+0.5007%/日（腰斩）** |
+| top-10 集中度边缘（top10−top20） | +0.194%/日 | **−0.009%/日（尖头被压平）** |
+
+**机制（与 §24 区别）**：
+- §24（CSRank）= **边界变平坦/倒挂**（1.03 → −0.078），横截面归一化**摧毁**绝对幅度承载的边界锐化信号。
+- §25（tail +2 因子）= **边界腰斩但仍正**（1.03 → 0.50），且 **champion 尖峰（rank 6-10 +1.654%）被压平到 +0.968%**、top-10 集中度边缘归零（+0.194 → −0.009）。
+
+→ 2 个 IC 强且与 18 因子**完全正交**的因子，没有锐化 topk=20 边界，而是**重排了排序**：把 champion 原本落在尖部（rank 6-10、+1.654%/日）的头部赢家**挤出 top-20**，腾出的 rank 让给尾盘信号强但次日收益平庸的票。这是典型的「**加因子稀释/重排**」效应——**单因子 IC 强 ≠ 加进组合后头部强**。
+
+### 25.5 三重墙定论（goal 因子优化 thread 收口）
+
+| 实验 | 改动 | IC | 超额含成本年化 | 机制 |
+|---|---|---|---|---|
+| §23 Step B | +12 日频/指数→30 | 0.0611（+12%）**↑** | +159.27% ≈ champion **平** | IC↑不传导头部 |
+| §24 CSRank | 18 因子横截面归一化 | 0.0526 ↓ | +143.14% ↓ | 边界摧毁 |
+| **§25 tail** | **+2 尾盘→20** | **0.0457 ↓** | **+139.60% ↓** | **边界腰斩+尖峰压平** |
+
+**三重独立证伪，机制各异**（加因子 / 改归一化 / 加正交因子），共同指向同一结构结论：**champion enhanced(18)@n_drop=15 的超额来自 topk=20 边界放得极锐**，18 个因子已在该边界处接近最优——任何方向（加日频、改横截面、加正交尾盘）都重排并退化该边界。**18 因子近天花板**。
+
+→ **goal「优化因子提升超额」thread 收口**：继续追超额边际收益已极低（3 路全败），转向 **CLAUDE.md「待定」= 扩段验证 champion OOS 稳健性**（用 26 年全数据，而非追新因子）。
+
+### 25.6 判定与入库
+
+- **FAIL**（头部 / 超额 / 回撤 / IR 四口径全 < champion）。尾盘因子族（champion+2 最强正交）在此构造下死。
+- 入库文件：`qlib_ifind_beta/minute_enhanced_tail_handler.py` / `qrun/workflow_minute_enhanced_tail.yaml` / `tests/test_minute_enhanced_tail_handler.py`（4/4 PASS）/ `qlib_ifind_beta/materialize_minute.py`（5 尾盘 bin 物化 + shift-1）/ `qlib_ifind_beta/config.py`（`MINUTE_FACTOR_TAIL_FIELDS` + `TAIL_FIRST_SLOT/TAIL_SLOT_COUNT`）/ `tests/test_materialize_minute.py`（3 尾盘测试）。
+- recorder：`mlruns/882574446881966247/f49261b7c66f4934a286653c57cf6ef1`；头对头分析脚本 `/tmp/tail_head_cmp.py`。
+- champion（enhanced(18)@n_drop=15）**不变**，A/B 隔离，本实验纯负结果归档。三重墙定论后，因子优化 thread 收口，转向 OOS 稳健性验证。
