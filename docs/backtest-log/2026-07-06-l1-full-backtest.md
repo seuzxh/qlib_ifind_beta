@@ -1103,3 +1103,68 @@ IC 正交、RankICIR 持平——但**头部、超额、回撤、IR 四口径全
 - recorder：V1 `ecf50b7250d143e0a3be9edcc675416b` / V1b `de4c265a623c4070a770e66d0e2ef664`（见 `/tmp/v1.log` `/tmp/v1b.log` 末行）；IC 校准 `/tmp/ic_calib_opening.py` → `/tmp/ic_calib_opening.json`。
 - champion（enhanced(18)@n_drop=15）**不变**，A/B 隔离，本实验纯负结果归档。
 - **明早需用户决策**（详见 morning report）：① 接受五重墙、转向 OOS walk-forward 稳健性验证（sliding 设计已批、paused）——**推荐**；② V4 replacement（丢 2 弱 champion + 加 2 开盘 = 18，测「count-dilution vs boundary-optimality」唯一未涉结构假设）需用户授权动 §D6 冻结口径；③ 调 topk/n_drop（策略层始终冻结，只记录）。
+
+---
+
+## §27 模型层正则化杠杆 → W1 破墙 / W2 OOS 证伪（窗口过拟合，机制不成立）（2026-07-08，overnight autonomous）
+
+### 27.1 背景：五重因子墙后转向未冻结的模型层 + 边界诊断机制假说
+
+§23–§26 五重因子墙确认「加任何因子都退化超额」。goal「扩展不同区间的 1min 因子」方向已穷尽，但 goal 上层「提升 IC 和超额收益」**未**收口。转向**用户冻结清单外、零证据**的唯一杠杆 = **模型层超参**（label/策略/切分/数据全冻结，仅动 `LGBModel` kwargs）。
+
+**机制假说（边界诊断驱动）**：champion topk=20 边界处 rank16-20 实现 label +0.0121 vs rank21-25 +0.0004（~96% 断崖），但预测 rel_gap 中位 0.0000（fragile）。假说 = **更强正则化 → 压制头部过拟合噪声 → 锐化边界带 → 破 IC→超额墙**。
+
+### 27.2 W1 实验（test 2026-04→07）：模型层 sweep + 正则化剂量-响应
+
+与 champion 逐字一致，唯一变量 = `LGBModel` 超参（loss / num_leaves / max_depth / lambda_l1 / lambda_l2）。
+
+- **M_huber**：`loss: huber`（其余同 champion）
+- **M_cap+**：`num_leaves 64→128 / max_depth 6→8`（容量↑）
+- **M_reg(l1=10)**：`lambda_l1 5→10 / lambda_l2 10→20`
+- **reg15**：`lambda_l1 15 / lambda_l2 30`
+- **reg20**：`lambda_l1 20 / lambda_l2 40`
+
+### 27.3 W1 结果（test 2026-04→07，初看 4/4 破墙、reg15 强候选）
+
+| 配置 | IC | RankIC | 超额含成本×242 | 超额 geo_cum | maxDD | 边界 rel_gap |
+|---|---|---|---|---|---|---|
+| champion l1=5/l2=10 | 0.0545 | 0.0679 | +194.5% | +60.6% | −2.4% | 0.0013 |
+| M_huber | — | — | FAIL（loss 变更引发 label 尺度失配） | | | |
+| M_cap+ leaves128/d8 | 0.0374 | 0.0534 | +200.6% | +62.7% | −3.3% | 0.0232 |
+| M_reg l1=10/l2=20 | 0.0589 | 0.0726 | +198.0% | +62.3% | −3.1% | 0.0246 |
+| **reg15 l1=15/l2=30** | **0.0534** | **0.0706** | **+232.1%** | **+76.2%** | −4.0% | 0.0116 |
+| reg20 l1=20/l2=40 | 0.0572 | 0.0760 | +218.2% | +70.1% | −3.9% | 0.0210 |
+
+**初看强信号**（reg15 vs champion）：
+- 超额 +232.1% vs +194.5%（**+37.6pp arith**），geo_cum +76.2% vs +60.6%（+15.6pp）。
+- **IC 反而更低**（0.0534 < 0.0545）→ 印证诊断「IC/超额在边界解耦」预测。
+- 倒 U 剂量-响应：l1=5→10→15→20 超额 +194→+198→+232→+218%，峰在 l1=15。
+- **边缘分布式稳健**：median +1.092%/d（> champion +0.937%）、win 72%（>66%）、H1 +209% H2 +254%（两半都赢）、top3/total 26%（<30%，非少数日驱动）。
+
+→ reg15 形似强 champion 候选。**但因 reg15 系在 W1 上选出，W1 即其 in-sample 调参窗 → 必须独立 OOS 窗验证才能定论**（LightGBM 默认 feature_fraction=1/bagging=none 为确定性，seed 验证无意义，换窗才是真稳健性）。
+
+### 27.4 W2 OOS 验证（test 2025-04→07 平移窗，genuinely OOS）
+
+train 2024-01→2024-12 / valid 2025-01→03 / **test 2025-04→07**（reg15 调参窗 W1 的前一年，真 OOS）。champion 与 reg15 除 lambda 外逐字一致：
+
+| 配置 | IC | RankIC | 超额含成本×242 | 超额 geo_cum | maxDD | median/d | win |
+|---|---|---|---|---|---|---|---|
+| champion l1=5/l2=10 | 0.0718 | 0.1177 | +96.7% | +25.8% | −9.0% | +0.419% | 57% |
+| reg15 l1=15/l2=30 | 0.0709 | 0.1173 | +100.4% | +27.4% | −9.7% | +0.271% | 56% |
+
+**边缘坍缩**：reg15 超额 arith 仅 +3.7pp（W1 +37.6pp → W2 +3.7pp，缩 ~90%），geo_cum 仅 +1.6pp。更反常：W2 上 reg15 的 **median/d（+0.271%）与 win（56%）反而低于 champion**（+0.419%/57%）——W1「两维都赢」的分布式稳健在 OOS 不复存在。
+
+### 27.5 统计与机制双重证伪（最关键）
+
+**(A) 统计无差异**：reg15−champion 日超额差 paired t=0.12、**p=0.906**；bootstrap 95% CI [−57.5, +62.2]pp 横跨 0；reg15 仅 29/61 天更优（48%，劣于掷币）。→ **reg15 与 champion 在真 OOS 统计上不可区分**。
+
+**(B) 机制证伪**：诊断假说「更强正则→锐化边界」。实测 W2 边界 rel_gap：champion **0.0122** > reg15 **0.0072**——reg15 **边界更钝**，假说方向相反。reg15 的 +3.7pp 残余超额与边界锐化**无关**，无可解释机制支撑。
+
+→ **结论**：W1 的 +37.6pp 是**窗口过拟合**（正则强度实质上拟合了 W1 测试窗噪声），非可泛化信号。诊断的「正则化破墙」机制**证伪**。
+
+### 27.6 判定与入库
+
+- **FAIL（OOS）**：reg15 不达稳健 champion 标准（W2 p=0.906、机制证伪）。**champion enhanced(18)@n_drop=15 维持不变**，A/B 隔离，本实验纯负结果归档。
+- **正向价值**：排除「模型正则化可破墙」假设 → 五重因子墙 + 本模型墙共同确认：**champion 在 topk=20/n_drop=15 下已达该因子集的结构性超额天花板**，墙非模型欠拟合、非因子不足，是边界结构本身（rank16-20 vs 21-25 实现 96% 断崖但预测不可靠分离）。两窗超额均 +96~100% arith 年化 → **墙是「超额上限」非「可行性」**，策略本身盈利。
+- 入库文件：`qrun/workflow_minute_enhanced_mdl_{cap,huber,reg,reg15,reg20}.yaml`（W1 模型层 5 变体）+ `qrun/workflow_minute_enhanced_{w2,mdl_reg15_w2}.yaml`（W2 OOS 验证 2 窗）。recorder：W1 champion eid907625868975691204 run b8b187d6 / reg15 eid148551552510143393 run 1ec846a9；**W2 champion eid449239398769286298 run dcd756bb** / **reg15 eid968255313638515434 run 982fba5e**。对比脚本 `/tmp/{sweep_compare,sweep_reconcile,full_compare,reg15_robust,w2_compare,w2_deep}.py`。
+- **明早需用户决策**（详见 morning report）：① 接受天花板、champion 定稿、转扩段（26 年全数据）+ 报告产出 ——**推荐**；② 横截面 regime/共振 因子（用户领域模型「指数大势×T-1 K线→共振/启动/高潮」，因子墙 5 重未涉的**非纯个股因子**方向，可能是真正未探索杠杆）；③ 模型层其它（loss/stacking/特征选择）——正则化线已证伪、预期收益低，不推荐。
