@@ -1,6 +1,6 @@
 """Re-materialize minute factors (20 day.bins/stock) without redoing the full overlay.
 
-Writes 14 baseline minute factors + 4 surgery extras (vol_vs_yest_t2/t3/t5 +
+Writes 14 baseline minute factors + 4 enhanced extras (vol_vs_yest_t2/t3/t5 +
 overnight_gap) + price_941 + change_941 per stock. Use after tweaking
 qlib_ifind_beta/materialize_minute.py formulas — avoids re-pulling the iFinD
 universe (unlike scripts/build_overlay.py). Reads the existing

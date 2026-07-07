@@ -1,11 +1,10 @@
 """Materialize minute factors + $price_941 as day.bin into the overlay.
 
 Writes 20 day.bins/stock: 14 baseline minute factors (MINUTE_FACTOR_FIELDS) + 4
-surgery-experiment extras (MINUTE_FACTOR_EXTRA_FIELDS: vol_vs_yest_t2/t3/t5 +
+enhanced extras (MINUTE_FACTOR_EXTRA_FIELDS: vol_vs_yest_t2/t3/t5 +
 overnight_gap) + $price_941 (deal price) + $change_941 (涨跌停拦截用). The 14
-baseline are frozen for m14 reproducibility; the 4 extras are the 2026-07-07
-A/B experiment (drop 10 dead-weight + add reversal family). See
-docs/superpowers/specs/2026-07-07-minute-factor-surgery-design.md.
+baseline are frozen for m14 reproducibility; the 4 extras feed MinuteEnhancedHandler
+(14 + 4 = 18-factor champion, backtest-log §22).
 
 Reads cn_data_1min 1min bins (close/open/high/low/volume) per stock, slices each
 trading day's morning window (slots 1-11 = 09:31-09:41: 10 feature bars slots 1-10
@@ -49,7 +48,7 @@ from .config import (
 
 _1MIN_FIELDS = ("close", "open", "high", "low", "volume")
 
-# Of MINUTE_FACTOR_EXTRA_FIELDS (surgery 实验)，vol_vs_yest_t2/t3/t5 在 min-cal 空间（随 fac
+# Of MINUTE_FACTOR_EXTRA_FIELDS（enhanced extras），vol_vs_yest_t2/t3/t5 在 min-cal 空间（随 fac
 # scatter，复用 full_day_vol shift 2/3/5）；overnight_gap 在 day-cal 空间（与 change_941 同处
 # 直接算，输入是日频 open/close）。两组并集 == MINUTE_FACTOR_EXTRA_FIELDS，否则 config 改动未同步。
 _EXTRA_MINUTE_SPACE = ("vol_vs_yest_t2", "vol_vs_yest_t3", "vol_vs_yest_t5")
@@ -136,7 +135,7 @@ def _read_1min_fields(code: str):
 
 def materialize_minute_instrument(code: str) -> bool:
     """Read 1min + daily bins for `code`, write 20 day.bins: 14 baseline minute
-    factors + 4 surgery extras (vol_vs_yest_t2/t3/t5 + overnight_gap) +
+    factors + 4 enhanced extras (vol_vs_yest_t2/t3/t5 + overnight_gap) +
     $price_941 + $change_941.
 
     Returns True on success; False if the 1min source is missing/misaligned, or the
@@ -309,7 +308,7 @@ def materialize_minute_instrument(code: str) -> bool:
             raw_prev_close[1:] = raw_close[:-1]
         out_change941 = (raw_p941 / raw_prev_close - 1.0).astype(np.float32)
 
-        # overnight_gap（surgery 反转因子，day 空间）：不复权开盘跳空 =
+        # overnight_gap（enhanced extra，day 空间反转因子）：不复权开盘跳空 =
         # (open[T]/factor[T]) / (close[T-1]/factor[T-1]) - 1。复用上方 raw_prev_close。
         # 不复权口径（同 change_941 源）：除权日 factor 跳变会被分母分子同步抵消 → 反映真实
         # 开盘情绪；若用后复权 ($open/Ref($close,1)-1) 除权缺口被复权抹平 → 口径错。

@@ -7,8 +7,9 @@
   - §19.1 full(85=14min+71daily) IC 最低 → 日频 Alpha158 稀释 9:41 信号；但 4 extra 都是
     分钟族（vol_vs_yest_t2/t3/t5）或日频跳空（overnight_gap），与 ~1.5 天 label 同周期，
     不属于「5/10 日均线」那种尺度错配 → 加 4 extra 不会重蹈 full 覆辙。
-  - surgery(8) IC +0.0661 最高但 n_drop=5 实现 alpha +14.34%；surgery 砍掉了 startup_mom/
-    accel/close_pos 族。n_drop=15 跟踪到位后，这些被砍的族可能重新有效 → 14 全集可能优于 8。
+  - 早期 8 因子消融实验（surgery，2026-07-07，已弃用移除）IC +0.0661 最高但 n_drop=5 实现
+    alpha +14.34%；它砍掉了 startup_mom/accel/close_pos 族。n_drop=15 跟踪到位后，这些被砍的
+    族可能重新有效 → 14 全集可能优于 8（历史对照论据，surgery 代码已删）。
   - enhanced(18) = 14 全集 + 4 extra：既保留 14 的全部动量/加速度/位置信号，又加 4 反转/跳空
     信号，在 n_drop=15 好策略下测上限。
 

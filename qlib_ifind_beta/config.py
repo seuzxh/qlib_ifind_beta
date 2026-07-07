@@ -77,9 +77,9 @@ MINUTE_DEAL_PRICE_FIELD = "price_941"
 # 仅把"全天 close"换成"9:41 close"。必须不复权（除权日 factor 跳变会误判涨跌停）。
 MINUTE_CHANGE_941_FIELD = "change_941"
 
-# 17th-20th materialized bins — surgery 实验（2026-07-07，砍噪 + 反转族强化）。
-# MINUTE_FACTOR_FIELDS（14）不变 → m14 复现保留；这 4 个是 A/B 实验新增因子，仅 MinuteSurgeryHandler 消费。
-# 详见 docs/superpowers/specs/2026-07-07-minute-factor-surgery-design.md。
+# 17th-20th materialized bins — enhanced champion 的 4 extra 因子（2026-07-07）。
+# MINUTE_FACTOR_FIELDS（14）不变 → m14 复现保留；这 4 extra 被 MinuteEnhancedHandler 消费
+#（14 baseline + 4 extra = 18 因子；详见 backtest-log §22 champion = enhanced@n_drop=15）。
 #   - vol_vs_yest_t2/t3/t5：vol_vs_yest 多日族，T 日 9:30-9:40 累积量 / (T-k 日全天分钟量/240)，
 #     k∈{2,3,5}（与 vol_vs_yest 同形，分母 shift 改 2/3/5）。min-cal 空间，随 fac scatter。
 #   - overnight_gap：不复权开盘跳空 = (open[T]/factor[T])/(close[T-1]/factor[T-1]) - 1。day-cal 空间，

@@ -86,13 +86,13 @@ def test_materialize_returns_true_for_liquid_stock():
 
 def test_materialize_writes_20_bins():
     """All 20 day.bins present after materialize: 14 baseline minute factors +
-    4 surgery extras (vol_vs_yest_t2/t3/t5 + overnight_gap) + price_941 + change_941."""
+    4 enhanced extras (vol_vs_yest_t2/t3/t5 + overnight_gap) + price_941 + change_941."""
     mm.materialize_minute_instrument("SH600519")
     d = Path(FEATURES_DST) / "sh600519"
     from qlib_ifind_beta.config import MINUTE_CHANGE_941_FIELD
     expected = (
         list(MINUTE_FACTOR_FIELDS)            # 14 baseline
-        + list(MINUTE_FACTOR_EXTRA_FIELDS)    # 4 surgery extras (incl. overnight_gap)
+        + list(MINUTE_FACTOR_EXTRA_FIELDS)    # 4 enhanced extras (incl. overnight_gap)
         + [MINUTE_DEAL_PRICE_FIELD, MINUTE_CHANGE_941_FIELD]
     )
     assert len(expected) == 20
@@ -330,8 +330,8 @@ def test_change_941_matches_hand_formula():
 
 
 # ---------------------------------------------------------------------------
-# surgery 实验新增因子（2026-07-07）：vol_vs_yest_t2/t3/t5 + overnight_gap。
-# 详见 docs/superpowers/specs/2026-07-07-minute-factor-surgery-design.md。
+# enhanced champion 的 4 extra 因子（2026-07-07）：vol_vs_yest_t2/t3/t5 + overnight_gap。
+# 详见 backtest-log §22（MinuteEnhancedHandler，14 + 4 = 18 因子）。
 # ---------------------------------------------------------------------------
 
 
