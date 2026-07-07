@@ -1,4 +1,11 @@
-"""Materialize 14 minute factors + $price_941 as day.bin into the overlay.
+"""Materialize minute factors + $price_941 as day.bin into the overlay.
+
+Writes 20 day.bins/stock: 14 baseline minute factors (MINUTE_FACTOR_FIELDS) + 4
+surgery-experiment extras (MINUTE_FACTOR_EXTRA_FIELDS: vol_vs_yest_t2/t3/t5 +
+overnight_gap) + $price_941 (deal price) + $change_941 (涨跌停拦截用). The 14
+baseline are frozen for m14 reproducibility; the 4 extras are the 2026-07-07
+A/B experiment (drop 10 dead-weight + add reversal family). See
+docs/superpowers/specs/2026-07-07-minute-factor-surgery-design.md.
 
 Reads cn_data_1min 1min bins (close/open/high/low/volume) per stock, slices each
 trading day's morning window (slots 1-11 = 09:31-09:41: 10 feature bars slots 1-10
@@ -9,6 +16,8 @@ $price_941[T] row-aligns with $close[T]).
 
 vol_vs_yest denominator = previous min-cal trading day's TOTAL minute volume / REAL_BARS_PER_DAY
 (= 240 real bars/day; computed from cn_data_1min itself — minute volume on BOTH sides). The
+vol_vs_yest_t2/t3/t5 family reuses the same full_day_vol, shifting by 2/3/5 min-cal days.
+overnight_gap is day-space (daily open/close, 不复权 caliber). The
 minute-vs-daily volume unit mismatch (per-stock ratio 1.0-192.7, ≈ cumulative
 adjustment factor: 科创板≈1, 茅台 5.84, 平安银行 192.7) ruled out the prior
 qlib_data daily-volume denominator.
@@ -35,10 +44,19 @@ from .binio import read_bin, write_bin
 from .config import (
     BUY_SLOT, DAY_CAL, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FREQ,
     FIRST_FEATURE_SLOT, MIN_CAL, MINUTE_CHANGE_941_FIELD, MINUTE_DEAL_PRICE_FIELD,
-    MINUTE_FACTOR_FIELDS, REAL_BARS_PER_DAY, SLOTS_PER_DAY,
+    MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS, REAL_BARS_PER_DAY, SLOTS_PER_DAY,
 )
 
 _1MIN_FIELDS = ("close", "open", "high", "low", "volume")
+
+# Of MINUTE_FACTOR_EXTRA_FIELDS (surgery 实验)，vol_vs_yest_t2/t3/t5 在 min-cal 空间（随 fac
+# scatter，复用 full_day_vol shift 2/3/5）；overnight_gap 在 day-cal 空间（与 change_941 同处
+# 直接算，输入是日频 open/close）。两组并集 == MINUTE_FACTOR_EXTRA_FIELDS，否则 config 改动未同步。
+_EXTRA_MINUTE_SPACE = ("vol_vs_yest_t2", "vol_vs_yest_t3", "vol_vs_yest_t5")
+_EXTRA_DAY_SPACE = ("overnight_gap",)
+assert set(_EXTRA_MINUTE_SPACE) | set(_EXTRA_DAY_SPACE) == set(MINUTE_FACTOR_EXTRA_FIELDS), (
+    "materialize 内部 _EXTRA_* 空间划分与 config.MINUTE_FACTOR_EXTRA_FIELDS 不一致，请同步")
+_OVERNIGHT_GAP_FIELD = "overnight_gap"
 # Morning window: slots FIRST_FEATURE_SLOT..BUY_SLOT inclusive = 11 calendar rows.
 _MORNING_WINDOW = BUY_SLOT - FIRST_FEATURE_SLOT + 1   # 11
 _cal_cache: dict = {}
@@ -117,11 +135,13 @@ def _read_1min_fields(code: str):
 
 
 def materialize_minute_instrument(code: str) -> bool:
-    """Read 1min + daily bins for `code`, write 14 factor day.bins + price_941.day.bin.
+    """Read 1min + daily bins for `code`, write 20 day.bins: 14 baseline minute
+    factors + 4 surgery extras (vol_vs_yest_t2/t3/t5 + overnight_gap) +
+    $price_941 + $change_941.
 
     Returns True on success; False if the 1min source is missing/misaligned, or the
-    daily close bin is missing/misaligned (caller treats as "no minute data for
-    this stock" — qlib reads NaN).
+    daily close/factor/open bin is missing/misaligned (caller treats as "no minute
+    data for this stock" — qlib reads NaN).
     """
     si_m, m = _read_1min_fields(code)
     if si_m is None:
@@ -138,6 +158,10 @@ def materialize_minute_instrument(code: str) -> bool:
     si_df, factor_d = read_bin(ddir / f"factor.{FREQ}.bin")
     if factor_d.size != close_d.size or si_df != si_dc:
         return False   # factor 必须与 close 同对齐（同属 qlib_data 日频 bin）
+    # overnight_gap 输入：日频 open.bin（后复权），与 close/factor 同对齐校验。
+    si_do, open_d = read_bin(ddir / f"open.{FREQ}.bin")
+    if open_d.size != close_d.size or si_do != si_dc:
+        return False   # open 必须与 close 同对齐（overnight_gap 口径依赖）
 
     # Calendar-grid alignment: scatter each 1min bin onto the global (day, slot)
     # grid by absolute calendar row, then take morning slots FIRST_FEATURE_SLOT
@@ -177,8 +201,8 @@ def materialize_minute_instrument(code: str) -> bool:
     # vol_vs_yest denominator (minute-only both sides): per-day FULL-DAY minute
     # volume from cn_data_1min, summed across all real (non-NaN) slots that day.
     # Computed from the scattered grid (uses the WHOLE volume bin, not just the
-    # morning window) → per-min-day total. Then shift by 1 min-cal trading day
-    # (first day → NaN). NaN-safe: NaN placeholder slots contribute 0 to the sum.
+    # morning window) → per-min-day total. Reused by the whole vol_vs_yest family
+    # (shift 1/2/3/5，见下方 E 段)；NaN-safe：NaN 占位槽对求和贡献 0。
     n_total_min_rows = min_slots.size
     vol_bin = m["volume"]
     bin_rows = si_m + np.arange(vol_bin.size, dtype=np.int64)
@@ -189,9 +213,6 @@ def materialize_minute_instrument(code: str) -> bool:
     src_vals = np.where(np.isfinite(src_vals), src_vals, 0.0)
     full_day_vol = np.zeros(n_min_days, dtype=np.float64)
     np.add.at(full_day_vol, day_idx_all[in_range], src_vals)
-    prev_day_full_vol = np.full(n_min_days, np.nan, dtype=np.float64)
-    if n_min_days > 1:
-        prev_day_full_vol[1:] = full_day_vol[:-1]
 
     # per-min-day date → day-calendar row → output-relative index.
     # morning_rows[::_MORNING_WINDOW] = each day's slot-FIRST_FEATURE_SLOT (slot 1)
@@ -237,18 +258,28 @@ def materialize_minute_instrument(code: str) -> bool:
         d5 = v[:, 0:4].mean(axis=1)
         fac["vol_ratio_5m"] = np.full(n, np.nan)
         np.divide(v[:, 5:10].mean(axis=1), d5, out=fac["vol_ratio_5m"], where=(d5 > 0))
-        # E. cross-day volume (minute-only): prev min-cal day's full-day vol / REAL_BARS_PER_DAY
-        prev_safe = np.where(prev_day_full_vol > 0, prev_day_full_vol, np.nan)
-        fac["vol_vs_yest"] = v[:, 0:10].sum(axis=1) / (prev_safe / float(REAL_BARS_PER_DAY))
+        # E. cross-day volume family (minute-only both sides): T 日 9:30-9:40 累积量 /
+        #    (T-k 日全天分钟量 / REAL_BARS_PER_DAY)。k=1 → vol_vs_yest（主力反转因子，与
+        #    compute_day_factors oracle 数值一致）；k=2/3/5 → 反转族强化（连续放量更稳）。
+        #    shift k → 首 k 个 min-cal 日 NaN；分母 ≤0 → NaN（NaN-safe）。
+        morning_vol_sum = v[:, 0:10].sum(axis=1)
+        for k, fname in ((1, "vol_vs_yest"), (2, "vol_vs_yest_t2"),
+                         (3, "vol_vs_yest_t3"), (5, "vol_vs_yest_t5")):
+            pv = np.full(n_min_days, np.nan, dtype=np.float64)
+            if n_min_days > k:
+                pv[k:] = full_day_vol[:-k]
+            pv_safe = np.where(pv > 0, pv, np.nan)
+            fac[fname] = morning_vol_sum / (pv_safe / float(REAL_BARS_PER_DAY))
     price_941 = c[:, 10]
 
     # scatter into day-aligned output (length = daily close.bin length)
     n_out = close_d.size
-    out = {name: np.full(n_out, np.nan, dtype=np.float32) for name in MINUTE_FACTOR_FIELDS}
+    _scatter_fields = list(MINUTE_FACTOR_FIELDS) + list(_EXTRA_MINUTE_SPACE)
+    out = {name: np.full(n_out, np.nan, dtype=np.float32) for name in _scatter_fields}
     out_p941 = np.full(n_out, np.nan, dtype=np.float32)
     valid = (rel >= 0) & (rel < n_out) & (day_rows >= 0)
     rel_v = rel[valid]
-    for name in MINUTE_FACTOR_FIELDS:
+    for name in _scatter_fields:
         out[name][rel_v] = fac[name][valid].astype(np.float32)
     out_p941[rel_v] = price_941[valid].astype(np.float32)
 
@@ -278,9 +309,18 @@ def materialize_minute_instrument(code: str) -> bool:
             raw_prev_close[1:] = raw_close[:-1]
         out_change941 = (raw_p941 / raw_prev_close - 1.0).astype(np.float32)
 
+        # overnight_gap（surgery 反转因子，day 空间）：不复权开盘跳空 =
+        # (open[T]/factor[T]) / (close[T-1]/factor[T-1]) - 1。复用上方 raw_prev_close。
+        # 不复权口径（同 change_941 源）：除权日 factor 跳变会被分母分子同步抵消 → 反映真实
+        # 开盘情绪；若用后复权 ($open/Ref($close,1)-1) 除权缺口被复权抹平 → 口径错。
+        # 首日无昨收 → NaN；停牌日 open=NaN → NaN（NaN-safe）。9:30 集合竞价 < 9:41 买入，无前视。
+        raw_open = open_d.astype(np.float64) / factor_d.astype(np.float64)
+        out_overnight_gap = (raw_open / raw_prev_close - 1.0).astype(np.float32)
+
     dst_dir = Path(FEATURES_DST) / code.lower()
-    for name in MINUTE_FACTOR_FIELDS:
+    for name in _scatter_fields:
         write_bin(dst_dir / f"{name}.{FREQ}.bin", si_dc, out[name])
     write_bin(dst_dir / f"{MINUTE_DEAL_PRICE_FIELD}.{FREQ}.bin", si_dc, out_p941)
     write_bin(dst_dir / f"{MINUTE_CHANGE_941_FIELD}.{FREQ}.bin", si_dc, out_change941)
+    write_bin(dst_dir / f"{_OVERNIGHT_GAP_FIELD}.{FREQ}.bin", si_dc, out_overnight_gap)
     return True

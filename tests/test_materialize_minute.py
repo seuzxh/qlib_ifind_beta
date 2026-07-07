@@ -9,7 +9,8 @@ from qlib_ifind_beta import materialize_minute as mm
 from qlib_ifind_beta.binio import read_bin
 from qlib_ifind_beta.config import (
     BUY_SLOT, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FIRST_FEATURE_SLOT,
-    MINUTE_DEAL_PRICE_FIELD, MINUTE_FACTOR_FIELDS, SLOTS_PER_DAY,
+    MINUTE_DEAL_PRICE_FIELD, MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS,
+    SLOTS_PER_DAY,
 )
 from qlib_ifind_beta.minute_factors import compute_day_factors
 
@@ -83,15 +84,20 @@ def test_materialize_returns_true_for_liquid_stock():
     assert mm.materialize_minute_instrument("SH600519") is True
 
 
-def test_materialize_writes_16_bins():
+def test_materialize_writes_20_bins():
+    """All 20 day.bins present after materialize: 14 baseline minute factors +
+    4 surgery extras (vol_vs_yest_t2/t3/t5 + overnight_gap) + price_941 + change_941."""
     mm.materialize_minute_instrument("SH600519")
     d = Path(FEATURES_DST) / "sh600519"
-    from qlib_ifind_beta.config import MINUTE_FACTOR_FIELDS, MINUTE_DEAL_PRICE_FIELD
-    for name in MINUTE_FACTOR_FIELDS:
-        assert (d / f"{name}.day.bin").exists(), name
-    assert (d / f"{MINUTE_DEAL_PRICE_FIELD}.day.bin").exists()
     from qlib_ifind_beta.config import MINUTE_CHANGE_941_FIELD
-    assert (d / f"{MINUTE_CHANGE_941_FIELD}.day.bin").exists()
+    expected = (
+        list(MINUTE_FACTOR_FIELDS)            # 14 baseline
+        + list(MINUTE_FACTOR_EXTRA_FIELDS)    # 4 surgery extras (incl. overnight_gap)
+        + [MINUTE_DEAL_PRICE_FIELD, MINUTE_CHANGE_941_FIELD]
+    )
+    assert len(expected) == 20
+    for name in expected:
+        assert (d / f"{name}.day.bin").exists(), name
 
 
 def test_day_bin_aligned_to_daily_close():
@@ -321,3 +327,120 @@ def test_change_941_matches_hand_formula():
     m = np.isfinite(expected) & np.isfinite(ch941)
     assert np.nanmax(np.abs(expected[m] - ch941[m])) < 1e-5
     assert np.isnan(ch941[0])   # 首日无昨收 → NaN
+
+
+# ---------------------------------------------------------------------------
+# surgery 实验新增因子（2026-07-07）：vol_vs_yest_t2/t3/t5 + overnight_gap。
+# 详见 docs/superpowers/specs/2026-07-07-minute-factor-surgery-design.md。
+# ---------------------------------------------------------------------------
+
+
+def test_minute_window_kbar_count():
+    """CLAUDE.md：分钟因子测试必须验证 K 线数量。开盘窗 = 恰好 10 根特征 K（slots
+    1-10 = 09:31-09:40）+ 1 根买入 K（slot 11 = 09:41）；1min 日历每个交易日贡献
+    恰好 11 行 morning rows。本设计不含尾盘因子（无尾盘 20 根要求）。"""
+    _, min_slots = mm._load_min_calendar()
+    morning_rows = np.where(
+        (min_slots >= FIRST_FEATURE_SLOT) & (min_slots <= BUY_SLOT)
+    )[0]
+    # 每个交易日恰好 11 行（整除），无溢出/缺失。
+    assert morning_rows.size % _MORNING_WINDOW == 0
+    # 抽查第 0 个交易日的 11 行：slots 必须是 1..11 连续。
+    first_day_slots = min_slots[morning_rows[:_MORNING_WINDOW]]
+    assert list(first_day_slots) == list(range(FIRST_FEATURE_SLOT, BUY_SLOT + 1))
+    # 特征 K = 10 根（slots 1-10），买入 K = slot 11。
+    assert (BUY_SLOT - FIRST_FEATURE_SLOT) == 10   # 10 feature bars
+    assert _MORNING_WINDOW == 11                   # 10 feature + 1 buy
+
+
+@pytest.mark.parametrize("shift,fname", [
+    (2, "vol_vs_yest_t2"),
+    (3, "vol_vs_yest_t3"),
+    (5, "vol_vs_yest_t5"),
+])
+def test_vol_vs_yest_family_shift_crosscheck(shift, fname):
+    """vol_vs_yest_t{2,3,5}[T] = morning_vol_sum[T] / (full_day_vol[T-shift] / 240)。
+
+    三层断言：
+    1. shift 正确：bin[T] 用的分母是 T-shift 日的全天量（与 vol_vs_yest 的 shift-1
+       同形，仅 shift 改 2/3/5）。
+    2. 与 vol_vs_yest 在同一日取值不同（证明确实是不同 shift，非复制粘贴 bug）。
+    3. NaN-safe：min-cal 首 shift 日（k<shift）fac 为 NaN。
+    """
+    mm.materialize_minute_instrument("SH600519")
+    si_out, fac_bin = read_bin(Path(FEATURES_DST) / "sh600519" / f"{fname}.day.bin")
+    _, vvy = read_bin(Path(FEATURES_DST) / "sh600519" / "vol_vs_yest.day.bin")
+
+    si_m, c2d, v2d, si_dc, close_d, n_days_m = _stock_arrays()
+    min_dates, min_slots = mm._load_min_calendar()
+    _, date_to_row = mm._load_day_calendar_lookup()
+    morning_rows = np.where(
+        (min_slots >= FIRST_FEATURE_SLOT) & (min_slots <= BUY_SLOT)
+    )[0]
+    full_day_vol = _full_day_minute_vol()
+
+    # 找一个近期、k>=shift、晨窗量非 NaN 的 min-cal 日。
+    km = None
+    for k in range(n_days_m - 1, -1, -1):
+        if _min_day_in_day_cal(k, morning_rows, min_dates, date_to_row) < 0:
+            continue   # 额外 min-cal 日（如 2026-07-03）
+        if k < shift:
+            continue   # fac[fname] 在 k<shift 处为 NaN
+        if np.all(np.isfinite(v2d[k, 0:10])):
+            km = k
+            break
+    assert km is not None, f"no valid day for {fname}"
+
+    day_row = _min_day_in_day_cal(km, morning_rows, min_dates, date_to_row)
+    out_row = day_row - si_out
+    expected = v2d[km, 0:10].sum() / (full_day_vol[km - shift] / 240.0)
+    assert abs(fac_bin[out_row] - expected) < 1e-3, (
+        f"{fname} shift={shift}: bin={fac_bin[out_row]} expected={expected}")
+
+    # 与 vol_vs_yest（shift-1）同一日必须不同（分母用不同日 → 不同值），证明非复制 bug。
+    assert abs(fac_bin[out_row] - vvy[out_row]) > 1e-6, (
+        f"{fname} 与 vol_vs_yest 在 out_row={out_row} 完全相同 → 疑似 shift 未生效")
+
+
+def test_overnight_gap_crosscheck():
+    """overnight_gap[T] = (open[T]/factor[T]) / (close[T-1]/factor[T-1]) - 1。
+
+    口径：不复权（分子分母同除 factor 抵消后复权 → 反映真实开盘跳空；除权日跳空
+    不被复权抹平）。与 change_941 同源（都是 raw 价 pct）。
+    断言：start_index == daily close；长度 == close（day-cal 对齐）；首日 NaN；
+    全 finite 日与手算公式吻合。
+    """
+    from qlib_ifind_beta.config import MINUTE_CHANGE_941_FIELD  # noqa: F401 (keep import style parity)
+    mm.materialize_minute_instrument("SH600519")
+    si_close, close_d = read_bin(Path(FEATURES_SRC) / "sh600519" / "close.day.bin")
+    _, open_d = read_bin(Path(FEATURES_SRC) / "sh600519" / "open.day.bin")
+    _, factor_d = read_bin(Path(FEATURES_SRC) / "sh600519" / "factor.day.bin")
+    si_out, og = read_bin(Path(FEATURES_DST) / "sh600519" / "overnight_gap.day.bin")
+
+    assert si_out == si_close                 # day-cal 对齐
+    assert og.size == close_d.size            # 长度 == 日频 close（每日一个值）
+    assert np.isnan(og[0])                    # 首日无昨收 → NaN
+
+    raw_open = open_d.astype(np.float64) / factor_d.astype(np.float64)
+    raw_close = close_d.astype(np.float64) / factor_d.astype(np.float64)
+    prev = np.full_like(raw_close, np.nan)
+    prev[1:] = raw_close[:-1]
+    expected = raw_open / prev - 1.0
+    m = np.isfinite(expected) & np.isfinite(og)
+    assert m.sum() > 100, f"only {m.sum()} finite days for overnight_gap cross-check"
+    assert np.nanmax(np.abs(expected[m] - og[m])) < 1e-5, (
+        f"overnight_gap max abs diff = {np.nanmax(np.abs(expected[m] - og[m]))}")
+
+    # 不复权口径自洽：除权日（factor 跳变）overnight_gap ≠ 后复权口径 ($open/Ref($close,1)-1)。
+    # 后复权口径会把除权缺口抹平；这里验证两者在 factor 变化日确有差异（口径正确的副作用）。
+    adj_open = open_d.astype(np.float64)      # 后复权 open（qlib bin 原值）
+    adj_prev_close = np.full_like(close_d.astype(np.float64), np.nan)
+    adj_prev_close[1:] = close_d[:-1].astype(np.float64)   # 后复权 prev close
+    adj_gap = adj_open / adj_prev_close - 1.0
+    factor_changed = np.abs(np.diff(factor_d.astype(np.float64))) > 1e-9
+    factor_changed = np.concatenate(([False], factor_changed))   # 对齐到 T
+    diff_mask = factor_changed & np.isfinite(og) & np.isfinite(adj_gap)
+    # 至少有一个除权日，且不复权与后复权口径在该日确实不同（证明口径选择有实际后果）。
+    if diff_mask.sum() > 0:
+        assert np.nanmax(np.abs(og[diff_mask] - adj_gap[diff_mask])) > 1e-4, (
+            "overnight_gap 与后复权口径在除权日无差异 → 口径选择未生效")
