@@ -41,6 +41,18 @@ BENCHMARK = "SH000300"
 # 已实测与 sh000300 同构（7 base bin × 6296 bytes，26 年深度；amount 8 bytes 空文件不用）。
 INDEX_FACTOR_SOURCES = ("SH000001",)
 
+# --- champion FROZEN 推理口径（2026-07-09 实战对接 P1）-------------------------
+# champion = enhanced(18)@topk10/nd8, commit 24b18dd, recorder caf649ca（params.pkl = LGBModel）。
+# P1 inference 复刻此 fit 段（FROZEN），仅 end_time 扩到 T。spike 2026-07-09 验证零偏离
+#（predict_day("2026-07-02") vs champion pred.pkl 同日 max|diff|=0、top10 10/10 完全一致）。
+CHAMPION_RECORDER_ID = "caf649ca6aa44aac8dec8c4e5a252aef"
+CHAMPION_EXPERIMENT = "minute_enhanced_tk10_nd8"
+CHAMPION_DATA_START = "2024-01-01"        # handler start_time（含 train 段供 learned processor fit）
+CHAMPION_FIT_START = "2024-01-01"         # FROZEN = champion train 段
+CHAMPION_FIT_END = "2025-12-31"           # FROZEN = champion train 段
+CHAMPION_LABEL_EXPR = "Ref($close, -1) / $price_941 - 1"   # FROZEN label（P1 仅 fetch 结构，不读值）
+CHAMPION_TOPK = 10
+
 # --- fields ------------------------------------------------------------------
 BASE_FIELDS = ("open", "high", "low", "close", "volume", "factor", "vwap")
 DERIVED_FIELDS = ("change", "limit_up", "limit_down")
