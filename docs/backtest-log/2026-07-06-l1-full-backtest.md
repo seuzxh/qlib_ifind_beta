@@ -1700,3 +1700,77 @@ bar = (≥3 proxy \|IC_train\|>0.03) **OR** (valid AUC>0.55)
 3. **转实战对接**（§28.7 选项②）：策略两窗含成本超额 +40~159% arith 已盈利，可进纸面/实盘跟踪，边跑边观察 OOS 稳健性。非优化，是部署。
 
 **落档**：§35 诊断完成，champion 不变。bagging 因实测无效**不推进**（区别于 §34 的"证伪后 STOP"——此处是"测量后证伪方向"）。directive #2/#3 方向经复读 §23/§28/§29/§30/§31 原文确认五度证伪、**规则 #7 关闭**。诊断脚本（diag_cost/diag_factors/boundary churn）保留 `/tmp`（惯例不入 repo，会随系统清理）。FROZEN label/strategy 全程未动。**测量版结论：冻结设定下三层杠杆（因子/模型/策略）已穷尽，超额天花板结构性不可破；唯一能动的是解冻（sticky holdings 重设计 label 节奏）或转向（扩段稳健性 / 实战对接）。待用户裁定。**
+
+---
+
+## §36 champion 实战对接 P1 — 纸面前向跟踪系统实现（2026-07-09）
+
+> 触发：用户裁定 §35.5 剩余杠杆③「转实战对接」（§28.7 选项②）—— champion 两窗含成本超额 +40~159% arith 已盈利，从回测验证推进到每日产出可执行交易信号 + 前向纸面跟踪。授权："完成方案设计和实施，有需要决策的整理清单"。
+> 范围：**P1 纸面前向**（零外部依赖，消费既有 day.bin），非 P2 实时/P3 实盘。spec [2026-07-09-live-forward-design.md](../superpowers/specs/2026-07-09-live-forward-design.md) + plan [2026-07-09-live-forward.md](../superpowers/plans/2026-07-09-live-forward.md)。
+> FROZEN 全程未动：label `Ref($close,-1)/$price_941-1` / deal_price `$price_941` / topk10/nd8 / model params.pkl（commit `24b18dd`）。
+
+### 36.1 推理口径零偏离铁证（P1 正确性根基）
+
+复刻 champion handler（fit 段 2024-01-01→2025-12-31 FROZEN，仅 end_time→T）→ load 冻结 model（params.pkl = LGBModel 实例，num_trees=10）→ DatasetH(segments={"inference":(T,T)}) → model.predict。
+
+spike 验证 predict_day("2026-07-02") vs champion pred.pkl（test 末日）：
+- matched 98/98，**max|diff| = 0.000e+00**（bit-exact，非数值近似）
+- top10 10/10 集合一致
+
+→ P1 推理 = champion 回测 test 段逐位复刻，无口径漂移。`test_predict_day_zero_drift` 锚定此口径不退化（max|diff|<1e-6）。
+
+qlib fit 语义确认：processor 在 train segment fit（RobustZScoreNorm/Fillna/DropnaLabel），inference 段仅 transform → T 日因子变换口径 = test 段口径（零漂移的机制根因）。
+
+### 36.2 六模块实现（commit 9a81818→2bfbba0）
+
+| 文件 | 职责 | qlib 分层 |
+|---|---|---|
+| [config.py](../../qlib_ifind_beta/config.py) L48-54 | champion FROZEN 常量（recorder_id/experiment/fit 段/label/topk） | — |
+| [live/inference.py](../../qlib_ifind_beta/live/inference.py) | predict_day() 推理核心（load model → 复刻 handler → predict → top10 + aux） | Workflow/Model + Interface/Recorder |
+| [live/track.py](../../qlib_ifind_beta/live/track.py) | record_signal/settle_prev/compute_nav/daily_ic（纯 pandas 状态机） | Interface/Recorder（纸面简化） |
+| [live/materialize_live.py](../../qlib_ifind_beta/live/materialize_live.py) | load_pool(T-1 membership)/materialize_pool（薄封装 overlay+materialize） | Infrastructure/DataProvider |
+| [scripts/live_forward.py](../../scripts/live_forward.py) | 五步编排入口（universe→materialize→predict→settle→nav） | Interface/Workflow |
+| [tests/test_live_inference.py](../../tests/test_live_inference.py) | 8 测试（零偏离/NAV/涨停/前视/跌停/幂等/IC） | — |
+
+偏离点（spec §5 已声明，均为 qlib 原生 API 合法组合，非自定义抽象层）：
+- 推理入口组装（load_object + DatasetH + predict）—— qlib 原生调用链
+- 纸面撮合简化（change_941>=limit_up 剔除 + close[T+1] 卖，与 exchange 同源判定）
+
+### 36.3 settle 口径双修正（实现中发现，非 spec 字面）
+
+dry-run 暴露两个真实口径偏差，按第一性原理修正：
+
+**修正1 — close_lookup 覆盖（universe 时变 vs 持仓掉出池）**：
+- 现象：settle_prev(07-01→07-02) 98 笔但 sell_price 仅 8 笔非空 → NAV 只反映 8 只。
+- 根因：`D.instruments(market)` 返回 dict，`D.features(dict, start=T, end=T)` 按 date 过滤成**当日池（~100）**；883926 每日换手 ~90%（§35.3 实测 89%），T-1 持仓 ~90% 在 T 日掉出观察池 → close_lookup 仅含当日池 → overlap 8/98。
+- 修正：close/change/limit_down lookup 按 **prev_candidates code 列表**查（`D.features(list, ...)` 不受 universe 池过滤，直接取 bin）。close 是 base bin 全票都有 → 完整覆盖；change/limit_down 是 overlay 物化 bin，掉出池票缺失 → blocked 判断 None→False（P1 可接受简化，跌停拦截降级）。
+- 验证：close_lookup 0→98 全覆盖，sell_price 8→10（topk）非空。
+
+**修正2 — NAV=top10 对齐 spec §3.2 [5]**：
+- 现象：原 record/settle **全部 candidates（98）**，NAV 等权 98 只，偏离 spec「equal-weight top10」。
+- 修正：record_signal 加 `in_topk` 标记（topk = 剔除封涨停后前 10），settle_prev 只结算 in_topk=True。保留全部 candidates 供 IC 复算（IC 需全部 score，非仅 topk）。
+- 验证：settle 98→10 行，n_held=10。
+
+**dry-run 终态**（2026-07-01→07-02，--skip-universe --skip-materialize）：
+- Day1 07-01: predict topk10，settle 0（首日无 T-1），NAV 空。
+- Day2 07-02: predict topk10，settle 10 笔（07-01→07-02），NAV net_nav=1.0101 / gross_nav=1.0121 / n_held=10。
+- 8/8 测试 PASSED。
+
+### 36.4 P1→P2→P3 路线 + 待决策清单（governance #1/#2，明早裁定）
+
+| 阶段 | 状态 | 外部依赖 | 价值 |
+|---|---|---|---|
+| **P1 纸面前向** | ✅ 完成（本节） | 零（消费既有 day.bin） | 验证 OOS 稳健性 + 回测假设；每日 top10 信号可执行 |
+| P2 实时跟踪 | 待定 | 实时分钟数据源（9:41 前 T 日 9:30-9:40 分钟） | 盘前产出信号（现 P1 是盘后） |
+| P3 实盘 | 待定 | 交易通道（券商 API） | 真实委托（替换纸面撮合） |
+
+**待用户决策清单（6 项）**：
+
+1. **P2 实时分钟数据源**：P1 复用既有 day.bin（盘后），P2 需 9:41 前获 T 日 9:30-9:40 实时分钟。候选：iFinD 实时行情 / 券商 Level-1 推送 / 自建分钟采集。需选型 + 鉴权。
+2. **P3 交易通道**：实盘委托通道选型（券商 API / 桥接）。涉及资金，需用户主导。
+3. **模型重训节奏**：champion params.pkl FROZEN（2024-2025 训）。前向跟踪是否定期重训（周/月）？重训 = 新 recorder_id，需更新 config 常量 + 重跑零偏离验证。
+4. **universe 增量入 P1 cron + iFinD token 2026-08-01 到期**：P1 live_forward [1] universe 增量（iFinD p03473 T-1 快照）需网络 + token；token refresh_token 2026-08-01 到期，届时 universe 刷新失败（P1 有 fallback 用既有池继续，但池会逐渐过期）。需决策 cron 化 + token 续期。
+5. **清理证伪族产物 + config 死常量（牵连活代码，需谨慎评估）**：§25 tail/§26 opening_t1/§29 index_opening 证伪族的 config 常量（INDEX_FACTOR_SOURCES/MINUTE_FACTOR_TAIL_FIELDS/MINUTE_FACTOR_OPENING_T1_FIELDS/INDEX_OPENING_*）+ daily-index-factors 已提交产物（7 文件）待清理。**⚠️ 但这些常量被 [materialize_minute.py](../../qlib_ifind_beta/materialize_minute.py)（champion 物化链路活代码）+ [build_overlay.py](../../scripts/build_overlay.py) 引用** → 删常量须同步改物化逻辑，风险触及 champion 18 因子物化 → 可能不该动（证伪族 bin 占磁盘无害，dead config 无害，清理风险>收益）。需用户裁定。
+6. **sticky holdings 探索（§35.5 杠杆①）**：唯一能动结构性换手（89% universe 轮换）的策略层杠杆，但需解冻 FROZEN label horizon（~1.5d → 多日持有超预测视野，需重设计 label/hold 节奏）。属大改，需用户明确授权。
+
+**落档**：§36 P1 实战对接完成。champion 从回测验证 → 每日可执行信号 + 纸面前向跟踪。FROZEN 全程未动。P1 零外部依赖，可立即每日盘后跑（`scripts/live_forward.py --date T`）。P2/P3 待用户裁定外部依赖选型。6 项决策清单明早整理。
