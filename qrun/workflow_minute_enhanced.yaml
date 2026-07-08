@@ -1,7 +1,12 @@
-# 883926 高贝塔 · 分钟因子增强 iteration-9（2026-07-07）
+# 883926 高贝塔 · 分钟因子增强 iteration-9（2026-07-07）★ champion
 # 运行：conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced.yaml
 #
-# 目的：iteration-7 发现 n_drop=15 是策略甜点（m14 +28%→+116%）。本轮在 n_drop=15 下验证
+# §33（2026-07-08）策略层 sweep：topk/n_drop 20/15 → 10/8 双窗双赢
+#   W1 +158.9%→+191.1%(+32.2pp) / W2 +63.2%→+75.9%(+12.8pp) / W1 回撤 −5.59%(在 −10% gate 内)
+#   机制：topk=10 集中头部 alpha（rank1-10 ≫ rank11-20）+ n_drop=8 高换手保鲜信号。
+#   因子集(18)/label/deal_price/涨跌停拦截/模型超参/切分 全 FROZEN —— 唯一变量 topk/n_drop。
+#
+# 迭代史：iteration-7 发现 n_drop=15 是策略甜点（m14 +28%→+116%）；iteration-9 在其下验证
 # 因子维度杠杆：14 分钟全集 + 4 extra（vol_vs_yest_t2/t3/t5 + overnight_gap）= 18 因子。
 # 4 extra 均与 ~1.5 天 label 同周期（分钟族 + 跳空），不会重蹈 full(85) 日频稀释覆辙（§19.1）。
 # label / deal_price / 涨跌停拦截 / 模型超参 / 切分全部与 workflow_minute_only.yaml 一致
@@ -32,8 +37,8 @@ port_analysis_config: &port_analysis_config
         module_path: qlib_ifind_beta.td0_strategy
         kwargs:
             signal: <PRED>
-            topk: 20
-            n_drop: 15        # iteration-7 甜点（5→15：+28%→+116%）
+            topk: 10
+            n_drop: 8         # §33 sweep 双窗双赢（20/15→10/8：头部集中 + 信号保鲜）
             hold_thresh: 1
             forbid_all_trade_at_limit: true
     backtest:

@@ -1,10 +1,10 @@
 # qlib_ifind_beta
 
 > 基于 [qlib](https://github.com/microsoft/qlib) 的 A 股因子挖掘 MVP。
-> 标的：**883926（同花顺高贝塔值指数）成分股**；形态：日频 baseline（`Alpha158`，IC≈0）→ **champion = enhanced(18)@n_drop=15**（14 个 T 日 9:30-9:40 分钟因子 + 4 extra，9:41 成交），全链路（因子 → 模型 → 回测 → 报告）。详见 [backtest-log §22](docs/backtest-log/2026-07-06-l1-full-backtest.md)。
+> 标的：**883926（同花顺高贝塔值指数）成分股**；形态：日频 baseline（`Alpha158`，IC≈0）→ **champion = enhanced(18)@topk10/nd8**（14 个 T 日 9:30-9:40 分钟因子 + 4 extra，9:41 成交），全链路（因子 → 模型 → 回测 → 报告）。详见 [backtest-log §22/§33](docs/backtest-log/2026-07-06-l1-full-backtest.md)。
 > 数据：**只读消费** [`/home/zxh/qlib_data`](../../qlib_data)（7 字段 × 26 年，日频）+ [`/home/zxh/cn_data_1min`](../../cn_data_1min)（1min，分钟因子源），不生产行情数据。
 
-**状态**：MVP 已端到端跑通 → 已演进到 **champion = enhanced(18)@n_drop=15**（test 2026-04→07 +158.86% w/cost / IC 0.0545 / ICIR 5.12 / drawdown −5.44%，详见 backtest-log §22）；本地 git 初始化（`feat/minute-factors` 分支，未接远端）。
+**状态**：MVP 已端到端跑通 → 已演进到 **champion = enhanced(18)@topk10/nd8**（test 2026-04→07 +191.1% w/cost / IC 0.0545 / ICIR 5.41 / drawdown −5.59%，§33 sweep 双窗双赢晋升自 @n_drop=15，详见 backtest-log §22/§33）；本地 git 初始化（`feat/minute-factors` 分支，未接远端）。
 
 ---
 
@@ -28,7 +28,7 @@ conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow.yaml
 
 # 4. 【champion 复现】物化分钟因子（14 baseline + 4 extra + price_941/change_941）→ 跑 enhanced
 conda run -n qlib_ifind_beta python scripts/materialize_minute.py
-conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced.yaml   # n_drop=15
+conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced.yaml   # topk=10/n_drop=8（§33）
 ```
 
 ---
@@ -77,7 +77,7 @@ conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced.ya
 ├── scripts/make_report.py         # 回测报告汇总
 ├── qrun/                          # 全链路入口
 │   ├── workflow.yaml              #   MVP（Alpha158）
-│   ├── workflow_minute_enhanced.yaml   # ★ champion（enhanced(18)@n_drop=15）
+│   ├── workflow_minute_enhanced.yaml   # ★ champion（enhanced(18)@topk10/nd8）
 │   ├── workflow_smoke.yaml        #   烟雾测试
 │   └── run.py                     #   qrun 等价入口（绕本机坑）
 ├── docs/                          # 架构 / 技术方案 / backtest-log

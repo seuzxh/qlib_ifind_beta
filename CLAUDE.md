@@ -113,11 +113,11 @@ conda run -n qlib_ifind_beta python -c "import qlib; print(qlib.__version__)"
 - **Universe**：`highbeta883926` 时变成分股池（iFinD p03473 每日快照，T-1 lag 无前视：T 日观察池 = 883926 的 T-1 在册集；详见 [universe.py](qlib_ifind_beta/universe.py) + technical-design §3）
 - **Benchmark**：`SH000300`（883926.TI 因 iFinD `history_data` 序列不连贯暂搁置，见 technical-design §2 D5）
 - **切分**：train 2024-01-01→2025-12-31 / valid 2026-01-01→2026-03-31 / test 2026-04-01→2026-07-02（仅用 2024-2026 \~2.5 年，不用 26 年全段）
-- **频率**：日频 baseline（Alpha158）+ T 日 9:30-9:40 分钟因子（物化为 day.bin、Handler 层不混频）；champion = enhanced(18)@n_drop=15
+- **频率**：日频 baseline（Alpha158）+ T 日 9:30-9:40 分钟因子（物化为 day.bin、Handler 层不混频）；champion = enhanced(18)@topk10/nd8（§33 策略层 sweep 双窗双赢晋升自 20/15，含成本超额 +191%）
 
 ## 待定
 
-- ~~自定义因子起步集最终清单~~ → ✅ 已完成（champion = enhanced(18)@n_drop=15，详见 technical-design §D6 + backtest-log §22）
+- ~~自定义因子起步集最终清单~~ → ✅ 已完成（champion = enhanced(18)@topk10/nd8，详见 technical-design §D6 + backtest-log §22/§33）
 - 扩段评估（用 26 年全数据）/ 追加新分钟因子族 —— 待用户决策（champion 已达成「一套有效 min 因子组合」目标）
 
 

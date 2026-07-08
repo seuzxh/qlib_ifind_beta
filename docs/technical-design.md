@@ -16,7 +16,7 @@
 | 外部行情源 | **iFinD `quantapi`**（仅取成分股 p03473） | 883926 成分股 qlib_data 无；iFinD token 复用 qlib_data 既有刷新链路，零额外凭证。 |
 | 环境 | **conda env `qlib_ifind_beta`**（Python 3.12.13） | CLAUDE.md 硬约束；从 `qlib` env clone，保证 pyqlib 版本一致。 |
 | 标的范围 | **883926 成分股 + SH000300 benchmark** | 用户指定标的；benchmark 选择见 §2 D5。 |
-| 频率 | **日频 + T 日 9:30-9:40 分钟因子** | v1 日频 baseline（Alpha158，IC≈0，§D6 基线段）；2026-07-06 起 T 日 9:30-9:40 1min 滑窗因子物化为 day.bin、Handler 层不混频（§D6 m14/enhanced 段）；champion = enhanced(18)@n_drop=15（backtest-log §22）。 |
+| 频率 | **日频 + T 日 9:30-9:40 分钟因子** | v1 日频 baseline（Alpha158，IC≈0，§D6 基线段）；2026-07-06 起 T 日 9:30-9:40 1min 滑窗因子物化为 day.bin、Handler 层不混频（§D6 m14/enhanced 段）；champion = enhanced(18)@topk10/nd8（策略层 §33 sweep 双窗双赢晋升自 @n_drop=15；backtest-log §22/§33）。 |
 
 ---
 
@@ -65,7 +65,7 @@
 
 **理由**：daily 模式下 `hold_thresh` 单位是天，`hold_thresh=1` 表示持仓至少 1 天才能卖，即 A 股 T+1 的原生实现；无需自定义 Strategy。`forbid_all_trade_at_limit` 依赖 D3 的 `$change + 板块阈值` 实现封板禁交易。
 
-**参数**：`topk=20`（883926 约 100 只成分股，取 20）；`n_drop=5`（⚠️ 换手偏高，跑完按 PortAnaRecord 换手率再调，可降到 2-3）。
+**参数**：`topk=10` / `n_drop=8`（§33 策略层联合 sweep 双窗双赢：头部 rank1-10 alpha 集中 + 高换手保鲜信号；backtest-log §33。演进：MVP `topk=20/n_drop=5` 换手偏高 → iteration-7 发现 `n_drop=15` 策略甜点 → §33 topk/n_drop 联合 sweep 晋升 `10/8`，含成本超额 +159%→+191%、W1 回撤 −5.44%→−5.59%、IR 5.12→5.41）。
 
 ### D5 · Benchmark 从 SH883926 切到 SH000300
 **决策**：`BENCHMARK = "SH000300"`，复用 qlib_data 干净 bin（`link_stock + materialize`），不再 dump 883926.TI。
@@ -88,7 +88,7 @@
 
 ⚠️ **m14 反转校正（2026-07-07，[MinuteOnlyHandler](../qlib_ifind_beta/minute_only_handler.py)）**：上段「因子层无用、瓶颈在 label SNR、不在因子层打转」的论断被**部分推翻**。实验：仅保留 14 个 9:30-9:40 分钟因子（丢全部 71 日频，HighBetaAlpha158 子类仅 override `get_feature_config`），其余（label / deal_price / 涨跌停 / 超参 / 切分）全同主线 → 唯一变量 feature 85→14。结果（同 test 窗口 2026-04-01~07-01，benchmark SH000300 +44.11%）：best iter 3→4→**14**（`early_stopping_rounds=20`，前 13 轮 valid 持续改善）、IC −0.013→+0.022→**+0.034**、Rank ICIR —→0.20→**0.296**、含成本 alpha +20%→−7%→**+28.4%**、IR 0.76→−0.31→**1.25**、maxDD −14%→−10%→**−7.2%**，全维度优于 v2(172)/v3(85)。**判据（区分真信号 vs 噪声）**：m14 是 IC↑+回测↑+best iter↑ 的**同向耦合**（真信号）；v2 是 IC↑+回测↓+valid l2 平坦的**解耦**（near-degenerate 噪声，+20% 是幸运命中）。**根因（第一性原理）**：label = `Ref($close,-1)/$price_941-1` 衡量 ~1.5 天短期收益（T 日 9:41 买入 → T+1 收盘卖出）；分钟因子（启动动量 / 加速度 / 尾盘位置 / 量比）与该尺度**天然对齐** → 同周期信号；Alpha158 日频因子（5/10 日均线 / 动量 / 波动率）预测周-月中期收益，与 ~1.5 天 label **尺度错配** → 噪声。驱动 best iter 的是**因子-label 时间尺度对齐度**，不是因子数（v3 85 比 v2 172 少半，best iter 仅 3→4 可证）。**修正后方向**：因子层仍有杠杆，方向是「时间尺度对齐（砍错配日频因子）」；label 设计（更长 horizon / rank label）退居次要。**caveat**：① valid l2 仍 0.989 ≈ 标签方差（CSZScoreNorm 后基线 MSE≈1.0），绝对预测力未提升，仅排序方向变好；② test 仅 3 个月 + 大牛市，+28% 需熊市 / 震荡验证；③ 14 因子是 9:41 策略原生尺度，不可外推到中长期。**未切主线**（证据偏弱），`MinuteOnlyHandler` + `workflow_minute_only.yaml` 保留为实验分支。详见 [backtest-log §15](backtest-log/2026-07-06-l1-full-backtest.md)。
 
-⚠️ **enhanced(18) champion（2026-07-07，[MinuteEnhancedHandler](../qlib_ifind_beta/minute_enhanced_handler.py)）**：m14 段「未切主线（证据偏弱）」的 caveat 被**推翻并固化**。两次迭代后定论：(1) iteration-7 发现 `n_drop` 是策略甜点（m14 超额 +28%→+116%，ICIR→3.71）；(2) iteration-9 在该甜点上加 4 extra 因子（`vol_vs_yest_t2/t3/t5` 多日量比 + `overnight_gap` 隔夜跳空，均与 ~1.5 天 label 同周期，不重蹈 full(85) 日频稀释覆辙）= 18 因子 = enhanced → **IC 0.034→0.0545（+60%）/ 组合 ICIR 3.71→5.12 / 含成本超额 +159% / 回撤 −5.44% / 胜率 70.5%**（test 段，全维度碾压 m14@nd15）；(3) iteration-10/11 valid 段独立 OOS tie-break 证明高 n_drop（19/20）是 test 段过拟合，**n_drop=15 经 OOS 验证为稳健甜点**（valid 含成本 +17.02% > nd19/20 +11.7%，成本敏感度最低）。**champion 定论**：enhanced(18)@n_drop=15。因子层杠杆方向（m14 段修正后）至此闭合：9:30-9:40 分钟因子 + 隔夜跳空与 ~1.5 天 label 尺度对齐 = 真信号。详见 [backtest-log §22](backtest-log/2026-07-06-l1-full-backtest.md)。
+⚠️ **enhanced(18) champion（2026-07-07，[MinuteEnhancedHandler](../qlib_ifind_beta/minute_enhanced_handler.py)）**：m14 段「未切主线（证据偏弱）」的 caveat 被**推翻并固化**。两次迭代后定论：(1) iteration-7 发现 `n_drop` 是策略甜点（m14 超额 +28%→+116%，ICIR→3.71）；(2) iteration-9 在该甜点上加 4 extra 因子（`vol_vs_yest_t2/t3/t5` 多日量比 + `overnight_gap` 隔夜跳空，均与 ~1.5 天 label 同周期，不重蹈 full(85) 日频稀释覆辙）= 18 因子 = enhanced → **IC 0.034→0.0545（+60%）/ 组合 ICIR 3.71→5.12 / 含成本超额 +159% / 回撤 −5.44% / 胜率 70.5%**（test 段，全维度碾压 m14@nd15）；(3) iteration-10/11 valid 段独立 OOS tie-break 证明高 n_drop（19/20）是 test 段过拟合，**n_drop=15 经 OOS 验证为稳健甜点**（valid 含成本 +17.02% > nd19/20 +11.7%，成本敏感度最低）。**champion 定论**：enhanced(18)@n_drop=15。因子层杠杆方向（m14 段修正后）至此闭合：9:30-9:40 分钟因子 + 隔夜跳空与 ~1.5 天 label 尺度对齐 = 真信号。**§33（2026-07-08）策略层联合 sweep**：topk/n_drop `20/15 → 10/8` 双窗双赢（W1 含成本超额 +159%→+191%、W2 +63%→+76%；woc 同涨 = 真 alpha 集中头部 rank1-10，非成本把戏；IC 0.0545 不变 / IR 5.12→5.41）→ **champion 晋升 enhanced(18)@topk10/nd8**。详见 [backtest-log §22/§33](backtest-log/2026-07-06-l1-full-backtest.md)。
 
 ---
 
@@ -175,9 +175,9 @@
 |---|---|---|---|
 | ~~C1~~ | ~~幸存者偏差~~ → **已于 2026-07-05 解决** | — | ✅ p03473 历史 `iv_date` 实测通过 + [universe.py](../qlib_ifind_beta/universe.py) 时变 T-1 lag instruments 已落地（每日快照→连续段→+1 交易日 shift），静态池 hindsight 已消除。注：883926 是每日重平衡高贝塔榜（每日 ~80-90% 换手），时变池每日约 100 只、池子每日换血 |
 | C2 | **ST/*ST 涨跌停未区分**（±5%） | ST 股按各自板块 ±10/20/30% 处理 | 接入 iFinD ST 状态 → `limit_up/down` 升级为按日 bin |
-| ~~C3~~ | ~~Alpha158 baseline IC≈0~~ → **已被超越（2026-07-07）** | — | ✅ m14（14 分钟因子）IC 0→+0.034，enhanced(18)@n_drop=15 IC +0.0545 / 组合 ICIR 5.12 / 含成本超额 +159%（backtest-log §22）。baseline IC≈0 根因（日频因子与 ~1.5 天 label 尺度错配）见 §D6 m14 段。 |
+| ~~C3~~ | ~~Alpha158 baseline IC≈0~~ → **已被超越（2026-07-07）** | — | ✅ m14（14 分钟因子）IC 0→+0.034，enhanced(18)@n_drop=15 IC +0.0545 / 组合 ICIR 5.12 / 含成本超额 +159%（backtest-log §22）。→ **§33（2026-07-08）策略层 sweep 晋升 @topk10/nd8：IC 0.0545 不变（模型层，与 topk/n_drop 无关）/ IR 5.41 / 含成本超额 +191%（backtest-log §33）**。baseline IC≈0 根因（日频因子与 ~1.5 天 label 尺度错配）见 §D6 m14 段。 |
 | C4 | **`dump_index.py` 当前 dead code** | benchmark 走 SH000300 后未被引用 | 883926.TI 数据问题解决后可复活 |
-| ~~C5~~ | ~~`n_drop=5` 换手偏高~~ → **已调参（2026-07-07）** | — | ✅ champion 用 n_drop=15（iteration-7 发现的策略甜点：跟踪效率 × 换手成本最优平衡，5→10→15 超额翻 4 倍、15→20 valid OOS 反转回落，见 backtest-log §20/§22）。 |
+| ~~C5~~ | ~~`n_drop=5` 换手偏高~~ → **已调参（2026-07-07）** | — | ✅ champion 用 n_drop=15（iteration-7 发现的策略甜点：跟踪效率 × 换手成本最优平衡，5→10→15 超额翻 4 倍、15→20 valid OOS 反转回落，见 backtest-log §20/§22）→ **§33（2026-07-08）topk/n_drop 联合 sweep 晋升 topk=10/n_drop=8 双窗双赢（W1 +159%→+191%、W2 +63%→+76%，backtest-log §33）**。 |
 | ~~C6~~ | ~~git 未初始化~~ → **已初始化（2026-07-05）** | — | ✅ 本地 git 已 init（分支 `feat/minute-factors`，未接远端）。 |
 
 ---
@@ -226,7 +226,7 @@
 | ~~自定义因子起步集~~ | ✅ **已完成（2026-07-06）** | [HighBetaAlpha158](../qlib_ifind_beta/highbeta_handler.py)：子类 Alpha158，v2 全字段 lag T-1 + v3 rolling [5,10]（71 日频）+ 14 分钟因子 = 85；后续 [MinuteEnhancedHandler](../qlib_ifind_beta/minute_enhanced_handler.py) 精简到 18（champion）。围绕 7 字段 + 1min，剔除 `$turn/$amount`。 |
 | **883926 benchmark 复活** | `883926.TI` 数据口径问题解决 | 启用 [dump_index.py](../qlib_ifind_beta/dump_index.py)，`BENCHMARK` 改回 `SH883926` |
 | ~~分钟频因子~~ | ✅ **已完成（2026-07-06）** | [materialize_minute.py](../qlib_ifind_beta/materialize_minute.py)：T 日 9:30-9:40 1min 滑窗因子物化为 day.bin（消费 `/home/zxh/cn_data_1min`，**不新增 provider_uri、Handler 层不混频**）；14 因子 + 4 extra + price_941 + change_941 = 20 bin/股。详见 [minute-factors spec](superpowers/specs/2026-07-06-minute-factors-design.md)。 |
-| ~~换手率调参~~ | ✅ **已完成（2026-07-07）** | champion n_drop=15（iteration-7 甜点 + valid 段 OOS 验证，backtest-log §22）；原 n_drop=5 换手偏高问题随甜点上移解决。 |
+| ~~换手率调参~~ | ✅ **已完成（2026-07-07）** | champion n_drop=15（iteration-7 甜点 + valid 段 OOS 验证，backtest-log §22）→ **§33 topk/n_drop 联合 sweep 晋升 topk=10/n_drop=8 双窗双赢（backtest-log §33）**；原 n_drop=5 换手偏高问题随参数上移解决。 |
 | **L1 精化版（只 drop $price_941 NaN）** | 若误杀 4.392% 在策略上不可接受 | 自定义 Processor 或把 `$price_941` 加进 drop 检查；当前方案 A（整组 drop）保留为默认，见 §3.5 |
 | **git 初始化** | 用户指定时机 | 整库 `git init`（确认 `.gitignore` 已盖 `data/`、`mlruns/`、`.claude/settings.local.json`） |
 | **末日历越界彻底修复** | 需找回 2026-07-02 回测日 | 扩展 `calendars/day.txt` 加未来缓冲日（侵入 qlib_data 口径，需评估） |

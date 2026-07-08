@@ -1,7 +1,7 @@
 # 架构文档 · qlib_ifind_beta
 
 > 标的：**883926（同花顺高贝塔值指数）成分股**增强策略。
-> 形态：日频 baseline（`Alpha158`）→ **champion = enhanced(18)@n_drop=15**（14 个 T 日 9:30-9:40 分钟因子 + 4 extra，T 日 9:41 成交）。详见 [backtest-log §22](backtest-log/2026-07-06-l1-full-backtest.md)。
+> 形态：日频 baseline（`Alpha158`）→ **champion = enhanced(18)@topk10/nd8**（14 个 T 日 9:30-9:40 分钟因子 + 4 extra，T 日 9:41 成交）。详见 [backtest-log §22/§33](backtest-log/2026-07-06-l1-full-backtest.md)。
 > 本文档描述**当前已实现的 as-is 架构**（基于实际代码，非设计稿）。技术选型与决策依据见 [technical-design.md](technical-design.md)。
 > ⚠️ 本文部分段落仍为 MVP 期（日频 Alpha158 / 零子类化）as-is 快照；带 ⚡ 的为 2026-07-06 起分钟因子 + 子类化演进后现状。演进脉络见 technical-design §D1/§D6。
 
@@ -15,7 +15,7 @@
 - **自研代码**：在只读 qlib_data 之上**叠加 overlay**（symlink 7 base bin + 自有衍生 bin + 分钟因子 bin，每股 30 bins），满足 qlib `Exchange` 涨跌停拦截 + 分钟因子 + 9:41 成交价需求。
 - **因子/策略**：⚡ 因子层子类化（`Alpha158 → HighBetaAlpha158 → MinuteEnhancedHandler`）、策略层子类化（`TopkDropoutStrategy → TopkDropoutStrategyTD0`）；模型/执行/记录仍 `qlib.contrib` 原生，Exchange 用原生 `LT_TP_EXP` 不子类化。
 
-> 项目状态：MVP 跑通 → 已演进到 **champion = enhanced(18)@n_drop=15**（test 2026-04→07 +158.86% w/cost / IC 0.0545 / ICIR 5.12，详见 backtest-log §22）；本地 git（`feat/minute-factors` 分支，未接远端）。演进脉络 + 已知妥协见 technical-design §D1/§D6 + §5/§8。
+> 项目状态：MVP 跑通 → 已演进到 **champion = enhanced(18)@topk10/nd8**（test 2026-04→07 +191.1% w/cost / IC 0.0545 / ICIR 5.41；§33 sweep 双窗双赢晋升自 @n_drop=15，详见 backtest-log §22/§33）；本地 git（`feat/minute-factors` 分支，未接远端）。演进脉络 + 已知妥协见 technical-design §D1/§D6 + §5/§8。
 
 ---
 
@@ -88,7 +88,7 @@
 │   └── make_report.py           # 116 行 · 回测报告汇总
 ├── qrun/
 │   ├── workflow.yaml            # 101 行 · MVP 全量配置（Alpha158）
-│   ├── workflow_minute_enhanced.yaml # 88 行 · ★ champion（enhanced(18)@n_drop=15）
+│   ├── workflow_minute_enhanced.yaml # 88 行 · ★ champion（enhanced(18)@topk10/nd8）
 │   ├── workflow_minute_only.yaml #  86 行 · m14 实验配置
 │   ├── workflow_smoke.yaml      #  86 行 · 烟雾测试（2025 子窗口）
 │   └── run.py                   #  84 行 · qrun 等价入口（绕两个本机坑）
@@ -206,7 +206,7 @@ T 日 9:30-9:40 分钟因子的纯计算（无 IO），由 materialize_minute �
 继承 HighBetaAlpha158（复用 L1 护栏），override `get_feature_config` 丢弃 71 日频、只返回 14 分钟因子。验证「纯短周期分钟因子是否够预测 9:41 label」（m14，被 enhanced 超越，详见 backtest-log）。
 
 ### 4.12 [minute_enhanced_handler.py](../qlib_ifind_beta/minute_enhanced_handler.py) — MinuteEnhancedHandler（★ champion，36 行）
-继承 HighBetaAlpha158，`ENHANCED_FIELDS = 14 baseline + 4 extra`（`vol_vs_yest_t2/t3/t5` 多日族 + `overnight_gap` 不复权开盘跳空）= **18 因子**。n_drop=15 时 test IC 0.0545 / ICIR 5.12 / +158.86%（backtest-log §22）。对应 `qrun/workflow_minute_enhanced.yaml`。
+继承 HighBetaAlpha158，`ENHANCED_FIELDS = 14 baseline + 4 extra`（`vol_vs_yest_t2/t3/t5` 多日族 + `overnight_gap` 不复权开盘跳空）= **18 因子**。§33 topk=10/n_drop=8 时 test IC 0.0545（模型层，与 topk/n_drop 无关）/ IR 5.41 / 含成本超额 +191.1%（backtest-log §22/§33）。对应 `qrun/workflow_minute_enhanced.yaml`。
 
 ### 4.13 [td0_strategy.py](../qlib_ifind_beta/td0_strategy.py) — TopkDropoutStrategyTD0（策略子类，181 行）
 qlib 原生 `TopkDropoutStrategy.generate_trade_decision` 硬编码 `shift=1`（pred=T-1 → T 日次日成交）。分钟因子是 T 日 9:40 数据、9:41 成交，需 pred[T] → T 日当日成交 → **shift=0**。实现 = 逐字复制原生方法体仅 `shift=1→0`（qlib 未暴露 shift 参数，无法配置覆盖）。`test_td0_only_diff_is_shift_zero` 守卫"仅 shift 一行差异"。
@@ -373,9 +373,9 @@ conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_smoke.yaml
 conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow.yaml
 #    产物 → mlruns/<experiment_id>/<recorder_id>/{pred.pkl, label.pkl, …}
 
-# 3. 【★ champion 复现】enhanced(18)@n_drop=15（test 2026-04→07 +158.86% w/cost / IC 0.0545 / ICIR 5.12）
+# 3. 【★ champion 复现】enhanced(18)@topk10/nd8（test 2026-04→07 +191.1% w/cost / IC 0.0545 / IR 5.41，§33）
 conda run -n qlib_ifind_beta python scripts/materialize_minute.py              # 物化分钟因子（一次性，独立于 build_overlay）
-conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced.yaml   # n_drop=15
+conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced.yaml   # topk=10/n_drop=8（§33）
 ```
 
 > 两个 qlib 本机坑由 `run.py` 兜底（`limit_threshold` list→tuple、`MLFLOW_ALLOW_FILE_STORE=true`），详见技术方案文档 §6。

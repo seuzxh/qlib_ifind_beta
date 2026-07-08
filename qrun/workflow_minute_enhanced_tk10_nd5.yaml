@@ -1,33 +1,26 @@
-# [W2 OOS] champion lambda_l1=5/l2=10 on shifted window (test 2025-04->07). 1yr back from champion test.
-# 883926 高贝塔 · 分钟因子增强 iteration-9（2026-07-07）★ champion W2
-# 运行：conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_w2.yaml
+# 883926 高贝塔 · 策略层 topk/n_drop sweep — W1（test 2026-04→07）
+# 运行：conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd5.yaml
 #
-# §33（2026-07-08）策略层 sweep：topk/n_drop 20/15 → 10/8（与 W1 champion 同步晋升）
-#   W2 +63.2%→+75.9%(+12.8pp) / 回撤 −12.87% / 换手 141%/日。
-#   因子集(18)/label/deal_price/涨跌停拦截/模型超参/切分 全 FROZEN。
-#
-# 迭代史：iteration-7 发现 n_drop=15 是策略甜点（m14 +28%→+116%）；iteration-9 在其下验证
-# 因子维度杠杆：14 分钟全集 + 4 extra（vol_vs_yest_t2/t3/t5 + overnight_gap）= 18 因子。
-# 4 extra 均与 ~1.5 天 label 同周期（分钟族 + 跳空），不会重蹈 full(85) 日频稀释覆辙（§19.1）。
-# label / deal_price / 涨跌停拦截 / 模型超参 / 切分全部与 workflow_minute_only.yaml 一致
-# → 与 m14 严格可比，唯一变量是 feature 14 → 18 + 策略 n_drop 5 → 15。
-# Handler = MinuteEnhancedHandler（HighBetaAlpha158 子类，仅 override get_feature_config 返回 18 因子）。
+# 目的：策略参数 sweep——唯一变量 topk/n_drop（champion 20/15 → 10/5），handler/label/model/exchange/切分
+# 全 FROZEN vs champion workflow_minute_enhanced.yaml。第一性依据：champion W1 pred 十分位 D9(top-10)=+1.397%/日
+# >> D8(rank10-20)=+0.711%/日（per-name headroom +0.69%/日，IC=0.0545 校验通过）。topk=10 咬模型识别最准尾部；
+# n_drop=5=50% 换手帽（champion 75% 省成本）。
 qlib_init:
     provider_uri: /home/zxh/projects/3.qlib_ifind_beta/data/qlib_root
     region: cn
 
-experiment_name: minute_enhanced_w2
+experiment_name: minute_enhanced_tk10_nd5
 
 market: &market highbeta883926
 benchmark: &benchmark SH000300
 
 data_handler_config: &data_handler_config
     start_time: 2024-01-01
-    end_time: 2025-07-04
+    end_time: 2026-07-02
     fit_start_time: 2024-01-01
-    fit_end_time: 2025-03-31
+    fit_end_time: 2025-12-31
     instruments: *market
-    # Label（与 workflow_minute_only.yaml 一致，FROZEN）：T 日 9:41 买入、T+1 收盘卖出的收益。
+    # Label（FROZEN）：T 日 9:41 买入、T+1 收盘卖出的收益。
     label:
         - Ref($close, -1) / $price_941 - 1
 
@@ -38,12 +31,12 @@ port_analysis_config: &port_analysis_config
         kwargs:
             signal: <PRED>
             topk: 10
-            n_drop: 8         # §33 sweep 双窗双赢（20/15→10/8：头部集中 + 信号保鲜）
+            n_drop: 5        # sweep：50% 换手帽（champion=15/75%）
             hold_thresh: 1
             forbid_all_trade_at_limit: true
     backtest:
-        start_time: 2025-04-01
-        end_time: 2025-07-01
+        start_time: 2026-04-01
+        end_time: 2026-07-01
         account: 100000000
         benchmark: *benchmark
         exchange_kwargs:
@@ -75,13 +68,13 @@ task:
         module_path: qlib.data.dataset
         kwargs:
             handler:
-                class: MinuteEnhancedHandler    # HighBetaAlpha158 子类，18 因子（14 全集 + 4 extra）
+                class: MinuteEnhancedHandler
                 module_path: qlib_ifind_beta.minute_enhanced_handler
                 kwargs: *data_handler_config
             segments:
-                train: [2024-01-01, 2024-12-31]
-                valid: [2025-01-01, 2025-03-31]
-                test:  [2025-04-01, 2025-07-02]
+                train: [2024-01-01, 2025-12-31]
+                valid: [2026-01-01, 2026-03-31]
+                test:  [2026-04-01, 2026-07-02]
     record:
         - class: SignalRecord
           module_path: qlib.workflow.record_temp
