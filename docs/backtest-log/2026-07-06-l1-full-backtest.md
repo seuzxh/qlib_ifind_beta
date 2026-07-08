@@ -1587,3 +1587,116 @@ champion 在 W1/W2 各有多次 run（不同时间重跑），IC 完全一致：
 - 策略层（超额↔IC 解耦）：本节确认 topk=10/n_drop=8 是当前信号下的**集中度甜点**，已榨取 +32pp；进一步集中（tk5）方差失控。**策略层杠杆已基本用尽**。
 
 **落档**：champion = enhanced(18)@**topk10/nd8**（W1 +191.1% wc / woc +226.0% / IC 0.0545 / IR 5.41 / 回撤 −5.59%）。sweep 证据 run 见 mlflow exp `minute_enhanced_tk10_nd8`（W1）/ `minute_enhanced_w2_tk10_nd8`（W2）；提取脚本 `/tmp/sweep_metrics.py`（诊断脚本，不入 repo）。
+
+## §34 Part B：T-1 反转风险 gate（策略层，非因子墙）— cheap-falsify kill-switch
+
+> **定位**：§33.7 已言"Part B 撞墙中（低 prior）"。本节是 Part B spec（[2026-07-08-t1-reversal-gate-design.md](../superpowers/specs/2026-07-08-t1-reversal-gate-design.md)）的 **§7 cheap-falsify kill-switch** —— 先不建分类器、不物化 bin，只验证核心假设：**盲区 A（T-1 全天 minute 盘中轨迹，slots 1-241，现有 champion 只用 9:30-9:40 开盘 10 根）对 T 日反转是否有区分度**。通过 → 进物化+gate 回测；不达 bar → 方向证伪 STOP（spec §7.2）。本节零风险触及 FROZEN champion/label/strategy（纯只读分析）。脚本 [scripts/cheap_falsify_revrisk.py](../../scripts/cheap_falsify_revrisk.py)。
+
+### 34.1 方法（spec §7.1）
+
+- **连续 fade_score**（§2，IC 主目标）：`fade_T = (high_T − close_T)/(high_T − low_T) ∈ [0,1]`（1 = 收在最低 / 冲高回落最狠）。daily 后复权 OHLC，scale-invariant。
+- **12 T-1 proxy**（§3，全部 T-1-close-knowable 零前视）：7 minute 盘中族（#1-4,10-12，cn_data_1min 全天 242 slot scatter → 4 段切片 [1:31]/[31:121]/[121:211]/[211:242]，段 VWAP=4OHLC 均值）+ 5 daily 聚合族（#5-9，qlib_data 日频）。
+- **三段检验**：① 单变量 rank IC（每日横截面 Spearman，train 均值）；② 五分位 bucket（pooled train，Q5−Q1 的 fade_score 均值 + 现有 label 均值）；③ logistic regression（12 proxy，θ 在 train 段定 25-35% 占比 → valid AUC + 连续 IC）。
+- **样本**：全 universe 5038 票（5116 − 78 无 minute bin），restrict 到 pool-active (code,date)（highbeta883926 时变池，50525 段）；train 47789 / valid 5583 / test 6198 行，train 横截面 484 天。
+
+### 34.2 结果
+
+**表 1 — 单变量 rank IC vs fade_score（train / valid，484 天横截面均值）**
+
+| # | proxy | 族 | IC_train | IC_valid | \|IC_train\* |
+|---|---|---|---|---|---|
+| 1 | seg_ret_open_mid | min | −0.0146 | −0.0495 | 0.0146 |
+| 2 | seg_ret_mid_pm | min | +0.0124 | +0.0275 | 0.0124 |
+| 3 | seg_ret_pm_tail | min | +0.0101 | +0.0304 | 0.0101 |
+| 4 | tail_mom | min | −0.0132 | −0.0006 | 0.0132 |
+| 5 | intraday_weak | day | −0.0068 | −0.0106 | 0.0068 |
+| 6 | close_quantile | day | −0.0275 | −0.0290 | 0.0275 |
+| **7** | **amplitude** | **day** | **+0.0546** | +0.0413 | **0.0546 ✓** |
+| **8** | **day_return** | **day** | **−0.0429** | −0.0550 | **0.0429 ✓** |
+| **9** | **overnight_gap** | **day** | **−0.0433** | −0.0470 | **0.0433 ✓** |
+| 10 | vol_ratio_tail_open | min | +0.0046 | +0.0575 | 0.0046 |
+| 11 | vol_share_tail | min | +0.0104 | +0.0491 | 0.0104 |
+| 12 | tail_30min_ret | min | −0.0138 | +0.0049 | 0.0138 |
+
+**表 2 — bucket Δ（pooled train，Q5−Q1）**：Δfade 有信号（amplitude +0.024 / day_return −0.038 / overnight_gap −0.049 / vol_share_tail +0.027），**但 Δlbl（现有 T-day label）全部 \|Δ\|<0.005** → fade_score 的"信号"未转化为实际交易收益区分度。
+
+**logistic**：θ=0.4（train reversal rate 0.287，落 [25%,35%] 带），**valid AUC=0.5316**，pred-vs-fade IC(valid)=0.0437。
+
+### 34.3 判定（spec §7.2）
+
+bar = (≥3 proxy \|IC_train\|>0.03) **OR** (valid AUC>0.55)
+- 条件 A：3 proxy 过线（amplitude / day_return / overnight_gap）→ **✓**
+- 条件 B：valid AUC=0.5316 < 0.55 → ✗
+- **机械判定：PASS**
+
+### 34.4 第一性原理复核 — 核心 nuance（机械 PASS 背后的证伪）
+
+**这是「机械 bar PASS、但 spec 核心假设被证伪 + 实用预测力弱」的 borderline 结果，不可机械推进**：
+
+1. **盲区 A（minute 盘中，spec §34 的核心赌注）被证伪**：7 个 minute proxy **全部 \|IC_train\|<0.015，0/7 过线**，最大 0.0146（噪声级）。spec 想验证的"T-1 全天盘中形态预测 T 日反转"**不成立**。这正是 §33.7 预言的"Part B 撞墙"。
+2. **通过 bar 的是 daily 聚合族**（振幅/涨幅/跳空），且：
+   - `overnight_gap` **已是 champion enhanced(18) 的 4 extra 之一**（[materialize_minute.py](../../qlib_ifind_beta/materialize_minute.py) MINUTE_FACTOR_EXTRA_FIELDS）→ 直接重叠；
+   - `day_return` / `amplitude` 与 Alpha158 的 MOM/ROC/VOL 类高度共线 → 增量信息可疑。
+3. **实用预测力弱**：12 维 logistic 组合 valid AUC 仅 0.5316（接近随机 0.5），pred IC=0.0437；bucket Δlbl≈0（fade 信号不转化实际收益）。即便物化成 gate，可榨超额的 prior 很低。
+4. **train↔valid 不一致**：minute 族 valid 段有几个 \|IC\|>0.03（open_mid −0.0495 / vol_ratio +0.0575 / vol_share +0.0491）但 train 段全 <0.03 → 过拟合/噪声，非稳定信号（spec §7.2 用 train IC 判定即为此防过拟合）。
+
+### 34.5 结论与决策（2026-07-09 用户裁定：证伪归档 STOP）
+
+- **spec §34 核心假设（盲区 A minute 盘中预测反转）= FAIL**；§7.2 bar 的机械 PASS **完全靠 daily 族救场**，而 daily 族与 champion 重叠、实用力弱。
+- **用户 2026-07-09 裁定：证伪归档 STOP** → **不推进** spec §13 step 2-5（物化 revrisk.bin + TopkDropoutStrategyTD0Gate + 回测全部停做）。champion 不变，零风险。
+- **未走 amplitude 单变量 gate**：daily amplitude（IC 0.0546）虽是 Alpha158 未直接覆盖项，但 Δlbl≈0、AUC 0.5316 < 0.55、prior 低，且属 daily 族（与盲区 A minute 假设无关）→ 不构成 Part B 的有效增量，随 STOP 一并归档。
+- **证伪价值**：盲区 A minute 盘中族 0/7 是一个**确定的负结论** —— 与 §23-§29 九重墙同向（T-1 盘中加法信号无效），进一步坐实 §31.2 信息天花板在因子层的不可破性。Part B 的"策略层 gate 绕墙"路径，其信号源（盲区 A）本身无效 → gate 无米之炊。§33.7 "Part B 撞墙（低 prior）"预判兑现。
+
+**落档（用户裁定 STOP）**：§34 Part B 证伪关闭。champion 不变（enhanced(18)@topk10/nd8，commit `24b18dd`）。脚本 [cheap_falsify_revrisk.py](../../scripts/cheap_falsify_revrisk.py) + spec [2026-07-08-t1-reversal-gate-design.md](../specs/2026-07-08-t1-reversal-gate-design.md) 保留为只读诊断/设计存档（均未提交，待用户决定提交或删除）。FROZEN label/strategy 全程未动。
+
+---
+
+## §35 champion 只读诊断（2026-07-09）：bagging 假设实测推翻 + 天花板测量定位
+
+> 触发：standing 优化指令（提升超额/IC）+ Stop hook（§34 证伪 ≠ 满足优化目标，须继续推进实际优化）。规则 #7 禁止重做 §23-§29 九重墙 → 转向**未尝试的正交方向**的零风险只读诊断（不重训、不回测、不动 FROZEN）。诊断脚本入 `/tmp`（惯例，不入 repo）。
+> 对象：champion W1 recorder `mlruns/156869948604814731/caf649ca6aa44aac8dec8c4e5a252aef`（experiment `minute_enhanced_tk10_nd8`，git `f4986af`）。校验身份：IC 0.0545 / RankIC 0.0679 / ICIR 0.513 / excess wc 年化 191.1%（IR 5.406, maxDD −5.59%）/ woc 226.0%（IR 6.382）= champion 无误。
+> 三个未试正交方向：A 减法/LOO、B bagging（§31.4④ 唯一未试策略层方向）、C 数据完整性（directive #2 最高价值）。
+
+### 35.1 诊断 C（数据完整性）— ✓ PASS
+
+- recorder `label.pkl` 列名 = `Ref($close, -1) / $price_941 - 1`，与 FROZEN label **完全一致**（口径无漂移）。
+- recorder label vs qlib 重算（test 段 2026-04-01→07-02）：**逐 cell max|diff| = 0.00e+00，corr = 1.000000** → 训练用 label 即该表达式，**无前视、无口径漂移**。交集 6076/6198（差 122 = 末日 07-02 的 `Ref($close,-1)` 需 07-03 close=NaN 被 dropna，符合预期）。
+- panel：6198 行 × 19 列，每日 universe ~96 票，62 日，因子 NaN 率 max 3.6% / label NaN 2.0% → 干净。
+
+### 35.2 诊断 B（换手率/成本/bagging gate）— 朴素 gate 通过，但前提被 35.3 推翻
+
+- **换手率结构性极高**：`report_normal.turnover` 日均 **147.4%**（median 152.8%，min 95%，max 167%）；100% 交易日 >80%，98.4% >100%。非尖峰驱动，是全段高位。
+- **成本侵蚀**：test 段几何累计超额 wc 74.94% vs woc 91.11% = **16.17pp**（年化口径 wc 191% vs woc 226% = 34.9pp，同向）。
+- **朴素 bagging gate**（假设"换手率可被 bagging 削"）：换手降 50%→超额 +7.91pp，降 30%→+4.70pp（test 段）。**⚠️ 此 gate 建立在伪前提上，见 35.3。**
+
+### 35.3 边界翻转率实测 — bagging 假设被测量推翻（核心发现）
+
+读 `pred.pkl` 逐日 top-k 排序测真实翻转结构：
+
+- **top10 留存率 = 0.98%**（几乎每日全换 10 只），top18 留存 1.46%。
+- **universe 每日轮换 89%**：相邻日 universe 交集占比 mean 10.9%（median 9.7%，min 1%）；每日 ~96 票仅 ~10 票与昨日延续 → **883926 每日重平衡高贝塔榜的编制本质**（plan 待定段已注：883926 每日换手 ~90% 是其编制本质）。
+- **共有票 top10 单边翻转 = 0.00 只/日**：两日 universe 交集（mean 10 票）内，top10 成员零翻转 → **bagging 能削减的边界噪声 ≈ 0**。
+
+**结论（第一性原理修正 §31.4④）**：147% 换手率 ≈ **89% universe 轮换**（结构性、bagging 无法触及）+ **0% 预测边界噪声**。bagging 即便完全消除边界翻转，换手率降幅 ≈ 0 → **年化超额回收 < 1pp**，远低于 §31.4④ 估计的 10-15pp 与 35.2 朴素 gate 的 5-8pp。
+
+> **bagging 实测无效 → 不推进 bagging 回测**（省下一个浪费的多 seed LGBM + 回测）。成本侵蚀 16pp 是**结构性**的（日频重平衡 universe 的代价），非预测噪声，因子/模型层不可破。
+
+### 35.4 诊断 A（因子相关矩阵 + 单变量 rank IC）— LOO 候选弱
+
+- **18×18 相关矩阵（pooled Pearson）无严重共线**：最高 |r|=0.891（vol_ratio_3m~5m）；次 close_pos_3m~5m 0.871、accel_3m~5m 0.822。**原假设"vol_vs_yest_t2/t3/t5 高共线"证伪**（三者各自独立，未进 |r|>0.6 榜）→ "剔 2 留 1" LOO 候选不成立。
+- **单变量 rank IC（§31.2 口径，截面 Spearman 按日均值）**：仅 5 因子 |IC|>0.03 — `overnight_gap` +0.062、`vol_vs_yest_t5` −0.069、`t2` −0.049、`t3` −0.045、`vol_vs_yest` −0.034；**14 个 baseline 分钟因子 |IC|<0.025**（弱线性，靠 LGBM 非线性组合，印证 §31.2 解耦）；`vol_ratio` 族 IC≈0 且 3m~5m 最共线 → 唯一勉强 LOO 候选 = vol_ratio_5m。
+- **LOO 整体偏弱**：无严重共线 + §31.2 单变量 IC 盲点 + §16 surgery 前鉴（IC↑≠超额↑）→ 减法风险 > 收益，暂缓。
+
+### 35.5 测量版天花板定位 + 剩余杠杆
+
+**三向诊断收口**：C ✓ 无前视；B ✗ bagging 实测无效；A △ LOO 弱。**用测量证据坐实 §33.7"天花板已至"** —— 因子层（IC 信息天花板 §31.2）+ 模型层（bagging 实测无效）+ 策略层浓度（§33 topk10/nd8 双窗双赢）均已触顶；成本侵蚀结构性不可削。
+
+**剩余杠杆（均需用户对齐 governance #1/#2，不擅改 FROZEN）**：
+
+> **先排除一个伪选项（本节起草时的联想错误，已自纠）**：directive #2/#3 方向（T-1 K 线情绪相位 + 上证指数共振）**不是未测正交方向**，正是已被五度证伪的同一族 —— §28.A（因子层 per-stock 日频情绪+指数共振，W2 OOS IC −15%/超额 −69.6pp/p=0.443）+ §28.B（策略层 regime-gating，相关≈0/gate 毁收益）+ §29（分钟尺度共振 broadcast）+ §30（idio 相对强度偏 IC≈0）+ §31（日频反转族属 §28.A）。起草时曾误将 §28 记成"标量广播"、把"K 线相位分类"当不同族（违反 governance #3 禁联想）；复读 backtest-log §23/§28/§29 原文纠正：**§28 恰是 per-stock 日频情绪+指数共振（非广播），"broadcast 同值"失败的是 §29**。规则 #7 禁重做，此方向**关闭**。
+
+1. **策略层 sticky holdings**（唯一可能动结构性换手的策略层杠杆）：持仓 N 日不随 universe 每日轮换 → 削 89% universe 换手、降成本侵蚀。**⚠️ 代价**：与 ~1.5 天 label horizon 冲突（label 仅预测 T+1，多日持有超出预测视野）→ 需重设计 label/hold 节奏，**属解冻 FROZEN 的大改**，需用户明确授权。
+2. **扩段评估**（待定项，§28.7 选项①）：用 26 年全段重训重测 champion 泛化性 —— **非提 IC**（9 重墙已证天花板结构性），是稳健性验证 + 正式报告产出前置。
+3. **转实战对接**（§28.7 选项②）：策略两窗含成本超额 +40~159% arith 已盈利，可进纸面/实盘跟踪，边跑边观察 OOS 稳健性。非优化，是部署。
+
+**落档**：§35 诊断完成，champion 不变。bagging 因实测无效**不推进**（区别于 §34 的"证伪后 STOP"——此处是"测量后证伪方向"）。directive #2/#3 方向经复读 §23/§28/§29/§30/§31 原文确认五度证伪、**规则 #7 关闭**。诊断脚本（diag_cost/diag_factors/boundary churn）保留 `/tmp`（惯例不入 repo，会随系统清理）。FROZEN label/strategy 全程未动。**测量版结论：冻结设定下三层杠杆（因子/模型/策略）已穷尽，超额天花板结构性不可破；唯一能动的是解冻（sticky holdings 重设计 label 节奏）或转向（扩段稳健性 / 实战对接）。待用户裁定。**
