@@ -13,21 +13,26 @@ from pathlib import Path
 
 import pandas as pd
 
-_SIGNAL_COLS = ["date", "code", "score", "price_941", "change_941", "limit_up", "limit_down"]
+_SIGNAL_COLS = ["date", "code", "score", "price_941", "change_941",
+                "limit_up", "limit_down", "in_topk"]
 _SETTLE_COLS = ["signal_date", "code", "buy_price", "sell_date", "sell_price", "blocked"]
 
 
 def record_signal(result: dict, path: Path) -> None:
     """追加 predict_day 结果到 live_signals.csv（幂等：同 date 先删后写）。
 
-    记录全部 candidates（含封涨停未买的），便于事后 IC 复算。
+    记录全部 candidates（含封涨停未买的）+ in_topk 标记：
+    - 全部 candidates 保留 → 事后 IC 复算（IC 需全部 score，非仅 topk）。
+    - in_topk=True → 实际买入集（已剔除封涨停的前 topk，spec §3.2 [5] NAV 口径）。
     """
     path = Path(path)
+    topk_codes = {c["code"] for c in result["topk"]}
     rows = []
     for c in result["candidates"]:
         rows.append({"date": result["date"], "code": c["code"], "score": c["score"],
                      "price_941": c["price_941"], "change_941": c["change_941"],
-                     "limit_up": c["limit_up"], "limit_down": c["limit_down"]})
+                     "limit_up": c["limit_up"], "limit_down": c["limit_down"],
+                     "in_topk": c["code"] in topk_codes})
     new = pd.DataFrame(rows, columns=_SIGNAL_COLS)
     if path.exists():
         old = pd.read_csv(path)
@@ -54,7 +59,13 @@ def settle_prev(prev_date: str, today: str,
     if not signals_path.exists():
         return 0
     sig = pd.read_csv(signals_path)
-    prev_topk = sig[sig["date"] == prev_date]
+    # 仅结算实际买入集 in_topk=True（spec §3.2 [5]: NAV = equal-weight topk10）。
+    # in_topk 已在 record_signal 阶段剔除封涨停（change_941 >= limit_up）。
+    prev_day = sig[sig["date"] == prev_date]
+    if "in_topk" in prev_day.columns:
+        prev_topk = prev_day[prev_day["in_topk"].astype(bool)]
+    else:
+        prev_topk = prev_day   # backward-compat（无 in_topk 列 → 全结算）
     rows = []
     for _, r in prev_topk.iterrows():
         code = r["code"]
