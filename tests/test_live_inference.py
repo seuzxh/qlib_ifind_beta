@@ -49,3 +49,41 @@ def test_predict_day_zero_drift(qlib_init):
     assert len(common) > 0, "P1 candidates 与 champion pred 无交集（口径错）"
     diffs = [abs(cands[c] - ref_day.loc[c]) for c in common]
     assert max(diffs) < 1e-6, f"max|diff|={max(diffs):.3e} 超阈值，口径偏离"
+
+
+# ---------------------------------------------------------------------------
+# Task 3: NAV 累积（数值正确性手算对照）
+# ---------------------------------------------------------------------------
+def test_compute_nav_compound(tmp_path):
+    """equal-weight compound NAV 手算对照。无成本，2 日。
+
+    day1: A buy=10 sell=11 (ret=+0.10), B buy=10 sell=9 (ret=-0.10) → 组合 ret=0 → nav=1.0
+    day2: A buy=10 sell=12 (ret=+0.20), B buy=10 sell=11 (ret=+0.10) → 组合 ret=+0.15 → nav=1.15
+    """
+    from qlib_ifind_beta.live.track import compute_nav
+    settle = pd.DataFrame([
+        {"signal_date": "2026-04-01", "code": "A", "buy_price": 10.0, "sell_date": "2026-04-02", "sell_price": 11.0},
+        {"signal_date": "2026-04-01", "code": "B", "buy_price": 10.0, "sell_date": "2026-04-02", "sell_price": 9.0},
+        {"signal_date": "2026-04-02", "code": "A", "buy_price": 10.0, "sell_date": "2026-04-03", "sell_price": 12.0},
+        {"signal_date": "2026-04-02", "code": "B", "buy_price": 10.0, "sell_date": "2026-04-03", "sell_price": 11.0},
+    ])
+    out = tmp_path / "nav.csv"
+    nav = compute_nav(settle, out, open_cost=0.0, close_cost=0.0)
+    by_sell = nav.set_index("sell_date")["daily_ret_net"]
+    assert abs(by_sell["2026-04-02"] - 0.0) < 1e-9
+    assert abs(by_sell["2026-04-03"] - 0.15) < 1e-9
+    assert abs(nav["net_nav"].iloc[-1] - 1.15) < 1e-9
+
+
+def test_compute_nav_with_cost(tmp_path):
+    """含成本：单笔 ret 受 open_cost/close_cost 双向侵蚀。"""
+    from qlib_ifind_beta.live.track import compute_nav
+    settle = pd.DataFrame([
+        {"signal_date": "2026-04-01", "code": "A", "buy_price": 10.0, "sell_date": "2026-04-02", "sell_price": 11.0},
+    ])
+    out = tmp_path / "nav.csv"
+    nav = compute_nav(settle, out, open_cost=0.001, close_cost=0.001)
+    # ret_net = 11*0.999/(10*1.001) - 1 = 10.989/10.01 - 1 = 0.097902...
+    expected = 11 * 0.999 / (10 * 1.001) - 1
+    assert abs(nav["daily_ret_net"].iloc[0] - expected) < 1e-9
+    assert abs(nav["gross_nav"].iloc[0] - 1.10) < 1e-9   # gross = 11/10-1 = 0.10
