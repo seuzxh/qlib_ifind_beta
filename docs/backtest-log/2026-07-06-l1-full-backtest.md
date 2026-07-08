@@ -1262,3 +1262,245 @@ Step A 独立 IC 0.0366 > m14 baseline 0.0341、RankICIR 0.366 → **standalone 
 2. **分钟尺度 regime 特征** —— 唯一原则性未测方向（日频 regime 已证伪、§28.5 机制指向 label 尺度匹配）。需新因子工程（9:30-9:40 内指数/个股共振的分钟代理），预期工作量大、收益不确定。
 3. **regime 作风控 overlay（非超额最大化）** —— 用 idx_rsv 高分位做**回撤控制**（沸点降仓位降风险），代价是收益让步、超额不升反降。仅当用户优先级从「超额」转向「Sharpe/回撤」时才合理。
 4. **接受 champion、转实战对接** —— 策略已两窗盈利，可直接进实盘/纸面跟踪，边跑边观察 OOS 稳健性。
+
+---
+
+## §29 分钟尺度指数开盘共振（§28.7 选项 2 实做）— 第 9 重墙 · saga 收束
+
+> 2026-07-08。用户隔夜自主授权「换个思路扩展不同区间的 1min 因子特征，寻找多种可能性」。§28 三层（factor/model/strategy）八重墙后，**唯一原则性未测杠杆** = §28.7 选项 2「分钟尺度 regime 特征」。本轮忠实实现用户领域模型「T 日 9:30-9:40 开盘分钟内个股 vs 指数的横截面相对强度」，物化为 day.bin 并入 18→21，W1+W2 双窗 OOS 验证。**判定：第 9 重墙，双窗 FAIL。**
+
+### 29.1 设计意图（与 §28 的本质区别）
+
+用户领域模型原话：「分钟频只能观测 T 日的开盘阶段，所以我需要结合指数（大势）和 T-1 之前的 K 线来判断个股是否是共振、启动、高潮或者惯性冲高」。
+
+- **§28 测的是 DAILY regime 状态**做择时（5/9/20d 慢窗 SH000001 冰点/沸点）→ scale 错配（label ≈1.5d，慢因子 W1 过拟合 W2 崩 IC −15%）。
+- **§29 测的是 MINUTE 尺度开盘共振**：T 日 9:30-9:40 指数开盘特征（idx 收益/动量/加速度），与 champion 个股开盘因子（startup_total/startup_mom_5m/accel_5m）**公式同构、尺度对齐 label**。idx 因子 broadcast 同值（每只股存同日同一 idx 值），靠 LGBModel 学 **idx × 个股交互**表达「在大势 X 下个股强度 Y 的信号」。
+
+**设计局限（诚实标注）**：broadcast 同值的 idx 因子单独是**横截面常数列**（全池同日同值），对 topk ranking 零区分度；区分度**全部依赖** idx×个股交互项。本轮**未**构造显式 `个股开盘 − idx 开盘` 相对强度因子（横截面非常数）—— 那是理论上不同的设计，效果未知、需用户决策是否再试。
+
+### 29.2 3 因子公式 + broadcast 物化方案
+
+`config.py`：`INDEX_OPENING_SRC = "SH000001"`；`INDEX_OPENING_FIELDS = ("idx_open_ret_10", "idx_open_mom_5m", "idx_open_accel_5m")`。
+
+| 因子 | 公式（1min 早盘 slot 1-10） | champion 同构 |
+|---|---|---|
+| `idx_open_ret_10` | `idx_close[9] / idx_open[0] − 1` | startup_total |
+| `idx_open_mom_5m` | `idx_close[9] / idx_close[4] − 1` | startup_mom_5m |
+| `idx_open_accel_5m` | `(idx_close[9]/idx_open[5]−1) − (idx_close[3]/idx_open[0]−1)` | accel_5m |
+
+- **物化**（`materialize_minute.py._load_index_opening_factors`）：读 SH000001 1min close/open bin，scatter 到全局 min-cal morning grid（slots 1-11），算 3 因子 cache（全池共享一份，仅依赖 idx 自身 si_dc）。`materialize_minute_instrument` 末尾 broadcast：每只股用自身 `valid/rel_v`（scatter 输出）把 idx cache 写入自己的 overlay bin → 38 day.bins/stock（35 champion + 3 idx 共振）。
+- **SH000001 缺失日**：train ~6%、test/valid 0% → 全池同日 NaN → DropnaProcessor drop（不会单股漏数据）。
+- **全池物化**（`scripts/materialize_minute.py` 全 5116 codes）：5040 ok / 76 missing（delisted/suspended 无 1min/daily bin，预期值）。docstring 已同步 35→38（ripple 已修）。
+
+### 29.3 落地验证（`/tmp/verify_idx_landing.py`）
+
+抽查 highbeta883926 池内大盘股 test W1 窗（2026-04）：SH600519 / SZ000001 三因子 **21/21 finite（100% 落地）**；broadcast 同值验证「同日 4 股 idx 值完全相同 ✓」（确认横截面常数机制）。
+
+### 29.4 双窗测试结果（4 回测同口径对比）
+
+> **口径对齐凭证**：本轮同 session 重跑 champion W1/W2 baseline，IC 与 §28.2/§28.3 **完全一致**（W1 0.0545 / W2 0.0718）→ 4 回测严格同口径。label `Ref($close,-1)/$price_941-1`、deal_price `["$price_941","$close"]`、涨跌停 `["$change_941>=$limit_up","$change<=$limit_down"]`、模型超参、切分、策略（n_drop=15）全与 champion 一致 → **唯一变量 feature 18→21**。
+
+**W1（train 2024-01→2025-12 / valid 2026Q1 / test 2026-04→07，benchmark +44.1%）**：
+
+| config (W1) | IC | ICIR | RankIC | RankICIR | excess 含成本 | excess 不含成本 |
+|---|---|---|---|---|---|---|
+| champion enhanced(18) | 0.0545 | 0.513 | 0.0679 | 0.542 | **+158.9%** | **+191.3%** |
+| §29 resonance(21) | 0.0570 (**+4.6%**) | — | 0.0654 | — | +119.2% (**−39.7pp**) | +151.2% (**−40.1pp**) |
+
+**W2 OOS（train 2024-01→2024-12 / valid 2025Q1 / test 2025-04→07，benchmark +6.96%）**：
+
+| config (W2) | IC | ICIR | RankIC | RankICIR | excess 含成本 | excess 不含成本 |
+|---|---|---|---|---|---|---|
+| champion enhanced(18) | 0.0718 | 0.390 | 0.1177 | 0.824 | **+63.2%** | **+95.1%** |
+| §29 resonance(21) | 0.0697 (**−2.9%**) | 0.367 | 0.1163 | 0.749 | +40.1% (**−23.1pp**) | +72.5% (**−22.6pp**) |
+
+### 29.5 机制归因（第一性原理，不联想）
+
+- **broadcast 同值 = 横截面常数**：idx 因子同一日全池所有股同值 → 纯 idx 维度对 topk ranking 零区分度（与 §28.4 策略层 regime-gating **同源机制**）。区分度只能来自 LGBModel 的 idx×个股交互项。
+- **交互项贡献噪声级**：IC 两窗都极接近 champion（W1 +4.6% / W2 −2.9%，幅度 <5%，噪声级）→ idx×个股交互在 top20 头部排序中没有 exploitable 信号。
+- **维度增加损害排序**：超额两窗都稳定低于 champion（W1 −40pp / W2 −23pp）→ 3 个横截面常数列加入，引入噪声维度、轻微过拟合，损害 top20 头部 alpha（与 §23-26 因子扰动组同现象）。
+- **与 §28 的关键区别（证明无 scale 错配）**：§28.A W2 IC **−15% 崩**（日频 5/9/20d 慢因子 scale 错配，W1 过拟合换 regime 即失效）；§29 W2 IC **仅 −2.9%**（分钟尺度与 ~1.5d label 同尺度，无错配）。**即使无 IC 崩，超额仍 −23pp 撞墙** → 墙是结构性的，非因子不足、非 scale 错配。
+
+### 29.6 判定与 saga 收束
+
+- **FAIL（第 9 重墙，双窗超额全跌）**：W1 IC +4.6%（噪声级微涨）但超额 −40pp 大跌；W2 OOS IC −2.9%（未崩，证明无 scale 错配）但超额 −23pp 退化。**champion enhanced(18)@n_drop=15 维持不变**，§29 实验产物入库作 saga 收束证据，**不入 champion 配置**。
+
+- **saga 收束（9 重独立验证全撞墙）**：
+
+  | # | 章节 | 杠杆层 | 机制 |
+  |---|---|---|---|
+  | 1-2 | §23-24 | 因子（扰动/startup 组） | 维度噪声 |
+  | 3 | §25 | 因子（tail 分钟组） | 维度噪声 |
+  | 4 | §26 | 因子（T-1/T-2 opening） | 维度噪声 |
+  | 5 | §27 | 模型（正则化 lambda/leaves） | IC-超额解耦 |
+  | 6 | §28.A | 因子层（日频/指数，scale 错配） | W1 过拟合 W2 崩 |
+  | 7 | §28.B | 策略层（regime-gating，broadcast 同值） | 横截面常数 |
+  | 8 | §29 | 因子层（分钟尺度共振，broadcast 同值） | 横截面常数 + 维度噪声 |
+
+  覆盖**因子层（日频 + 分钟）+ 模型层 + 策略层 + 跨尺度**。用户领域模型（共振/启动/高潮/冰点沸点）方向经双实现证伪 —— 在用户冻结的 label/策略/池设定下，champion topk=20/n_drop=15 的超额天花板是**结构性**的，**既非因子不足、非 scale 错配、非模型欠拟合、也非择时缺位**。两窗超额含成本 +40~159% arith → 墙是「超额上限」非「可行性」，策略本身盈利。
+
+### 29.7 入库文件 + recorder
+
+- **handler**：[minute_resonance_handler.py](../../qlib_ifind_beta/minute_resonance_handler.py)（MinuteEnhancedHandler 子类，21 = 18 champion + 3 idx）；config [config.py](../../qlib_ifind_beta/config.py) 加 `INDEX_OPENING_SRC/FIELDS`。
+- **workflow**：[workflow_minute_resonance.yaml](../../qrun/workflow_minute_resonance.yaml)(W1) + [workflow_minute_resonance_w2.yaml](../../qrun/workflow_minute_resonance_w2.yaml)(W2)。
+- **物化**：[materialize_minute.py](../../qlib_ifind_beta/materialize_minute.py) `_load_index_opening_factors` cache + broadcast scatter；[scripts/materialize_minute.py](../../scripts/materialize_minute.py) 全池入口（docstring 35→38 已同步）。
+- **test**：[test_index_factors.py](../../tests/test_index_factors.py) 加 §29 共振因子用例。
+- **验证脚本**：`/tmp/verify_idx_landing.py`（落地 + broadcast 同值）。
+- **recorder**：§29 resonance **W1 eid798779997054224731 run677a3a82** / **W2 eid182312265270673755 run9e53c4ed**；对照 champion W1 eid907625868975691204 runb8b187d6 / W2 eid449239398769286298 rundcd756bb。
+- **§28.7 选项 2 状态更新**：原「唯一原则性未测方向 = 分钟尺度 regime 特征」**已测、已证伪**（§29）。待 user 决策项收敛为：① 接受天花板、champion 定稿 + 扩段（26 年全数据稳健性）；② 转实战对接（纸面/实盘跟踪）；③ 显式相对强度因子（`个股开盘 − idx 开盘`，横截面非常数，理论上不同于 §29 broadcast，效果未知，需用户决策是否再试）。
+
+## §30 选项③预筛：个股开盘 β 中性化（idio）偏 IC 诊断 — 廉价证伪
+
+> saga 收束（§29.6）后唯一原则性未测方向 = §29.7 选项③「显式相对强度因子（个股开盘 − idx 开盘，横截面非常数，理论上不同于 §29 broadcast）」。隔夜自主做**廉价预筛**（不全池物化，复 §29 教训），分两个变体证伪，选项③收束。
+
+### 30.1 两个变体
+
+- **简单差变体**（`startup_total − idx_open_ret_10`，无 β）：idx_open_ret_10 因 broadcast 同日全池同值（§29.5 已验证）→ 简单差 = `startup_total − 常数` → **横截面 ranking 零增量**（平移不改 rank，数学必然，无需诊断）。
+- **β 中性化残差变体**（`startup_total − β·idx_open_ret_10`，β = rolling20 cov(stock,idx)/var(idx)，逐股不同）：横截面非常数（diag_idio.py 测 β 中位数 std ≈ 0.564，逐股确实不同）→ 选项③唯一可能有信号的形态，需诊断。
+
+### 30.2 偏 IC 诊断（diag_idio_ic.py，40 股，双重残差 OLS，2026-07-08 复核）
+
+> 偏 IC = 控制 startup_total 后 idio→label 的纯增量（逐日横截面：res_idio = idio~startup 残差；res_label = label~startup 残差；Spearman(res_idio, res_label)）。label 绑定 `close[T+1]/price_941[T]-1`。
+
+| 段 | N日 | partial IC mean | ICIR | 判据 |
+|---|---|---|---|---|
+| 全段 2024-01~2026-07 | 561 | **+0.0028** | +0.010 | B：≈0 证伪 |
+| test 2026-04~07 | 61 | +0.0603 | +0.235 | 小样本（§29 教训） |
+
+- 全段偏 IC +0.0028（|mean| < 0.01 判据 B）→ idio 增量是 **β 估计噪声**，与 §29 broadcast 同形。
+- test 窗 +0.0603 仅 61 日，diag_idio_ic_ts.py 月度序列证伪（2024-2025 随机震荡，非单月拉高即偶发）→ 小样本假信号。
+
+### 30.3 判定
+
+- **选项③完整收束（FAIL）**：简单差变体数学零增量 + β 中性化变体偏 IC 全段 ≈0。saga 第 9 重墙后再排除此方向。**不物化**。
+
+## §31 日频情绪反转因子族廉价诊断（vol_ratio_5_20 等）— 属 §28.A 已证伪族，不物化
+
+> 用户领域模型「启动/发酵/高潮/惯性冲高」+ 避免拥挤度过高接盘。champion 18 因子全是 T 日 9:30-9:40 开盘族 + 隔夜，**完全不看 T-1 之前 K 线**。隔夜自主从 daily bins 即时算日频情绪候选（零物化，diag_daily_mood*.py）。
+
+### 31.1 候选 + 单变量 IC 月度稳定性（600 股抽样，diag_daily_mood_ts.py，2026-07-08 复核）
+
+| 因子 | 含义 | 期望 | 全段 ICIR | 2024 / 2025 / 2026 ICIR |
+|---|---|---|---|---|
+| vol_ratio_5_20 | 5/20 日量比 | − | **−0.235** | −0.194 / −0.310 / −0.166 |
+| n_up_5 | 5 日连阳数 | − | −0.145 | −0.158 / −0.189 / −0.048 |
+| ret_5d | 5 日收益 | − | −0.152 | −0.126 / −0.247 / −0.084 |
+| dist_high_20 | 距 20 日高 | + | +0.007 | −0.044 / +0.034 / +0.096 |
+| **startup_total** | champion 基线 | ? | **−0.027** | +0.044 / −0.120 / −0.011 |
+
+vol_ratio_5_20 三年方向负占比 59/63/55%，反转信号稳健。
+
+### 31.2 关键洞察（第一性原理）：startup_total 单变量 ICIR ≈ 0
+
+champion 核心分钟因子 startup_total **单变量横截面 rank IC 全段 ICIR −0.027（近零）**，但 champion W1 模型 pred IC = 0.0545（§29.4）、超额 +158.9%。
+
+→ **champion 的 alpha 来自 LGBM 非线性组合，非单变量线性 IC**。这揭示「IC→超额墙」的深层机制：**IC 涨和超额涨解耦** —— §23-§29 所有"IC 涨"实验（§28.A W1 +12%、§27 reg15、§23 Step B）都撞墙，正因为 IC 提升（线性可度量）无法传导到 top20 头部收益（非线性 + 肥尾 + 成本）。**用单变量/偏 IC 筛因子存在方法论盲点**：单变量 IC 稳健 ≠ 能提升 LGBM 超额。
+
+### 31.3 判定
+
+vol_ratio_5_20 等属**§28.A 已证伪的日频情绪反转族**（scale 错配：日频 5/20d rolling vs ~1.5d label）。即便单变量 ICIR −0.235（> startup_total 的 −0.027），机制预判合体后撞第 10 重墙 —— §28.A Step B 已用**完整 LGBM 回测**（非线性，胜过本节线性单变量诊断）证明日频因子合体 W1 IC +12% 超额仍撞墙 / W2 OOS 崩。**不物化**，避免 redundant 重挖 §28.A。
+
+### 31.4 待 user 决策项（§30/§31 后再收敛）
+
+经 §30（选项③证伪）+ §31（日频反转族属已证伪族不物化），§29.7 原收敛 3 项中：
+- ③「显式相对强度因子」→ **§30 已证伪，移除**。
+- ①② 维持：① 接受天花板、champion 定稿 + 扩段（26 年全数据稳健性）；② 转实战对接（纸面/实盘跟踪）。
+
+**新增（§31.2 洞察衍生，非因子方向，需 user 决策是否探索）**：
+- ④ **策略层 bagging 集成降方差**（未测）：换手机制复核 [td0_strategy.py:83-106](../../qlib_ifind_beta/td0_strategy.py#L83-L106) `sell = last[last.isin(get_last_n(comb, n_drop))]` —— 换手**非** n_drop=15 结构性强制，而取决于预测排序稳定性：pred 稳定 → 持仓少落入 (持仓∪候选) 合并排序末 n_drop → 低换手；pred 噪声 → 持仓频繁跌入末位 → 高换手。champion 用 method_buy="top"/method_sell="bottom"（确定性，无策略层随机），方差来自 LGBM 训练 seed → bagging（多 seed/子采样 LGBM 平均）降 top20 边界 pred 方差 → 稳排序 → 降换手 → 减成本侵蚀**理论上成立**。上限受 §29.4 实测成本侵蚀 ~32pp 约束（且仅能回收其中「噪声换手」份额，信号换手不可降），现实增量估计 +10~15pp 量级。**不破 IC-超额信息墙**，纯成本侧优化。廉价 gate 可行：先测 champion 实际换手率 + 跨 seed top20 一致性（一致性已高 → bagging 无空间，免跑全量 ensemble）。
+- ⑤ **成本结构诊断**：**已由 §29.4 回答**（含成本/不含成本双列是项目标准报告指标，全 saga 一致使用，随换手正确变化）。§29.4 实测：champion 不含成本超额 W1 +191.3% / W2 +95.1%，§29 加因子后不含成本 +151.2% / +72.5% —— **加因子后「不含成本」超额仍低于 champion** → 即便零成本，因子也未改善 top20 头部 alpha → **墙是信息天花板，非成本天花板**。成本侵蚀稳定 ~32pp（全 n_drop=15 同换手档）。**⑤ 无需重跑**。
+
+## §32 窗内 5 折 expanding walk-forward 稳健性验证（2026-07-08）— champion 非单窗过拟合
+
+> 用户原 binding 目标「优化超额 + IC」经 §23-§31 全 saga 收敛到信息天花板（§31.2 揭示 IC↔超额解耦墙）。§29.7 收敛项 ①「接受天花板、champion 定稿 + 扩段（26 年全数据稳健性）」—— 本节即执行**窗内 walk-forward 稳健性验证**，回答「champion enhanced(18)@n_drop15 的 alpha 是否单窗过拟合」。
+>
+> **方法学说明**：26 年全段扩段受分钟 bin 物化回溯上限约束（champion 分钟因子 9:30-9:40 物化为 day.bin，有效覆盖 ~2024 起，见 `diag_data_coverage.py` 诊断）。故取**可行窗 2024-01→2026-07**，做 **5 折 expanding walk-forward**：唯一变量 = 切窗，label / 策略(n_drop15,topk20) / 模型超参 / 18 因子全 frozen = champion([workflow_minute_enhanced.yaml](../../qrun/workflow_minute_enhanced.yaml))。test 段为 5 个**不重叠** 3 月季度，覆盖 2025-04→2026-07 全 OOS。
+
+### 32.1 切窗设计（expanding train + rolling valid + 不重叠 test）
+
+| 折 | test（OOS 季度） | train expanding 末 | valid（rolling） | yaml | mlflow exp |
+|---|---|---|---|---|---|
+| f1 = W2 | Q2'25（2025-04..06） | 2024-12 | Q1'25（2025-01..03） | [w2.yaml](../../qrun/workflow_minute_enhanced_w2.yaml)（§29 既有） | 449239398769286298 |
+| f2 | Q3'25（2025-07..09） | 2025-03 | Q2'25（2025-04..06） | [wf2.yaml](../../qrun/workflow_minute_enhanced_wf2.yaml) | 602620168594697491 |
+| f3 | Q4'25（2025-10..12） | 2025-06 | Q3'25（2025-07..09） | [wf3.yaml](../../qrun/workflow_minute_enhanced_wf3.yaml) | 472635746064092743 |
+| f4 | Q1'26（2026-01..03） | 2025-09 | Q4'25（2025-10..12） | [wf4.yaml](../../qrun/workflow_minute_enhanced_wf4.yaml) | 159657062985786570 |
+| f5 = W1 | Q2'26（2026-04..06） | 2025-12 | Q1'26（2026-01..03） | [workflow_minute_enhanced.yaml](../../qrun/workflow_minute_enhanced.yaml)（champion 原窗） | 907625868975691204 |
+
+- **expanding 模式**：train 每折增长一季度（f1 末 2024-12 → f5 末 2025-12）；valid 滚动为 test 的前一季度（rolling，非 expanding）。各折 train∪valid 永远在 test 之前，**折内无前视**。跨折间 valid 可与前一折 test 重合（如 f2 valid=Q2'25=f1 test），这是 rolling valid 的标准特性，不影响任一折独立 OOS 评估。
+- f1 = §29 W2 窗、f5 = §22 champion W1 窗（直接复用既有 run，IC 与 anchor 逐位对齐见 §32.5）；f2/f3/f4 为本节新跑中间折。
+- 切窗技巧：`data_handler.end` = test 末 + ~7 日 buffer（**仅**为兑现 test 末日 label 的 `Ref($close,-1)`，**不扩 segments**）；`segments.test` = 精确季度；`fit_end` = train∪valid 末。**注**：段级为兑现末日 label 尾部略延 1-2 日（如 w2 段末 2025-07-02），test 按季度仍不重叠；聚合时按日期去重，不影响 304 日 OOS 结论。
+- 踩坑：首次 3 折全挂在 `MlflowException: Invalid experiment ID: '.pytest_cache'` —— mlflow file_store 把 `mlruns/` 下所有直接子目录当 experiment_id 扫描，`.pytest_cache`（pytest 缓存产物）非数字 → 报错。FIX：`rm -rf mlruns/.pytest_cache`（pytest 缓存，安全删；保留 `.trash`，mlflow 原生）。删除后 3 折全跑通。
+
+### 32.2 每折全量指标（5 折 OOS，取每 experiment 最新 run）
+
+口径：IC = `ic.pkl`（每日 IC Series）均值；ICIR = mean/std（raw，非年化，与 §29 "ICIR 0.390" 一致）；超额年化 = `port_analysis_1day.pkl.loc[(ret_type,'annualized_return'),'risk']`。
+
+| 折 | test | IC | RankIC | ICIR | 超额含成本年化 | 不含成本年化 | 回撤 | 组合 IR |
+|---|---|---|---|---|---|---|---|---|
+| f1=W2 | Q2'25 | **0.0718** | 0.1177 | 0.390 | +63.17% | +95.10% | −10.17% | 1.91 |
+| f2 | Q3'25 | **0.0905** | 0.1321 | 0.597 | +109.21% | +141.59% | −9.41% | 3.93 |
+| f3 | Q4'25 | **0.0635** | 0.0962 | 0.383 | +61.46% | +93.77% | −8.73% | 2.41 |
+| f4 | Q1'26 | **0.0563** | 0.0800 | 0.301 | +17.02% | +48.55% | −16.25% | 0.51 |
+| f5=W1 | Q2'26 | **0.0545** | 0.0679 | 0.513 | +158.86% | +191.33% | −5.44% | 5.12 |
+| **均值** | | **0.0673** | **0.0988** | — | — | — | — | — |
+| 跨折 std | | 0.0131 | 0.0236 | — | — | — | — | — |
+
+- **5 折 IC 全正**（0.0545~0.0905，跨折 std 仅 0.0131），**无一折翻负** —— 不是 W1 单窗侥幸。
+- **5 折超额含成本年化全正**（+17%~+159%），即便最弱的 f4（Q1'26，回撤 −16.25%）仍 +17% 正超额。
+- 最强 f2（Q3'25 IC 0.0905）/ 最弱 f4（Q1'26 IC 0.0563）差距合理，无极端崩塌。f5(W1) 超额最高（+158.86%）部分得益于该窗回撤最小（−5.44%）。
+
+### 32.3 池化 OOS 月度 IC 稳定性（5 折每日 IC 拼接去重按月均值）
+
+将 5 折的 `ic.pkl`（每日 IC Series）拼接、按日期去重（`~index.duplicated(keep='first')`）、按月均值，得 **16 个月池化 OOS 月度 IC**（2025-04→2026-07，304 交易日去重后）：
+
+| 月份 | IC | | 月份 | IC | | 月份 | IC | | 月份 | IC |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2025-04 | +0.1511 | | 2025-08 | +0.0411 | | 2025-12 | +0.0736 | | 2026-04 | +0.0769 |
+| 2025-05 | +0.0543 | | 2025-09 | +0.0922 | | 2026-01 | +0.0693 | | 2026-05 | +0.0355 |
+| 2025-06 | −0.0034 | | 2025-10 | +0.0885 | | 2026-02 | +0.1052 | | 2026-06 | +0.0510 |
+| 2025-07 | +0.1369 | | 2025-11 | +0.0304 | | 2026-03 | +0.0134 | | 2026-07 | −0.0015 |
+
+- **月度 IC 统计**：mean **+0.0634**，std 0.0450，**胜率 14/16 = 88%**，范围 [−0.0034, +0.1511]。
+- **关键**：仅 2 个月微负 —— 2025-06 (−0.0034) 与 2026-07 (−0.0015)，**均 ≈0（近零，非强负）**。无任何月份 IC < −0.01。模型从未在任一月产生有意义反向预测。
+- **月度 RankIC**：mean **+0.0961**，**胜率 16/16 = 100%**（排序信号比 Pearson IC 更稳，每月单调性都对）。
+
+### 32.4 分 regime 月度 IC（SH000300 月收益三分位）
+
+以 SH000300 月收益三分位划 regime（[−5.53%, +10.33%] 范围，分位 bear ≤ +0.09% / bull ≥ +2.28%）：
+
+| regime | 月数 | 月均 bm 收益 | 月均 IC | IC 胜率 |
+|---|---|---|---|---|
+| bear | 5 | −2.87% | **+0.0564** | 80% |
+| sideways | 6 | +1.57% | **+0.0648** | 100% |
+| bull | 5 | +5.52% | **+0.0687** | 80% |
+
+- **champion alpha 跨 regime 近乎平稳**（bear/sideways/bull 月均 IC 0.056/0.065/0.069，极差仅 0.012）—— **非牛市专属因子**，熊市依然有效。这与高贝塔成分股「牛市弹性大」的直觉不同：alpha 来自 9:30-9:40 开盘分钟结构（T 日盘中信号），而非 beta 暴露本身。
+- 唯一 bear 月负：2026-07（−0.0015，近零）。最强月 2025-04（+0.1511，bear 期）—— 反而是熊市月最强。
+
+### 32.5 可复现性（W1/W2 多 run 全量 IC）
+
+champion 在 W1/W2 各有多次 run（不同时间重跑），IC 完全一致：
+
+| 折 | experiment | run 数 | 各 run IC |
+|---|---|---|---|
+| f5=W1 | 907625868975691204 | 3 | 0.0545 / 0.0545 / 0.0545（全同） |
+| f1=W2 | 449239398769286298 | 2 | 0.0718 / 0.0718（全同） |
+
+→ 训练确定性（`LGBModel` 固定 `num_threads=20` + 无随机 bagging），**结果可逐位复现**，无 seed 抖动。
+
+### 32.6 判定：champion 非单窗过拟合
+
+| 稳健性维度 | 证据 | 结论 |
+|---|---|---|
+| 跨折 IC | 5 折全正 (0.0545~0.0905)，std 0.0131 | ✅ 非单窗 |
+| 跨折超额 | 5 折含成本年化全正 (+17%~+159%) | ✅ 非单窗 |
+| 月度 IC | 16 月 88% 正，2 负月均 ≈0 (−0.003/−0.002) | ✅ 无反向月 |
+| 月度 RankIC | 16 月 100% 正，mean +0.0961 | ✅ 排序极稳 |
+| regime 无关性 | bear/sideways/bull IC 0.056/0.065/0.069 | ✅ 非牛市专属 |
+| 可复现性 | W1×3 / W2×2 run IC 全同 | ✅ 确定性 |
+
+**结论**：champion enhanced(18)@n_drop15 在可行窗 2024-2026 的 5 折 expanding walk-forward 中表现**稳健**：跨折 IC 全正、月度 IC 88% 正（且 2 负月近零）、RankIC 月月正、跨 regime 平稳、可逐位复现。**alpha 不是 W1（Q2'26）单窗过拟合产物**。
+
+**对 §31.2「IC↔超额解耦墙」的补充**：walk-forward 证伪了「champion 是过拟合」这一替代解释 —— 墙是**真实的信息天花板**（单变量 startup_total ICIR≈0，§31.2），而非训练窗偶然。champion 的 alpha 来自 LGBM 对 18 个开盘族因子的非线性组合，该组合在 5 个独立 OOS 窗 + 16 个月 + 3 种 regime 下持续有效。f4（Q1'26）相对最弱（IC 0.0563、回撤 −16.25%）提示存在**时变衰减**迹象（非崩溃），符合 §29.7 ①「接受天花板」的现实定位。
+
+**落档**：本节为 champion 定稿的稳健性背书。§29.7 收敛项 ① 至此完成「定稿 + 窗内稳健性」半部；剩余「扩段（26 年全数据）」受分钟 bin 物化回溯上限约束，需先扩物化范围（待用户决策，非本节范围）。聚合脚本 `/tmp/wf_aggregate.py`（诊断脚本，同 §30/§31 惯例不入 repo）。

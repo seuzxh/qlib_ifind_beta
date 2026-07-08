@@ -1,0 +1,83 @@
+# [Walk-Forward Fold 2] champion enhanced(18)@nd15 on test Q3'25 (2025-07..09). expanding train 2024-01..2025-03.
+# 5 折 expanding walk-forward 第 2 折（中间折，新跑）。唯一变量 = 切窗。
+# label / 策略(n_drop15,topk20) / 模型超参 / 18 因子全 frozen = champion(workflow_minute_enhanced.yaml)。
+# 运行：conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_wf2.yaml
+qlib_init:
+    provider_uri: /home/zxh/projects/3.qlib_ifind_beta/data/qlib_root
+    region: cn
+
+experiment_name: minute_enhanced_wf2
+
+market: &market highbeta883926
+benchmark: &benchmark SH000300
+
+data_handler_config: &data_handler_config
+    start_time: 2024-01-01
+    end_time: 2025-10-07         # test 末 + buffer（仅兑现 test 末日 label，不扩 segments）
+    fit_start_time: 2024-01-01
+    fit_end_time: 2025-06-30      # = train ∪ valid 末
+    instruments: *market
+    # Label（FROZEN）：T 日 9:41 买入、T+1 收盘卖出的收益。
+    label:
+        - Ref($close, -1) / $price_941 - 1
+
+port_analysis_config: &port_analysis_config
+    strategy:
+        class: TopkDropoutStrategyTD0
+        module_path: qlib_ifind_beta.td0_strategy
+        kwargs:
+            signal: <PRED>
+            topk: 20
+            n_drop: 15
+            hold_thresh: 1
+            forbid_all_trade_at_limit: true
+    backtest:
+        start_time: 2025-07-01
+        end_time: 2025-09-30
+        account: 100000000
+        benchmark: *benchmark
+        exchange_kwargs:
+            freq: day
+            limit_threshold:
+                - $change_941 >= $limit_up
+                - $change <= $limit_down
+            deal_price: ["$price_941", "$close"]
+            open_cost: 0.0005
+            close_cost: 0.0015
+            min_cost: 5
+
+task:
+    model:
+        class: LGBModel
+        module_path: qlib.contrib.model.gbdt
+        kwargs:
+            loss: mse
+            learning_rate: 0.05
+            max_depth: 6
+            num_leaves: 64
+            num_threads: 20
+            lambda_l1: 5.0
+            lambda_l2: 10.0
+            num_boost_round: 200
+            early_stopping_rounds: 20
+    dataset:
+        class: DatasetH
+        module_path: qlib.data.dataset
+        kwargs:
+            handler:
+                class: MinuteEnhancedHandler
+                module_path: qlib_ifind_beta.minute_enhanced_handler
+                kwargs: *data_handler_config
+            segments:
+                train: [2024-01-01, 2025-03-31]
+                valid: [2025-04-01, 2025-06-30]
+                test:  [2025-07-01, 2025-09-30]
+    record:
+        - class: SignalRecord
+          module_path: qlib.workflow.record_temp
+        - class: SigAnaRecord
+          module_path: qlib.workflow.record_temp
+        - class: PortAnaRecord
+          module_path: qlib.workflow.record_temp
+          kwargs:
+              config: *port_analysis_config
