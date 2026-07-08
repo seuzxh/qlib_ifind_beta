@@ -87,3 +87,96 @@ def test_compute_nav_with_cost(tmp_path):
     expected = 11 * 0.999 / (10 * 1.001) - 1
     assert abs(nav["daily_ret_net"].iloc[0] - expected) < 1e-9
     assert abs(nav["gross_nav"].iloc[0] - 1.10) < 1e-9   # gross = 11/10-1 = 0.10
+
+
+# ---------------------------------------------------------------------------
+# Task 6a: 涨停买入拦截（predict_day topk 不含封涨停）
+# ---------------------------------------------------------------------------
+def test_predict_day_limit_up_filtered(qlib_init):
+    """topk 中不得含封涨停（change_941 >= limit_up），且 |topk| <= 10。"""
+    from qlib_ifind_beta.live.inference import predict_day
+    result = predict_day("2026-07-02")
+    for c in result["topk"]:
+        assert c["change_941"] < c["limit_up"], f"{c['code']} 封涨停却进 topk（买入拦截失效）"
+    assert len(result["topk"]) <= 10
+
+
+# ---------------------------------------------------------------------------
+# Task 6b: 无前视（handler end_time == T，不扩展到 T+1）
+# ---------------------------------------------------------------------------
+def test_predict_day_no_lookahead(qlib_init, monkeypatch):
+    """handler end_time 必须 == 推理日 T（不 fetch T+1 label 数据 → 无前视）。"""
+    from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
+    from qlib_ifind_beta.live import inference
+
+    captured = {}
+    orig_init = MinuteEnhancedHandler.__init__
+
+    def spy(self, *a, **kw):
+        captured["end_time"] = kw.get("end_time")
+        orig_init(self, *a, **kw)
+
+    monkeypatch.setattr(MinuteEnhancedHandler, "__init__", spy)
+    inference.predict_day("2026-07-02")
+    assert captured.get("end_time") == "2026-07-02", \
+        f"handler end_time={captured.get('end_time')} 超 T（前视泄漏）"
+
+
+# ---------------------------------------------------------------------------
+# Task 6c: 跌停卖出拦截（settle_prev: change <= limit_down → blocked, sell_price=NaN）
+# ---------------------------------------------------------------------------
+def test_settle_prev_limit_down_blocked(tmp_path):
+    """T+1 封跌停的持仓 → blocked=True, sell_price=NaN（递延，该笔 ret=0 持平）。"""
+    from qlib_ifind_beta.live.track import settle_prev
+    sig_p, set_p = tmp_path / "sig.csv", tmp_path / "set.csv"
+    pd.DataFrame([
+        {"date": "2026-07-01", "code": "A", "score": 0.9, "price_941": 10.0,
+         "change_941": 0.0, "limit_up": 0.095, "limit_down": -0.095, "in_topk": True},
+        {"date": "2026-07-01", "code": "B", "score": 0.8, "price_941": 20.0,
+         "change_941": 0.0, "limit_up": 0.095, "limit_down": -0.095, "in_topk": True},
+    ]).to_csv(sig_p, index=False)
+    n = settle_prev("2026-07-01", "2026-07-02",
+                    close_lookup={"A": 11.0, "B": 18.0},
+                    change_lookup={"A": 0.05, "B": -0.10},      # B 封跌停
+                    limit_down_lookup={"A": -0.095, "B": -0.095},
+                    signals_path=sig_p, settle_path=set_p)
+    assert n == 2
+    df = pd.read_csv(set_p).set_index("code")
+    assert bool(df.loc["A", "blocked"]) is False
+    assert df.loc["A", "sell_price"] == 11.0
+    assert bool(df.loc["B", "blocked"]) is True
+    assert pd.isna(df.loc["B", "sell_price"])
+
+
+# ---------------------------------------------------------------------------
+# Task 6d: record_signal 幂等 + in_topk 标记
+# ---------------------------------------------------------------------------
+def test_record_signal_idempotent(tmp_path):
+    """同 date 二次写入幂等（不重复）；in_topk 标记封涨停剔除（A 入选，B 封涨停）。"""
+    from qlib_ifind_beta.live.track import record_signal
+    cand_a = {"code": "A", "score": 0.9, "price_941": 10.0, "change_941": 0.02,
+              "limit_up": 0.095, "limit_down": -0.095}
+    cand_b = {"code": "B", "score": 0.8, "price_941": 20.0, "change_941": 0.10,
+              "limit_up": 0.095, "limit_down": -0.095}   # 封涨停
+    result = {"date": "2026-07-02", "candidates": [cand_a, cand_b], "topk": [cand_a]}
+    p = tmp_path / "sig.csv"
+    record_signal(result, p)
+    record_signal(result, p)                # 二次（幂等）
+    df = pd.read_csv(p)
+    assert len(df) == 2                      # 不重复
+    assert bool(df[df.code == "A"].iloc[0]["in_topk"]) is True
+    assert bool(df[df.code == "B"].iloc[0]["in_topk"]) is False
+
+
+# ---------------------------------------------------------------------------
+# Task 6e: daily IC 边界（< 5 对 → None）
+# ---------------------------------------------------------------------------
+def test_daily_ic_too_few_returns_none(tmp_path):
+    """< 5 对 score/label → Spearman 无意义，返回 None。"""
+    from qlib_ifind_beta.live.track import daily_ic
+    p = tmp_path / "sig.csv"
+    pd.DataFrame([
+        {"date": "2026-07-02", "code": "A", "score": 0.9},
+        {"date": "2026-07-02", "code": "B", "score": 0.8},
+    ]).to_csv(p, index=False)
+    assert daily_ic(p, {"A": 0.01, "B": 0.02}, "2026-07-02") is None
