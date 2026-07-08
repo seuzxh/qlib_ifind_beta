@@ -141,3 +141,31 @@ MINUTE_FACTOR_OPENING_T2_FIELDS = (
     "close_pos_5m_t2",
     "vol_ratio_5m_t2",
 )
+
+# 36th-38th materialized bins — 上证指数 T 日 9:30-9:40 开盘共振因子（goal 2026-07-08「分钟尺度
+# regime」实做，唯一原则性未测杠杆）。来源 SH000001 1min bin（cn_data_1min/features/sh000001/，
+# probe-verified：604 天覆盖，factor≈1.0，test W1/W2/valid 三窗 0 缺失，仅 train 早期 29 天 6%
+# 缺失 → DropnaProcessor drop，与 §L1 已接受的 4.4% 误杀同量级）。
+#
+# 用户领域模型（faithful 重解读）：「分钟频只能观测 T 日的开盘阶段，所以我需要结合指数（大势）
+# 和 T-1 之前的 K 线来判断个股是否是共振、启动、高潮或者惯性冲高」—— 本质是 **T 日 9:30-9:40
+# 开盘分钟内，个股 vs 指数的横截面相对强度信号**（尺度恰与 ~1.5 天 label 对齐，无 §28 日频
+# regime 的 scale 错配）。champion 18 因子全 per-stock、无指数维度 → idx 因子是真增量；
+# LGBModel 自动学「个股开盘动量 × 大势开盘强度」交互 = 用户「共振」语义（市场强势开盘日，
+# 个股开盘动量排序权重更高）。
+#
+# 3 因子与 champion 3 个代表早盘因子精确配对（公式同构，仅输入从个股换成 SH000001 1min 早盘
+# slot 1-10），刻画的都是「大势开盘态势」单一维度，供树模型学个股×大势交互：
+#   - idx_open_ret_10   = idx_close[9]/idx_open[0]-1   （配 startup_total，开盘整体强度）
+#   - idx_open_mom_5m   = idx_close[9]/idx_close[4]-1  （配 startup_mom_5m，开盘 5min 动量）
+#   - idx_open_accel_5m = (idx_c[9]/idx_o[5]-1)-(idx_c[3]/idx_o[0]-1)（配 accel_5m，开盘加速度）
+# slot 口径：open[0]/close[4]/close[9] = slot 1/5/10（09:31/09:35/09:40），与个股 morning2d
+# 列索引完全一致（FIRST_FEATURE_SLOT=1 起）。物化 broadcast：每只股 overlay bin 存同日同值的
+# idx 因子（Plan A per-stock broadcast，复用 scatter 的 valid/rel_v，仅依赖 code 的 si_dc，
+# 与因子来源无关）→ handler $idx_open_ret_10 等直接消费，无前视（T 日 9:40 ≪ 9:41 决策）。
+INDEX_OPENING_SRC = "SH000001"   # 上证综指 1min 共振源（区别 benchmark SH000300）
+INDEX_OPENING_FIELDS = (
+    "idx_open_ret_10",       # 指数开盘 10min 整体涨幅 → 配 startup_total，大势开盘强度
+    "idx_open_mom_5m",       # 指数开盘 5min 动量 → 配 startup_mom_5m，大势加速
+    "idx_open_accel_5m",     # 指数开盘加速度 → 配 accel_5m，大势启动/高潮共振
+)

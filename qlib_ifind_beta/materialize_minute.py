@@ -1,15 +1,19 @@
 """Materialize minute factors + $price_941 as day.bin into the overlay.
 
-Writes 35 day.bins/stock: 14 baseline minute factors (MINUTE_FACTOR_FIELDS) + 4
+Writes 38 day.bins/stock: 14 baseline minute factors (MINUTE_FACTOR_FIELDS) + 4
 enhanced extras (MINUTE_FACTOR_EXTRA_FIELDS: vol_vs_yest_t2/t3/t5 +
 overnight_gap) + 5 T-1 tail factors (MINUTE_FACTOR_TAIL_FIELDS, goal 2026-07-07) +
 5 T-1 opening + 5 T-2 opening factors (MINUTE_FACTOR_OPENING_T1_FIELDS /
-_T2_FIELDS, goal 2026-07-08「扩展不同区间 1min 因子」) + $price_941 (deal price)
-+ $change_941 (涨跌停拦截用). The 14 baseline are frozen for m14 reproducibility;
-the 4 extras feed MinuteEnhancedHandler (14 + 4 = 18-factor champion, backtest-log
-§22); the 5 tail factors feed MinuteEnhancedTailHandler (T-1 尾盘族, 23 因子);
-the 10 opening-T1/T2 factors feed MinuteEnhancedOpeningT1Handler (T-1/T-2 开盘族,
-破 IC→超额墙「同 regime 滞后」假设, spec 2026-07-08-t1-opening-factors-design).
+_T2_FIELDS, goal 2026-07-08「扩展不同区间 1min 因子」) + 3 上证指数开盘共振因子
+(INDEX_OPENING_FIELDS, goal 2026-07-08「分钟尺度 regime」, broadcast 同值 per
+Plan A) + $price_941 (deal price) + $change_941 (涨跌停拦截用). The 14 baseline
+are frozen for m14 reproducibility; the 4 extras feed MinuteEnhancedHandler (14 +
+4 = 18-factor champion, backtest-log §22); the 5 tail factors feed
+MinuteEnhancedTailHandler (T-1 尾盘族, 23 因子); the 10 opening-T1/T2 factors
+feed MinuteEnhancedOpeningT1Handler (T-1/T-2 开盘族, 破 IC→超额墙「同 regime
+滞后」假设, spec 2026-07-08-t1-opening-factors-design); the 3 idx opening factors
+feed MinuteResonanceHandler (18 + 3 = 21 因子, 破 IC→超额墙「分钟尺度 regime」
+实做, backtest-log §29).
 
 Reads cn_data_1min 1min bins (close/open/high/low/volume) per stock, slices each
 trading day's morning window (slots 1-11 = 09:31-09:41: 10 feature bars slots 1-10
@@ -47,7 +51,8 @@ import numpy as np
 from .binio import read_bin, write_bin
 from .config import (
     BUY_SLOT, DAY_CAL, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FREQ,
-    FIRST_FEATURE_SLOT, MIN_CAL, MINUTE_CHANGE_941_FIELD, MINUTE_DEAL_PRICE_FIELD,
+    FIRST_FEATURE_SLOT, INDEX_OPENING_FIELDS, INDEX_OPENING_SRC, MIN_CAL,
+    MINUTE_CHANGE_941_FIELD, MINUTE_DEAL_PRICE_FIELD,
     MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS, MINUTE_FACTOR_OPENING_T1_FIELDS,
     MINUTE_FACTOR_OPENING_T2_FIELDS, MINUTE_FACTOR_TAIL_FIELDS,
     REAL_BARS_PER_DAY, SLOTS_PER_DAY, TAIL_FIRST_SLOT, TAIL_SLOT_COUNT,
@@ -130,6 +135,63 @@ def _load_day_calendar_lookup():
     return _cal_cache["day"]
 
 
+def _load_index_opening_factors():
+    """Cache: read SH000001 1min close/open, scatter onto the global min-cal morning
+    grid (slots FIRST_FEATURE_SLOT..BUY_SLOT = 1..11 = 09:31-09:41), compute 3 idx
+    opening factors (n_min_days long, min-cal space).
+
+    Returns dict {field: np.float64 array[n_min_days]} or None if the SH000001 1min
+    source is missing/misaligned. Cached once per process. The 3 factors mirror
+    champion's startup_total / startup_mom_5m / accel_5m formulas (same column
+    indices into the morning window, c[:,9]/o[:,0], c[:,9]/c[:,4], accel), so the
+    tree-model 个股×大势 interaction is faithful to user's「共振」semantics. NaN
+    where SH000001 1min is missing (train-early ~6%, probe-verified test/valid 0%).
+
+    Broadcast contract (Plan A, per-stock broadcast): every stock's overlay bin
+    stores the SAME per-day idx values. The scatter's valid/rel_v mask in
+    materialize_minute_instrument depends only on `code`'s si_dc (daily close
+    alignment), NOT on the factor source → idx factors reuse that mask verbatim,
+    zero new alignment logic. SH000001-missing min-cal days → idx NaN → that day's
+    idx bin is NaN for ALL stocks → DropnaProcessor drops the day pool-wide (the
+    accepted ~6% train-side kill, §L1 guard parity)."""
+    if "idx_opening" in _cal_cache:
+        return _cal_cache["idx_opening"]
+    idx_dir = Path(FEATURES_1MIN_SRC) / INDEX_OPENING_SRC.lower()
+    p_close = idx_dir / "close.1min.bin"
+    p_open = idx_dir / "open.1min.bin"
+    if not p_close.exists() or not p_open.exists():
+        _cal_cache["idx_opening"] = None
+        return None
+    si_c, close_i = read_bin(p_close)
+    si_o, open_i = read_bin(p_open)
+    if (close_i.size == 0 or si_c is None or si_o is None or si_o != si_c
+            or open_i.size != close_i.size):
+        _cal_cache["idx_opening"] = None
+        return None
+    _, min_slots = _load_min_calendar()
+    morning_rows = np.where(
+        (min_slots >= FIRST_FEATURE_SLOT) & (min_slots <= BUY_SLOT)
+    )[0]
+    n_min_days = morning_rows.size // _MORNING_WINDOW
+
+    def m2d(arr):
+        """SH000001 morning bars on the global grid → (n_min_days, _MORNING_WINDOW).
+        Identical scatter to stock morning2d, only the source bin differs."""
+        flat = np.full(morning_rows.size, np.nan, dtype=np.float64)
+        valid = (morning_rows >= si_c) & (morning_rows < si_c + arr.size)
+        flat[valid] = arr[morning_rows[valid] - si_c].astype(np.float64)
+        return flat.reshape(n_min_days, _MORNING_WINDOW)
+
+    c, o = m2d(close_i), m2d(open_i)
+    fac = {}
+    with np.errstate(invalid="ignore", divide="ignore"):
+        fac["idx_open_ret_10"] = c[:, 9] / o[:, 0] - 1.0
+        fac["idx_open_mom_5m"] = c[:, 9] / c[:, 4] - 1.0
+        fac["idx_open_accel_5m"] = (c[:, 9] / o[:, 5] - 1.0) - (c[:, 3] / o[:, 0] - 1.0)
+    _cal_cache["idx_opening"] = fac
+    return fac
+
+
 def _read_1min_fields(code: str):
     """Return (start_index, dict field→float32 array) or (None, None) if missing/misaligned."""
     d = Path(FEATURES_1MIN_SRC) / code.lower()
@@ -155,9 +217,10 @@ def _read_1min_fields(code: str):
 
 
 def materialize_minute_instrument(code: str) -> bool:
-    """Read 1min + daily bins for `code`, write 35 day.bins: 14 baseline minute
+    """Read 1min + daily bins for `code`, write 38 day.bins: 14 baseline minute
     factors + 4 enhanced extras (vol_vs_yest_t2/t3/t5 + overnight_gap) + 5 T-1
-    tail + 5 T-1 opening + 5 T-2 opening factors + $price_941 + $change_941.
+    tail + 5 T-1 opening + 5 T-2 opening factors + 3 idx opening resonance
+    factors (broadcast SH000001 same-value) + $price_941 + $change_941.
 
     Returns True on success; False if the 1min source is missing/misaligned, or the
     daily close/factor/open bin is missing/misaligned (caller treats as "no minute
@@ -414,4 +477,16 @@ def materialize_minute_instrument(code: str) -> bool:
     write_bin(dst_dir / f"{MINUTE_DEAL_PRICE_FIELD}.{FREQ}.bin", si_dc, out_p941)
     write_bin(dst_dir / f"{MINUTE_CHANGE_941_FIELD}.{FREQ}.bin", si_dc, out_change941)
     write_bin(dst_dir / f"{_OVERNIGHT_GAP_FIELD}.{FREQ}.bin", si_dc, out_overnight_gap)
+
+    # 上证指数 T 日 9:30-9:40 开盘共振因子（goal 2026-07-08，broadcast 同值到每只股）。
+    # Plan A：idx 因子对全池同日同值，复用上面个股 scatter 的 valid/rel_v（仅依赖 code 的
+    # si_dc，与因子来源无关）。SH000001 缺失的 min-cal 日 idx 因子为 NaN → 全池同日 NaN →
+    # DropnaProcessor drop（train ~6%，test/valid 0%，probe-verified）。无前视：idx 早盘
+    # 9:40 ≪ 9:41 决策。详见 config.INDEX_OPENING_FIELDS 注释 + backtest-log §29。
+    idx_fac = _load_index_opening_factors()
+    if idx_fac is not None:
+        for name in INDEX_OPENING_FIELDS:
+            out_idx = np.full(n_out, np.nan, dtype=np.float32)
+            out_idx[rel_v] = idx_fac[name][valid].astype(np.float32)
+            write_bin(dst_dir / f"{name}.{FREQ}.bin", si_dc, out_idx)
     return True
