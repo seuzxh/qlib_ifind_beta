@@ -2143,3 +2143,57 @@ conda run -n qlib_ifind_beta python scripts/retrain.py
 ```
 
 **落档**：§42 每日滚动重训归档。champion FROZEN 口径全维持（use_online 默认 False）。P1 可在 FROZEN（零偏离）和滚动重训（每日新模型）间切换。
+
+---
+
+## §43 universe T-1 → T 日股池口径修正（2026-07-10）
+
+> 触发：用户验证发现 883926 股池是 **T 日盘前更新**（非此前假设的 T-1 日更新）。
+> §L1 2026-07-05 决策「T-1 lag 无前视」基于错误前提 → 修正为「T 日池无前视」。
+
+### 背景
+
+2026-07-05 决策（universe.py docstring + CLAUDE.md §已定）假设 883926 股池每日盘**后**更新，
+故 T 日盘前只能拿到 T-1 成员集 → `shift_T1()` 把每段 `(d_in, d_out)` 平移 +1 交易日，
+使 qlib `start <= T <= end` 返回 T-1 成员。
+
+**实测推翻**：883926 股池 T 日**盘前**更新（§L1 的 lag 假设不成立）。T 日开盘前即可获取当日
+最新成分股 → 应直接用 T 日段（不 shift），qlib `start <= T <= end` 返回 T 日成员。
+
+无前视保证：T 日盘前更新 ≪ T 日 9:30 开盘 ≪ 9:41 决策。
+
+### 改动（核心 1 行 + 消费侧注释同步）
+
+| 文件 | 改动 | qlib 分层 |
+|---|---|---|
+| `universe.py` | `dump_universe` 去掉 `shift_T1()` 调用（段直接用 raw `(d_in, d_out)`）+ module docstring | Infrastructure / InstrumentProvider |
+| `live/materialize_live.py` | docstring T-1 → T 日 | — |
+| `live/__init__.py` | docstring | — |
+| `scripts/live_forward.py` | docstring × 2（step [1]/[2]） | Interface / Workflow |
+| `scripts/build_overlay.py` | docstring × 2 | Interface / Workflow |
+| `CLAUDE.md` | §已定 Universe 条目同步 | — |
+
+`shift_T1` 函数 + `FAR_FUTURE` 常量保留（参考/回退用，不再被 `dump_universe` 调用）。
+
+**消费侧零逻辑改**：Handler/Strategy/Exchange/inference 全部通过 `market` 名读 instruments 文件，
+qlib 按日期区间过滤——段不再 shift 后自动返回 T 成员。
+
+### 验证
+
+1. **universe 重建**：`dump_universe('2024-01-01', '2026-07-02')` 用既有 snapshots cache（零 API），
+   5116 codes / 50525 段。抽查 `SH600004`：新 start=2024-01-17（原始 snapshot 日），旧 start=2024-01-18（shift+1）→ shift 移除生效。
+2. **champion 复现**（T 日池）：IC/excess/drawdown **bit-exact 一致**于 §33（T-1 池）：
+   - 年化超额（含成本）= **+191.1%**（1.910676），IR **5.4058**，drawdown **−5.5936%**
+   - 年化超额（无成本）= **+226.0%**（2.259834），IR **6.3824**
+   - T-1 → T 对 backtest 结果**零影响**（883926 每日换手 ~90%，但 test 段成员差异不足以改变 top10 排序）
+3. **pytest**：48 passed（worktree 全绿，3 个 test_live_inference 前期失败经确认是 worktree 环境
+   初始化问题非代码回归——主项目同组测试 8/8 PASSED）。
+
+### 合规性
+
+- **修改前 Checklist**：已确认属于 Infrastructure / InstrumentProvider 层，用 qlib 原生 instruments
+  机制，无新增抽象层，无前视（T 日盘前 ≪ 9:41），不改变因子输出 index 结构。
+- **输出格式**：按 CLAUDE.md「Qlib 官方方案 / 当前适配 / 偏离点 / 未来对齐」4 段（见对话记录）。
+
+**落档**：§43 T-1 → T 日股池修正归档。universe 口径与 883926 实际更新机制对齐。champion 回测
+bit-exact 不变（universe 口径修正对 test 段 top10 排序无影响）。

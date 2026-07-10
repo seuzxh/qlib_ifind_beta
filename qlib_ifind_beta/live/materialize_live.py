@@ -1,4 +1,4 @@
-"""P1 实战对接 — T-1 池增量物化 day.bins。
+"""P1 实战对接 — T 日池增量物化 day.bins。
 
 薄封装 overlay + materialize + materialize_minute。零新物化逻辑。
 materialize_minute_instrument 幂等全量重算（读 cn_data_1min 所有可得日 → 重写 day.bin），
@@ -12,10 +12,11 @@ from qlib_ifind_beta.config import INSTRUMENTS_DST, UNIVERSE_MARKET
 
 
 def load_pool(target_date: str, market: str = UNIVERSE_MARKET) -> list[str]:
-    """读 instruments/<market>.txt → target_date 当日在册 codes（T-1 lag：查 T 返回 T-1 集）。
+    """读 instruments/<market>.txt → target_date 当日在册 codes（T 日池：查 T 返回 T 日集）。
 
     文件 TSV：code\\tstart_date\\tend_date（时变段）。过滤 start <= target_date <= end，
-    去重返回（~100/日；区别于全历史 5116 unique × 50525 段）。
+    去重返回（~100/日；区别于全历史 5116 unique × 50525 段）。883926 股池 T 日盘前更新，
+    故 T 日查询返回的是 T 日当天的成分股（2026-07-10 起生效，此前为 T-1 lag）。
     """
     p = INSTRUMENTS_DST / f"{market}.txt"
     codes: set[str] = set()

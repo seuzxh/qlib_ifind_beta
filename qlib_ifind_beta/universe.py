@@ -6,15 +6,21 @@ p03473 live-verified schema (2026-07-05); historical ``iv_date`` confirmed worki
 * ``p03473_f002`` = constituent code in **iFinD** format ('000536.SZ')
 * ``p03473_f003`` = name (Chinese)
 
-**Time-varying universe (T-1 lag, no lookahead)** — user decision 2026-07-05:
-"883926 的股池每日都可能发生变化；T 日的观察股池 = 883926 的 T-1 日股池".
+**Time-varying universe (T-day pool, no lookahead)** — user decision 2026-07-10:
+"883926 股池 T 日盘前更新；T 日的观察股池 = 883926 的 T 日股池".
 
 Mechanism: for each constituent code, find its continuous membership segments
-``[d_in, d_out]`` from daily snapshots, then register each segment shifted +1
-trading day → ``[next(d_in), next(d_out)]``. A T-day ``D.features`` query returns
-instruments with ``start <= T <= end`` ⇔ ``d_in <= T-1 <= d_out`` ⇔ exactly the
-T-1 membership. ``Strategy``/``Exchange`` need zero changes — qlib filters by the
-per-instrument date range natively.
+``[d_in, d_out]`` from daily snapshots and register them **as-is** (no shift).
+A T-day ``D.features`` query returns instruments with ``start <= T <= end`` ⇔
+exactly the T-day membership. The 883926 index is updated pre-market on day T,
+so the T-day pool is known before the 9:41 decision → no lookahead.
+``Strategy``/``Exchange`` need zero changes — qlib filters by the per-instrument
+date range natively.
+
+**History**: 2026-07-05 to 2026-07-09 used T-1 lag (``shift_T1`` +1 trading day)
+under the assumption that the 883926 pool was T-1 updated. Verified 2026-07-10
+that it is actually T-day pre-market updated → ``dump_universe`` now uses raw
+segments. ``shift_T1`` + ``FAR_FUTURE`` retained for reference / rollback.
 
 Snapshots are cached to ``data/universe_snapshots.csv`` (long format, resumable);
 re-running ``dump_universe`` after a successful backfill hits zero iFinD API.
@@ -172,20 +178,24 @@ def shift_T1(segments: dict[str, list[tuple[str, str]]],
 def dump_universe(start: str = "2024-01-01", end: str = "2026-07-02",
                   code_ifind: str = INDEX_CODE_IFIND, market: str = UNIVERSE_MARKET,
                   cache_path: Path = SNAPSHOT_CACHE) -> tuple[Path, list[str]]:
-    """Time-varying end-to-end: daily snapshots → segments → T-1 shift → instruments file.
+    """Time-varying end-to-end: daily snapshots → segments → instruments file (T-day pool).
 
     Writes ``instruments/<market>.txt`` (TSV ``code\\tstart\\tend``, one row per
-    code×segment). Returns (path, sorted list of every historical code seen —
-    the superset build_overlay must link+materialize so backtests reaching into
-    the train window see bins for stocks no longer in the index today).
+    code×segment). Segments are used **as-is** (no T-1 shift): the 883926 pool is
+    updated pre-market on day T, so qlib's ``start <= T <= end`` returns exactly
+    the T-day membership — known before the 9:41 decision → no lookahead.
+    Returns (path, sorted list of every historical code seen — the superset
+    build_overlay must link+materialize so backtests reaching into the train
+    window see bins for stocks no longer in the index today).
     """
     from .overlay import write_market_file
     snapshots = fetch_history_snapshots(start, end, code_ifind, cache_path)
     segments = snapshots_to_segments(snapshots)
-    shifted = shift_T1(segments)  # uses full day.txt
-    records = [(code, s, e) for code, segs in shifted.items() for (s, e) in segs]
+    # T-day pool: 883926 updated pre-market on T → no shift needed (was shift_T1
+    # before 2026-07-10; see module docstring History section).
+    records = [(code, s, e) for code, segs in segments.items() for (s, e) in segs]
     path = write_market_file(market, records)
-    all_codes = sorted(shifted.keys())
+    all_codes = sorted(segments.keys())
     n_seg = len(records)
     print(f"universe: {len(all_codes)} historical codes, {n_seg} segments "
           f"(avg {n_seg / max(len(all_codes), 1):.1f} seg/code) → {path}")

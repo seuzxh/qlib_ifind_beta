@@ -3,7 +3,7 @@
 Idempotent — safe to re-run. Steps:
   1. link_calendars()           — symlink readonly calendars/ dir
   2. link_instruments()         — symlink instruments/all.txt
-  3. dump_universe(start,end)   — iFinD p03473 daily snapshots → T-1 time-varying
+  3. dump_universe(start,end)   — iFinD p03473 daily snapshots → T-day time-varying
                                    instruments/highbeta883926.txt (+ historical code superset)
   4. per code: link_stock()     — 7 base bins symlinked from qlib_data
             + materialize_instrument() — change/limit_up/limit_down derived
@@ -37,10 +37,10 @@ def build(start: str = DUMP_START, end: str = DUMP_END) -> dict:
     overlay.link_instruments()
     print("✓ calendars + instruments/all.txt symlinked")
 
-    # 3. universe (iFinD p03473, time-varying T-1 pool over [start, end])
+    # 3. universe (iFinD p03473, time-varying T-day pool over [start, end])
     _, codes = universe.dump_universe(start, end)
     summary["n_constituents"] = len(codes)
-    print(f"✓ universe: {len(codes)} historical codes (T-1 time-varying) "
+    print(f"✓ universe: {len(codes)} historical codes (T-day time-varying) "
           f"→ instruments/{UNIVERSE_MARKET}.txt")
 
     # 4. per-stock overlay + derived bins (daily change/limit + minute factors)

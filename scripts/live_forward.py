@@ -1,7 +1,7 @@
 """P1 实战对接 — 每日入口（orchestration）。
 
 工作日 15:35 触发（cn_data_1min 15:30 同步后）。五步：
-  [1] universe 增量（iFinD p03473 T-1 快照）—— 可 --skip-universe 跳过（无网络/离线时）
+  [1] universe 增量（iFinD p03473 T 日盘前快照）—— 可 --skip-universe 跳过（无网络/离线时）
   [2] materialize 池内 day.bins（~100 codes）—— 可 --skip-materialize 跳过（dry-run 时）
   [3] predict_day(T) → record_signal
   [4] settle_prev(T-1, T) —— 用 T 日 close/change/limit_down 回填 T-1 信号
@@ -62,7 +62,7 @@ def _aux_lookups(date: str, fields: list[str],
 def run(date: str, skip_universe: bool = False, skip_materialize: bool = False) -> None:
     print(f"▶ P1 live_forward date={date} skip_universe={skip_universe} skip_materialize={skip_materialize}")
 
-    # [1] universe 增量（iFinD p03473 T-1 快照；失败用既有池继续）
+    # [1] universe 增量（iFinD p03473 T 日盘前快照；失败用既有池继续）
     if not skip_universe:
         try:
             from qlib_ifind_beta import universe
@@ -73,7 +73,7 @@ def run(date: str, skip_universe: bool = False, skip_materialize: bool = False) 
     else:
         print("⏭ [1] universe 跳过")
 
-    # [2] materialize 池内（T-1 membership，~100 codes；幂等全量重算）
+    # [2] materialize 池内（T 日 membership，~100 codes；幂等全量重算）
     if not skip_materialize:
         codes = load_pool(date)
         summ = materialize_pool(codes)
