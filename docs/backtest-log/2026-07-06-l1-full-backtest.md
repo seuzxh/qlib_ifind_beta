@@ -1774,3 +1774,316 @@ dry-run 暴露两个真实口径偏差，按第一性原理修正：
 6. **sticky holdings 探索（§35.5 杠杆①）**：唯一能动结构性换手（89% universe 轮换）的策略层杠杆，但需解冻 FROZEN label horizon（~1.5d → 多日持有超预测视野，需重设计 label/hold 节奏）。属大改，需用户明确授权。
 
 **落档**：§36 P1 实战对接完成。champion 从回测验证 → 每日可执行信号 + 纸面前向跟踪。FROZEN 全程未动。P1 零外部依赖，可立即每日盘后跑（`scripts/live_forward.py --date T`）。P2/P3 待用户裁定外部依赖选型。6 项决策清单明早整理。
+
+---
+
+## §37 champion 主源穷尽性再证（2026-07-09）：拥挤 / rank 曲线 / 条件 IC 三轮只读
+
+> 触发：指令点 3「充分分析已有的策略和回测 log」。前序「7 字段体制内无提升路径」是二手断言（来自 §23-§35 综述），本会话首次用**主源只读实证**（gate-compliant：不改 champion / 不解冻 label / 不重训 / 无前视 / 无 ifind）从三个**墙没做过的口径**复核。三轮**独立再证**穷尽，**未踩 rule #7**（不是重做 §23-§31 的因子加法墙，是新诊断角度）。
+
+### 37.1 [A] 拥挤只读反事实 — item 7 先验反转
+
+拥挤代理 `vol_ratio_5_20 = Mean($volume,5)/Mean($volume,20)`，T-1 `shift(1)` 防 T 日全天量前视。test 61 天。
+
+- 全 universe Spearman(crowd,label) = **−0.024**，>0 占比 49.2% → 拥挤信号**近零**（§31 该样本不复现 −0.235）。
+- top-10 内 hi−lo 拥挤 label 差 = **+0.0037** → champion **不接盘**（更拥挤的票略好）。
+- 去拥挤反事实 `pred − λ·z(crowd)`：λ=0(champion) +1.105%/日 → λ=0.5 +0.353%/日(**−71.4pp**)，best λ=0。
+
+**结论**：volume 代理下去拥挤**毁超额**，「接盘」证伪 → item 7（扩 turn 拥挤）先验**中性→偏负**，建议降优先级。caveat：非真 turn、不计 n_drop 换手/成本。
+
+### 37.2 [B] rank 曲线 @ 部署 topk=10 — 5 重墙的配置裂缝
+
+**关键裂缝**：§23-§26 5 重墙**全在 topk=20/n_drop=15 旧配置**证伪「加因子」；FROZEN champion 是 **topk=10/n_drop=8**（§33 后），更集中、边界更锐。墙**从未在部署配置 topk=10 复核**。本节只读检验 champion pred 在部署边界处的 rank 曲线（test 61 天，每日按 pred 分桶算已实现 label）：
+
+| 桶 | r1-3 | r4-6 | r7-10 | r11-15 | r16-20 | r21-30 | r31+ |
+|---|---|---|---|---|---|---|---|
+| 日均% | +0.92 | +1.44 | +0.99 | +1.02 | +1.21 | +0.36 | +0.45 |
+
+topk 候选窗口等权已实现（gross，不计成本）：top-5 +1.105% / top-8 **+1.212%** / top-10 +1.105%(FROZEN) / top-12 +1.124% / top-15 +1.075% / top-20 +1.110%。top-8 gross > top-10，但 §33 在 **net**（含 n_drop 换手成本）下 10/8 胜 → 一致（top-8 高 gross 被更高换手成本吃掉）。
+
+### 37.3 [B-sig] 显著性诚实修正 — 「极端头部反转」是噪声
+
+初读 r1-3(+0.92%) < r4-6(+1.44%) 似「极端头部过度延伸反转」（佐证 §34 反转门）。**验显著性后推翻**：
+
+- r4-6 − r1-3 日均差 +0.52%，但 **Wilcoxon p=0.284**、**Binomial p=0.153**、r4-6>r1-3 占比仅 57.4% → **不显著，是噪声**。
+- 细粒度逐桶（r1…r20）暴露单股单日离群主导：r3(+0.22%)/r9(+0.17%)/r19(+0.16%) 近零但 r20(+2.85%!) 爆表 → top-20 内部逐桶是噪声，非系统性形态。
+
+**真正的结构（唯一显著）**：相邻桶最大下跳 = **r20→r21-30 = −2.49pp**（远大于其余跳跃）→ **champion 的真边 = 分离 top-20 quintile，悬崖在 rank 20 不在 10**。
+
+### 37.4 [B-cont] within-top 排序信号分层
+
+- **within-top-20 IC（champion pred 自身 vs label，条件于 rank≤20）= +3.09%**：弱正信号，champion 对 quintile 内部有边际排序力。
+- **within-top-10 IC = −0.008**（§37.6）：**头部 10 内排序归零**。
+- 综述：边 = rank-20 悬崖；within-top-20 弱正（+3.09%）；within-top-10 噪声。**topk=10 = 「rank-20 悬崖边 vs 换手成本」折中**（§33 net 优化的机制解释，独立坐实）。
+
+### 37.5 [C] T-1 K 线结构因子 within-top-20 条件 IC — 墙的筛选口径盲点
+
+§25/§26 用**全截面 RankIC**（|ICIR|>0.4）选候选 → 全踩 reshuffle 墙。但 quintile 分离已饱和时，全截面 IC 与「能否在 champion top-20 内加分排序」**不等价**。真正相关的是 **within-top-20 条件 RankIC**（在 champion 已选中的 top-20 里，候选能否进一步分辨 label）。测一族 champion 几乎没用到的 T-1 日频 K 线结构因子（指令点 2「结合 T-1 之前的 K 线」，全部 `Ref(...,1)` 外包无前视，7 字段内）：
+
+| 因子 | 全截面 IC | ICIR | within-top20 IC | ICIR | gap | 解读 |
+|---|---|---|---|---|---|---|
+| rev1（T-1 反转） | +0.44% | +0.031 | +0.04% | +0.002 | −0.40% | within 归零 |
+| mom5_t1 | +1.33% | +0.089 | +1.18% | +0.045 | −0.14% | 弱于 champion |
+| mom10_t1 | +1.35% | +0.101 | +0.68% | +0.026 | −0.67% | 弱于 champion |
+| volratio_t1 | −2.76% | −0.179 | −2.62% | −0.112 | +0.14% | 负向、不加分 |
+| tr1（T-1 振幅） | −0.24% | −0.018 | −2.23% | −0.097 | −1.99% | within 反而恶化 |
+| pos20（区间位置） | +1.22% | +0.094 | −0.22% | −0.009 | −1.44% | within 归零 |
+| dma20（偏离均线） | +2.49% | +0.166 | +2.00% | +0.080 | −0.49% | 弱于 champion |
+| gap_t1（T-1 跳空） | +1.43% | +0.112 | −0.32% | −0.013 | −1.75% | within 归零 |
+
+**全部 8 因子 within-top-20 IC ≤ +2.0%，无一超过 champion 自身 +3.09%**（即无一增加 within-top 排序信息）；gap 多为负（within 比全截面更弱）。
+
+### 37.6 三轮综述 — 主源穷尽性坐实 + item 7 bar 锐化
+
+**主源结论**（替代前序二手断言）：7 字段体制内 champion 因子改进路径**穷尽**，三轮独立口径再证：
+
+1. **拥挤**（§37.1）：volume 代理下去拥挤毁超额 −71.4pp，champion 不接盘。
+2. **rank 结构**（§37.2-4）：真边 = rank-20 悬崖（非 10）；within-top-20 弱正 +3.09%，within-top-10 噪声；极端头部反转 = 噪声（p=0.28）。
+3. **条件 IC**（§37.5）：8 个 T-1 K 线结构因子 within-top-20 IC 均 < champion +3.09%，无一增加 within-top 排序 → 墙的机制根因 = **champion 饱和 quintile 分离，within-top 无可挖信号**（任何加因子=纯 top 重排=中性偏破坏，正是 §23-§26 所见）。
+
+**item 7（扩字段新因子）bar 锐化**：合格线不是全截面 IC>0，而是 **within-top-20 条件 IC > +3.09%**（champion 自身基线）。7 字段 T-1 K 线族全不达标。真 turn/amount（item 7 的实质诉求）须过此具体 bar，而非泛泛「拥挤=金矿」。结合 §37.1（去拥挤毁超额），**item 7 先验偏负、降优先级**（两轮独立证据）。
+
+**未开自主路径**：三轮均为只读诊断，无一条改动 champion/label/策略即提升 IC/超额。能动 IC/超额 的下一步仍卡需授权决策：item 6（sticky holdings，需解冻 label horizon）、item 7（扩 turn/amount，先验已偏负）。
+
+**落档**：§37 三轮主源实证归档。脚本 `/tmp/crowding_posthoc_diag.py` / `/tmp/rankcurve_topk10.py` / `/tmp/rankcurve_significance.py` / `/tmp/within_top20_conditional_ic.py`（一次性，不入 repo）。Get笔记 §37-emp 同步拥挤实证（item 7 先验走弱）。
+
+### 37.7 新任务=§28 已证伪发现 + corr_20 缺口闭合（共振族条件 IC 补测）
+
+**主源核查推翻二手断言**：连续指令「添加日频因子 + 上证指数因子提升预测准确性」经 git 考古 = **§28（commit 19b4f7a, 2026-07-08）已实做并双证伪（第 8 重墙）**。commit message 明文「用户 /loop 任务『日频情绪因子 + 上证指数因子』= §27 morning report 选项 ② 的实做」。即新任务不是开放机会，是已测已败路径。**墙总数修正为 9 重**（§23-§31），非先前二手转述的「5 重」。
+
+- §28.A 因子层（12 Ref1 因子，含 ChangeInstrument SH000001 + beta_20）：W1 IC 0.0611 vs champion 0.0545（+12%，saga 首见真涨）但超额平（+0.4pp）；W2 OOS IC −15% / 超额 **−69.6pp**。W1 IC 涨 = 窗口过拟合（5/9/20d 因子对 ~1.5d label，scale 错配，与 Alpha158/full(85) 同病）。
+- §28.B 策略层（SH000001 情绪 lag1 解释 champion 逐日超额，pooled n=122）：相关 ≈0（bias +0.019 p=0.837 / rsv −0.008 p=0.931 / run −0.009 / vol +0.087），符号跨窗不一致=噪声；gate 模拟全毁收益。
+
+**corr_20 = §28 唯一 bug-drop 未测的 spec 因子**（用户「共振」核心，§28.A 因 qlib `Corr` 日历不齐崩剔除）。本节 pandas 显式对齐日历绕开 bug，算 corr_20[T]=corr(stock_ret, idx_ret, ending T-1)，shift(1) 防前视。口径沿用 §37.5 within-top-20 条件 RankIC（非重做墙：corr_20 从未测过，是补覆盖；非联想：实测而非推断）。test 62 天 / 2515 inst / 5799 行对齐。
+
+| 因子 | 全截面 IC | ICIR | within-top-20 IC | ICIR | 判定 |
+|---|---|---|---|---|---|
+| corr_20 | +3.24% | +0.238 | **+1.65%** | +0.073 | ✗ 未超基线 |
+| beta_20（§28 测过，新口径复核） | +3.78% | +0.253 | **−0.63%** | −0.029 | ✗ 负 |
+
+- corr_20 mean 0.318 / std 0.266；beta_20 mean 1.591 / std 1.529（高 beta 池内 beta 方差大，但 within-top-20 仍负→无分辨力）。
+- **校验**：本对齐下 champion pred 自身 within-top-20 IC = +1.09%（§37.6 基线 +3.09%）。同一对齐 corr_20 +1.65% ≈ champion 自身 +1.09%，ICIR 0.073 极小 → **不可分辨、无可挖信号**，加 champion=纯 top 重排。基线漂移（+3.09%↔+1.09%）本身坐实 within-top-20 信号弱/噪声（§37.4 结论）。
+
+**判定**：corr_20（共振核心、§28 唯一缺口）实测 **未达 within-top-20 条件 IC bar**，与 champion 自身弱信号不可分辨。**§28 共振族 falsification 覆盖闭合**；新任务（日频情绪 + 上证共振）= §28.A + §28.B + corr_20 全链坐实 = **已测已败，非开放机会**。gate-compliant 只读自主范围内，因子层 9 重墙 + §37 四轮主源复核 + corr_20 缺口闭合，**穷尽性再坐实**。能动 IC/超额 的下一步仍卡需授权决策：item 6（sticky holdings，需解冻 label horizon）、item 7（扩 turn/amount，先验偏负）。
+
+**落档**：§37.7 corr_20 闭合归档。脚本 `/tmp/corr20_conditional_ic.py`（一次性，不入 repo）。
+
+---
+
+### §37.8 未测族 within-top-20 条件 IC 补覆盖（vwap / 影线实体 / 量加速 / 20 日动量）
+
+**动机**：§37.4 结构性结论是 within-top-20 label 近噪声、预测所有因子都会败。但纪律要求「实测非推断」，且 7 字段中 **vwap 几乎未被挖**、`$open` 影线/实体族未测、量加速（仅测过 vol_ratio level）未测、20 日动量/RSV（仅测过 5/9/10）未测——未挖 vwap 就宣布穷尽 = 早熟。本节补测 10 个未测因子。
+
+**口径**：§37.5 within-top-20 条件 RankIC。全单 instrument qlib expression（无 ChangeInstrument/Corr → 无日历 bug），Ref1 防前视。只读、gate-compliant、非重做墙（这些族从未测过）。脚本 `/tmp/untested_family_conditional_ic.py`。
+
+| 因子 | 全截面 IC | ICIR | within-top-20 IC | ICIR | 判定（loose bar \|top20 IC\|>3.09%）|
+|---|---|---|---|---|---|
+| cvwap_t1（收盘 vs vwap） | −0.73% | −0.045 | −1.57% | −0.063 | ✗ |
+| vwap_pos_t1（vwap 日内位置） | +0.46% | +0.039 | **−4.99%** | −0.210 | ★ 反转 |
+| body_t1（实体方向） | −0.59% | −0.044 | −1.54% | −0.062 | ✗ |
+| upshad_t1（上影=抛压） | +3.37% | +0.282 | **+4.09%** | +0.167 | ★ |
+| lowshad_t1（下影=承接） | **+4.06%** | **+0.393** | +2.75% | +0.118 | ✗（全截面最强）|
+| volaccel_t1（量加速度） | −2.31% | −0.181 | **−4.74%** | −0.233 | ★ 反转 |
+| vol_trend3（短期量趋势） | −2.62% | −0.166 | −1.46% | −0.054 | ✗ |
+| mom20_t1（20 日动量） | −2.02% | −0.110 | **−3.12%** | −0.129 | ★ 反转 |
+| momrev_t1（5d-20d 动量差） | +1.85% | +0.099 | **+4.84%** | +0.174 | ★ |
+| rsv20_t1（20 日 RSV） | +1.22% | +0.094 | −0.93% | −0.037 | ✗ |
+
+**结果**：5/10 超 loose bar（vwap_pos/upshad/volaccel/mom20/momrev）。lowshad_t1 全截面 IC +4.06%/ICIR +0.393 最强但 top20 仅 +2.75%。
+
+**关键保留**：这是 **loose bar**（|IC|>champion 基线），而 champion 自身 within-top-20 基线弱且对齐敏感（+1.09%~+3.09%，§37.6/37.7）。多个为**负 IC 反转效应**（vwap_pos/volaccel/mom20）。「超 loose bar」≠「真增量」——需 §37.9 partial IC 判据区分「真增量 vs champion 倒影」。
+
+---
+
+### §37.9 partial rank IC（残差化 champion pred 后的增量检验）
+
+**决定性问题**：§37.8 超 loose bar 的因子是否带 champion 没有的 label 信息 = incremental / partial IC。
+
+**口径**：对每日 rank(factor) 用线性回归残差化掉 rank(pred)（champion 预测），再 Spearman(residual, rank(label))。full + within-top-20 两档。**增量判据**：全截面 |partial IC| ≥ 1.5% **且** 残存率（|partial/raw|）≥ 40%。脚本 `/tmp/candleshape_partial_ic.py`。
+
+| 因子 | 全截 raw IC | 全截 partial IC | 残存率 | top20 partial | 判定 |
+|---|---|---|---|---|---|
+| cvwap_t1 | −0.73% | +0.18% | — | −0.86% | ✗ 塌缩 |
+| vwap_pos_t1 | +0.46% | +1.33% | — | −3.12% | ~ 部分增量 |
+| body_t1 | −0.59% | +0.56% | — | −0.30% | ✗ 塌缩 |
+| upshad_t1 | +3.37% | **+2.43%** | 72% | +4.25% | ★ 真增量 |
+| lowshad_t1 | +4.06% | **+3.67%** | 90% | +1.37% | ★ 真增量（最强）|
+| volaccel_t1 | −2.31% | **−1.58%** | 68% | −4.24% | ★ 真增量 |
+| vol_trend3 | −2.62% | **−2.14%** | 81% | −0.24% | ★ 真增量（放量滞涨反转）|
+| mom20_t1 | −2.02% | −0.28% | — | −3.56% | ✗ 塌缩 |
+| momrev_t1 | +1.85% | **+1.77%** | 96% | +4.73% | ★ 真增量 |
+| rsv20_t1 | +1.22% | **+2.53%** | 207% | −0.75% | ★ 真增量（suppressor）|
+
+**结果**：6/10 通过增量判据——lowshad_t1（+3.67%/残存 90%，最强）、rsv20_t1（+2.53%/207%，正交化后显信号的 suppressor）、upshad_t1（+2.43%/72%）、vol_trend3（−2.14%/81%）、momrev_t1（+1.77%/96%）、volaccel_t1（−1.58%/68%）。cvwap/body/mom20 残差化后塌缩 → champion 倒影、无增量。
+
+**意义**：这是本窗口**首个未秒证伪、且经增量检验存活**的只读信号。6 个 T-1 日频因子（K 线影线 / 量能趋势 / 动量差 / RSV）属 champion 18 个 T 日 9:30-9:40 分钟因子之外的**不同信息族**，partial IC 残差化 champion pred 后仍残存。gate-compliant → 进 §38 决定性 shadow retrain A/B。
+
+---
+
+### §38 shadow retrain 决定性证伪：6 增量因子实测拖累 IC（−25%）
+
+**设计**：`ShadowCandleShapeHandler` = champion `MinuteEnhancedHandler`(18) + §37.9 六增量因子 = **24**。`qrun/workflow_shadow_candleshape.yaml` 是 champion `workflow_minute_enhanced_tk10_nd8.yaml` 的逐字拷贝，**唯一变量** = handler 18→24；label（`Ref($close,-1)/$price_941-1`）/ deal_price / 涨跌停 / LGBModel 超参（lr=0.05, λ_l1=5, λ_l2=10, num_boost_round=200, early_stopping=20）/ 切分 / 策略 topk10/nd8 **全 FROZEN**。champion（commit 24b18dd §33）不替换，纯 A/B。
+
+**A/B 结果**（test 2026-04-01→2026-07-02，W1）：
+
+| 指标 | champion(18) §33 | shadow(24) | Δ |
+|---|---|---|---|
+| **IC** | **0.0545** | **0.04090** | **−25%** |
+| Rank IC | — | 0.06157 | — |
+| ICIR | — | 0.3322 | — |
+| 超额（含成本 wc） | +191.1% | +189.5% | −1.6pp（基本持平）|
+| 超额（无成本 woc） | +226.0% | +224.9% | −1.1pp（基本持平）|
+| IR | 5.41 | 5.139 | 略降 |
+| **max_drawdown** | **−5.59%** | **−7.70%** | **恶化 2.1pp** |
+
+shadow recorder_id = `7e52c3ed08004754bfce3c8e87f8286e`（experiment `shadow_candleshape`）。
+
+**判定：证伪（FALSIFIED）。** 加入 6 个 T-1 增量因子后：
+- **IC 实质性下降 25%**（0.0545 → 0.0409）；
+- **超额基本持平**（wc −1.6pp / woc −1.1pp）——topk10/nd8 排名由分钟因子主导，日频因子仅在 top-10 内部及以下重排，策略层与 IC 退化解耦；
+- **回撤恶化 2.1pp**。
+
+**机制**：champion 18 个 T 日 9:30-9:40 分钟因子是真正的、已饱和的信号（§37.4）。partial IC（对 champion **PRED** 残差化，而 PRED 是 18 个原始分钟特征的非线性函数）**高估**了边际价值——在线性正交化下存活的「增量」，在已含 18 个原始强特征的树模型里并不能转化为额外收益：LGBM 的分裂预算被 6 个更弱的 T-1 日频因子稀释（注意力被分到弱特征），IC 反降。partial IC 的「增量」通过了**线性**正交化，却通不过非线性模型的注意力预算。
+
+**结论（最强闭合）**：本窗口**首个未秒证伪的只读信号**（§37.9）被推进到决定性的集成测试，并以清晰机制**失败**。§37.4（分钟因子饱和预测力）在 **retrain 层级**再坐实——这是真实 A/B，非只读断言。7 字段日频因子空间（vwap / K 线影线实体 / 量能 / 动量 / 振荡器 全部挖过 + 最强候选 retrain 实测）至此**经验性穷尽**。
+
+**产物处置**：`shadow_candleshape_handler.py` + `workflow_shadow_candleshape.yaml` 已证伪——保留作记录（与 §33 archived sweep yamls 同口径），文档中明确标注 falsified。promote/discard = **用户决策**（列入晨间清单）。
+
+**剩余开放**：gate-compliant 只读范围内，**无能动 IC/超额 的自主路径**。提升仍卡需授权：item 6（sticky holdings，需解冻 FROZEN label horizon）、item 7（扩 turn/amount 字段——§38 进一步削弱其先验）。
+
+**落档**：§37.8/§37.9/§38 归档。脚本 `/tmp/untested_family_conditional_ic.py`、`/tmp/candleshape_partial_ic.py`（一次性，不入 repo）。shadow 产物 `qlib_ifind_beta/shadow_candleshape_handler.py` + `qrun/workflow_shadow_candleshape.yaml` 入 repo 作 falsified 记录。
+
+### §39 日频情绪 + 上证指数共振因子 vs 当前 champion（§33 tk10/nd8）：W1 正向 → W2 决定性证伪（§27 窗口过拟合形态完整复现）
+
+**背景**：用户 /loop 2026-07-07 任务 2（日频情绪因子：启动/发酵/高潮判别）+ 任务 3（上证指数共振/冰点沸点）明示方向。该 index/日频因子族此前在 §23/§28 测过，但那是 vs **旧 champion（topk20/nd15，+159%）**；当前 FROZEN champion = §33（topk10/nd8，+191%）。index 因子从未在当前 champion 上做过干净 A/B——这是 §38（candle 因子在 tk10/nd8 补测证伪）的**对称缺口**。本节闭合它。
+
+**设计**（§38 同构 shadow 模式）：`EnhancedWithDailyIndex`（`HighBetaAlpha158` 子类）= champion `MinuteEnhancedHandler`(18)（`[f"${n}" for n in MinuteEnhancedHandler.ENHANCED_FIELDS]`，与 champion `get_feature_config` 逐字一致）+ 12 日频/指数因子（`IndexDailyHandler.FACTOR_FIELDS`，全部 `Ref(...,1)` T-1 lag、9:41 决策已知、无前视）= **30**。`qrun/workflow_shadow_daily_index.yaml` 是 champion `workflow_minute_enhanced_tk10_nd8.yaml` 的逐字拷贝，**唯一变量** = handler 18→30；label / deal_price / 涨跌停 / LGBModel 超参 / 切分 / 策略 topk10/nd8 **全 FROZEN**。
+
+12 日频/指数因子（5 指数共振 `SH000001` ≠ benchmark `SH000300`；corr_20 早在 §28 因 `Corr._load_internal` 行数不等 621≠624 broadcast crash 移除）：日频情绪 7 = `bias_5 / bias_20 / vol_ratio_20 / run_up_5 / rsv_9 / dist_to_limit / accel_mom`；指数共振 5 = `idx_bias_20 / idx_run_5 / idx_rsv_9 / idx_vol_ratio_20 / beta_20`。
+
+**A/B W1**（test 2026-04-01→2026-07-02，与 champion 同窗；提取器同口径 mean×250）：
+
+| 指标 | champion(18) §33 | shadow(30) | Δ |
+|---|---|---|---|
+| **IC** | **0.0545** | **0.0611** | **+12.1%** |
+| Rank IC | 0.0679 | 0.0840 | +23.7% |
+| Rank ICIR | 0.543 | 0.719 | +32.4% |
+| 超额 wc | +200.7% | +258.6% | **+57.9pp** |
+| 超额 woc | +237.4% | +295.2% | +57.8pp |
+| IR(woc) | 6.54 | 8.55 | +30.7% |
+| **max_drawdown** | **−7.02%** | **−8.74%** | **恶化 1.72pp** |
+
+shadow W1 recorder = `d5d93008d6604cecadd3ab5e44382b0f`（experiment `shadow_daily_index`，mlruns `795618133777945972`）。
+
+> 口径注：本节超额/IR/回撤用「提取器同口径 mean×250」（4 个 recorder 同方法，A/B 内部一致）。W1 champion 列（wc +200.7%/dd −7.02%）与 §38 champion 列（wc +191.1%/dd −5.59%，run-log qlib 几何年化）的绝对值差异源于年化方法，**IC 完全一致（0.0545），Δ 方向与量级两种口径均一致**（W1 shadow+champion 约 +55pp 超额）。
+
+**W1 = 正向信号**：每一项收益/准确率指标（IC +12%、RankIC +24%、超额 +58pp、IR +31%）shadow 都胜 champion，唯独回撤恶化 ~2pp。这是 §23 以来 index 因子族首个大幅正向 W1 结果（§23/§28 当时在 topk20/nd15 下仅 IC +12% 而超额持平的「墙」，在 tk10/nd8 下超额也跟着 IC 走了）。
+
+**§27 纪律介入**：单 W1 正向绝不宣布胜利。§27 血教训 = 「W1 破墙 / W2 OOS 证伪（窗口过拟合）」。强制 W2 OOS 验证：`qrun/workflow_shadow_daily_index_w2.yaml`（W2 窗：test 2025-04→07、train 2024-01→2024-12、valid 2025-01→03、fit_end 2025-03-31，其余全 FROZEN vs champion W2 `workflow_minute_enhanced_tk10_nd8_w2.yaml`，唯一变量 handler 18→30）。
+
+**A/B W2**（test 2025-04-01→2025-07-02，champion W2 窗往前推 1 年；同口径）：
+
+| 指标 | champion(18) §33 | shadow(30) | Δ |
+|---|---|---|---|
+| **IC** | **0.0718** | **0.0611** | **−14.9%** |
+| Rank IC | 0.1177 | 0.0972 | −17.4% |
+| Rank ICIR | 0.825 | 0.682 | −17.3% |
+| 超额 wc | +79.8% | +28.7% | **−51.0pp** |
+| 超额 woc | +114.8% | +64.4% | −50.4pp |
+| IR(wc) | 1.961 | 0.791 | **−60%** |
+| max_drawdown | −12.12% | −11.90% | +0.22pp（略好）|
+
+shadow W2 recorder = `f9227b81e9b54d5a9fd0545d84f86049`（experiment `shadow_daily_index_w2`，mlruns `325832602010495159`）。champion W2 recorder = `f5bb1a83d1ce48d78538af4100fb7aa8`。
+
+**判定：决定性证伪（FALSIFIED）。** W1 shadow 胜 champion（+12% IC / +58pp 超额），**W2 shadow 全面惨败** champion（−15% IC / −51pp 超额 / −60% IR）。完美复现 §27 形态：W1 的「提升」是 2026-04→07 窗内 12 日频/指数因子偶然与分钟信号对齐；W2（2025-04→07）窗二者冲突，加 12 弱日频/指数因子稀释 LGBM 对强分钟因子的分裂预算 → IC 与超额双降。注意 champion 自身窗口敏感（IC 0.0545 W1 → 0.0718 W2，分钟因子在 W2 更强），而 shadow 30 因子模型在两窗 IC 恒为 0.0611——多出的日频因子把模型「钉」在一个低于 champion W2 上限的水平，窗口适应性反而被削弱。
+
+**机制（= §38 同源）**：champion 18 个 T 日 9:30-9:40 分钟因子是真正饱和的强信号（§37.4）。日频情绪（bias/rsv/run_up/dist_to_limit/accel_mom）与指数共振（idx_*/beta_20）在 T-1 及更早尺度，与 T 日开盘 10 分钟的个股 alpha 是**弱相关或条件相关**：在 favorable regime（W1）顺周期、在 adverse regime（W2）逆周期。树模型无法在 2 年 train 上稳定区分两种 regime，于是把分裂预算分到这些 regime-conditional 弱因子，牺牲了对 robust 分钟因子的拟合深度。这与 §38（candle 因子 −25% IC）同机制、同结论。
+
+**结论**：index/日频因子路径（用户 /loop 2026-07-07 任务 2+3 明示）至此**第二次**决定性证伪——§28 在旧 champion（topk20/nd15）证伪，§39 在当前 champion（§33 tk10/nd8）补测同样证伪，且 §39 经历了 W1 正向→W2 反转的完整 §27 闭环，证据更强。7 字段日频情绪空间 + 上证指数共振空间，作为 champion(18) 的**增量叠加**，经验性穷尽。
+
+**与 §38 的关系**：§38（candle 影线/动量/量能 T-1 增量）与 §39（日频情绪/指数共振增量）是 7 字段日频因子空间的两个正交子方向，均在 tk10/nd8 shadow retrain 下决定性证伪，机制同（弱日频因子稀释强分钟因子的分裂预算）。两节合起来构成「日频增量因子空间经验性穷尽」的完整证据。
+
+**产物处置**：`enhanced_daily_index_handler.py` + `index_daily_handler.py` + `workflow_shadow_daily_index.yaml` + `workflow_shadow_daily_index_w2.yaml` + `tests/test_index_factors.py` 已证伪——保留作 falsified 记录（与 §33 archived sweep yamls / §38 shadow 产物同口径）。promote/discard = **用户决策**（列入晨间清单）。
+
+**剩余开放**：gate-compliant 只读 + shadow 范围内，**无能动 IC/超额 的自主路径**——日频增量（§38 candle + §39 index/daily）两正交子空间均已穷尽。提升仍卡需授权：item 6（sticky holdings，需解冻 FROZEN label horizon）、item 7（扩 turn/amount 字段——§38/§39 连续削弱其先验）。
+
+---
+
+## §40 champion(18) 特征重要度分解：alpha 集中在「量能异动 + 隔夜跳空」，修正 item 7 优先级（2026-07-09，只读取证）
+
+**动机**：§38/§39 两轮增量因子均 W1 正向→W2 证伪，机制推断为「弱日频因子稀释强分钟因子分裂预算」。但「强分钟因子」到底强在哪、有多集中——一直无实测证据。本节用 FROZEN champion 的已拟合模型直接读 gain importance，把假设升级为测量。
+
+**方法（纯只读，零重训/零新实验/零 champion 改动）**：
+- champion W1 recorder `caf649ca` 的 `artifacts/params.pkl` 实为已拟合 `LGBModel`（含 lightgbm `Booster`，非仅超参）。
+- `model.feature_importance(importance_type="gain")` + `feature_name()` → Column_0..17 的 gain 占比。
+- Column_N → 因子名映射 = `MinuteEnhancedHandler.ENHANCED_FIELDS` 顺序 = `tuple(MINUTE_FACTOR_FIELDS)(14)` + `tuple(MINUTE_FACTOR_EXTRA_FIELDS)(4)`（config.py:85/106 逐字对齐）。
+
+**gain importance 排名（18 因子，归一化到 100%）**：
+
+| 排名 | Column | 因子 | gain% | 累计% | 族 |
+|---|---|---|---|---|---|
+| 1 | 13 | **vol_vs_yest** | **24.3** | 24.3 | 量能族 |
+| 2 | 17 | **overnight_gap** | **19.3** | 43.6 | 隔夜族 |
+| 3 | 3 | startup_total | 7.1 | 50.7 | 启动动量族 |
+| 4 | 6 | accel_5m | 7.0 | 57.7 | 加速族 |
+| 5 | 14 | vol_vs_yest_t2 | 6.3 | 63.9 | 量能族 |
+| 6 | 15 | vol_vs_yest_t3 | 5.6 | 69.5 | 量能族 |
+| 7 | 0 | startup_mom_1m | 5.2 | 74.6 | 启动动量族 |
+| 8 | 10 | vol_ratio_1m | 4.2 | 78.8 | 量能族 |
+| 9 | 12 | vol_ratio_5m | 4.0 | 82.8 | 量能族 |
+| 10 | 5 | accel_3m | 3.9 | 86.7 | 加速族 |
+| 11 | 11 | vol_ratio_3m | 2.6 | 89.3 | 量能族 |
+| 12 | 2 | startup_mom_5m | 2.4 | 91.7 | 启动动量族 |
+| 13 | 16 | vol_vs_yest_t5 | 1.9 | 93.6 | 量能族 |
+| 14 | 4 | accel_1m | 1.8 | 95.4 | 加速族 |
+| 15 | 1 | startup_mom_3m | 1.7 | 97.1 | 启动动量族 |
+| 16 | 8 | close_pos_3m | 1.6 | 98.7 | 价格位置族 |
+| 17 | 7 | close_pos_1m | 0.9 | 99.6 | 价格位置族 |
+| 18 | 9 | close_pos_5m | 0.4 | 100.0 | 价格位置族 |
+
+**关键发现**：
+
+1. **alpha 高度集中、Pareto 陡峭**：top-2 = 43.6%，top-5 = 57.7%，top-9 = 78.8%。champion 不是 18 因子均匀贡献，而是靠少数「开盘 surprise」信号支撑——**这是「饱和」的最直接证据**，也解释了为何任何弱增量因子都难抢到分裂预算（§38/§39 机制坐实）。
+
+2. **量能族独占半壁**：vol_vs_yest(24.3) + vol_vs_yest_t2/t3/t5(6.3+5.6+1.9) + vol_ratio_1m/3m/5m(4.2+2.6+4.0) = **48.9%**。alpha 的来源是**开盘量能相对昨日均量的异动**——「这只票今天开盘被资金抢」的信号。
+
+3. **隔夜跳空 overnight_gap = #2（19.3%）**：它是 champion 里**唯一的日频空间因子**（day-cal，非分钟），却排第二。原因——它是「隔夜 surprise」（open vs T-1 close 的跳空），直连 9:41 决策瞬间；而 §39 加的 bias/run_up/rsv 是**渐进动量**（非 surprise），与 overnight_gap 语义正交、对 alpha 无增量 → 坐实 §39 证伪的内在原因。**日频不是无用，是「非 surprise 的日频」无用。**
+
+4. **价格位置族近死权**：close_pos_1m/3m/5m = 0.9+1.6+0.4 = **2.9% 合计**。这 3 个因子（每根 bar 的 (close-low)/(high-low)）几乎不贡献 → champion 存在可精简空间（未来消融实验候选，当前 FROZEN 不动）。
+
+**对决策清单的修正（重要）**：
+
+- **item 7（扩 turn/amount 字段）优先级上调**：此前 §38/§39 后我把 item 7 先验判为「连续削弱」。**本节证据推翻该判断**——alpha 49% 在量能族，而 turn（换手率 = volume/流通股本）是比 raw volume **更干净**的量能归一（自动校正送股/拆分/限售解禁导致的 volume 跳变，vol_vs_yest 当前分母用 T-1 全天量/240 无法剔除这类结构性量变）。**volume 族既然承载近半 alpha，一个更干净的 volume 代理（turn）是当前先验最高的 IC 杠杆**，而非「ROI 存疑」。§38/§39 削弱的是 PRICE/MOMENTUM 日频因子，与量能族正交，不构成对 item 7 的负面证据。
+- **item 6（sticky holdings）**：本节不改变其判断（仍需解冻 label，用户授权）。
+- **新增候选（未来，需授权）**：close_pos 族消融（drop 3 个近死权因子看 OOS 是否持平/微升）——属 champion 改动，FROZEN 期内不做，列入待授权清单。
+
+**纪律自检**：本节为**只读取证**——读 FROZEN 模型 artifact，无任何重训/新因子/W1-W2 实验，不触碰 champion。与 §27 无冲突（§27 约束的是「凭单窗 W1 宣布新因子有效」，本节是反方向的「解释为何旧增量无效」）。强化而非绕过 §27 结论。
+
+**Get笔记同步**：主文档 49,950/50,000 字符已满，§40 无法追加 → 与 §39 同列待用户决策（容量处理）。
+
+---
+
+## §41 证伪族彻底清理（2026-07-10，用户决策 item 5）
+
+> 触发：用户裁定 §36 待决策清单 item 5「清理证伪族产物 + config 死常量」→ 选项「彻底清理（含物化逻辑）」。
+
+**清理范围**：§23-§31/§38/§39 全部证伪族的代码产物（handler + workflow yaml + test）+ config 死常量 + materialize_minute 物化逻辑 + build_overlay step6 index link。
+
+**删除清单**：
+- **7 handler**：csrank（§24）/ tail（§25）/ opening（§26）/ resonance（§29）/ index_daily + enhanced_daily_index（§28/§39）/ shadow_candleshape（§38）/ minute_only（§15 实验分支）
+- **26 workflow yaml**：所有 csrank / mdl_* / opening / resonance / tail / shadow / daily_index / minute_only / wf2-4 / tk10_nd5 / tk5_nd3 / w2 证伪 sweep 产物（保留 5 核心：MVP / smoke / champion nd8 / champion nd8 W2 / champion 前身 nd15）
+- **4 test 文件**：csrank / tail / index / minute_only handler 测试
+- **6 config 死常量组**：`INDEX_FACTOR_SOURCES` / `MINUTE_FACTOR_TAIL_FIELDS` + `TAIL_FIRST_SLOT/TAIL_SLOT_COUNT` / `MINUTE_FACTOR_OPENING_T1/T2_FIELDS` / `INDEX_OPENING_SRC/INDEX_OPENING_FIELDS`
+- **materialize_minute.py 物化逻辑**：tail 因子物化（F 段 + tail2d）/ opening T1/T2 copy+shift / `_load_index_opening_factors` + idx scatter 块；docstring 38 bins → 20 bins
+- **build_overlay.py**：step6 INDEX_FACTOR_SOURCES link 循环删除
+- **未跟踪产物**：reversal-gate spec / cheap_falsify_revrisk / 3 shadow yaml
+
+**关键安全门（A5 验证）**：
+1. `pytest tests/` → **44 passed**（含 test_materialize_minute 14 测试，物化逻辑改动后全过）
+2. `qrun/run.py workflow_minute_enhanced_tk10_nd8.yaml`（champion 复现）→ IC/excess/drawdown **bit-exact 一致**：
+   - 年化超额（含成本）= **+191.1%**（1.910676），IR **5.4058**，drawdown **−5.5936%**
+   - 与 §33 原值逐字一致 → 证伪族代码移除对 champion 18 因子物化**零影响**
+
+**判定**：清理成功。champion 物化链路（materialize_minute 20 bins = 14 baseline + 4 extra + price_941 + change_941）不受影响，FROZEN 口径全维持。从 38 bins → 20 bins 的精简无任何数值后果（删的全是 champion 不消费的证伪族 bin）。
+
+**落档**：§41 清理归档。保留的文件 = champion 链路全活代码（config 20 常量 + materialize_minute 20 bins + 5 workflow + 7 test 文件）。

@@ -34,13 +34,6 @@ UNIVERSE_MARKET = "highbeta883926"    # instruments market name for qrun
 # functionpara/CPS has zero effect. User decision: use 000300 for now.
 BENCHMARK = "SH000300"
 
-# Index sources referenced by ChangeInstrument in daily/index factors (NOT benchmark).
-# 上证综指 SH000001 = 用户语义「上证指数」（共振 + 冰点/沸点因子引用源）。区别于 benchmark
-# (SH000300，回测基准冻结)。这些指数的 7 base bin 在 build_overlay step6 被 link 进 overlay
-# （仅 link，不 materialize——指数不交易，无需 change/limit 衍生）。qlib_data/features/sh000001/
-# 已实测与 sh000300 同构（7 base bin × 6296 bytes，26 年深度；amount 8 bytes 空文件不用）。
-INDEX_FACTOR_SOURCES = ("SH000001",)
-
 # --- champion FROZEN 推理口径（2026-07-09 实战对接 P1）-------------------------
 # champion = enhanced(18)@topk10/nd8, commit 24b18dd, recorder caf649ca（params.pkl = LGBModel）。
 # P1 inference 复刻此 fit 段（FROZEN），仅 end_time 扩到 T。spike 2026-07-09 验证零偏离
@@ -106,78 +99,4 @@ MINUTE_CHANGE_941_FIELD = "change_941"
 MINUTE_FACTOR_EXTRA_FIELDS = (
     "vol_vs_yest_t2", "vol_vs_yest_t3", "vol_vs_yest_t5",
     "overnight_gap",
-)
-
-# 21st-25th materialized bins — T-1 尾盘分钟族（2026-07-07，goal 因子优化迭代）。
-# 破局 Step B「IC +12% 不传导组合」：此前 T-1 全天分钟结构完全未用作因子（vol_vs_yest 分母
-# 仅把 T-1 全天量压成聚合标量，丢结构）。尾盘 slot 232-241 是次日惯性/高潮/启动最强领先信号。
-# 与早盘 slot 1-10 严格对称（slot 映射：slot N 下午覆盖 [13:00+(N-122), 13:00+(N-121))，
-# 故 slot 232 = [14:50,14:51) = 14:51 时刻 bar，slot 241 = [14:59,15:00) = 15:00 时刻 bar，
-# slot 232-241 覆盖 [14:50,15:00) 共 10 根）。物化时 shift 1（min-cal 空间）→ T 行 bin =
-# T-1 尾盘，handler $field 直接消费（与 14 分钟因子零 Ref 模式统一）。无前视（T-1 15:00
-# 收盘，T 日 9:41 决策已知）。详见 backtest-log（goal 设计）。
-TAIL_FIRST_SLOT = 232         # 尾盘 10min 窗首 slot（14:51 时刻 bar，覆盖 [14:50,14:51)）
-TAIL_SLOT_COUNT = 10          # slots 232-241 = 14:51-15:00 时刻 bar，覆盖 [14:50,15:00)
-MINUTE_FACTOR_TAIL_FIELDS = (
-    "tail_mom_t1",            # 尾盘 10 根整体动量 close[9]/close[0]-1 → 惯性冲高/高潮
-    "tail_mom_last5_t1",      # 14:55-15:00 收盘竞价动量 close[9]/close[5]-1
-    "tail_close_pos_t1",      # 收盘在尾盘振幅位置 → 收盘强弱
-    "tail_vol_ratio_t1",      # 尾盘量比 vol[9]/vol[0:9].mean → 主力介入/出逃
-    "tail_accel_t1",          # 尾盘加速度 → 高潮见顶/惯性持续
-)
-
-# 26th-30th / 31st-35th materialized bins — T-1 / T-2 开盘族（2026-07-08，goal「扩展不同区间的
-# 1min 因子」迭代）。复用 champion 早盘 5 公式（startup_mom_5m/startup_total/accel_5m/close_pos_5m/
-# vol_ratio_5m，slot 1-10），shift 1 / 2 → T 行 bin = T-1 / T-2 开盘。
-#
-# 破墙假设（详见 docs/superpowers/specs/2026-07-08-t1-opening-factors-design.md）：§25 尾盘失败因
-# T-1 尾盘与 T 日开盘是不同 regime（正交 |corr|<0.07）→ 重排 topk=20 边界。T-1/T-2 **开盘**与
-# T 日开盘**同 regime**（仅时间平移）→ 若高贝塔开盘动量跨日持续则**共线强化**（锐化边界而非重排），
-# 可能破 IC→超额墙；若跨日反转则正交 → 复刻 §25 失败。无论胜败都有结构结论。对齐用户心法
-# （T-1 之前 K 线判共振/启动/高潮/惯性 → regime 检测，树模型给齐 T-day+T-1 因子自动学交互）。
-#
-# 物化：raw 值已由 materialize A-D 段算进 fac（startup_mom_5m 等），此处 copy 到 _t1/_t2 key 再 shift。
-# shift-1/2 在 min-cal 空间 → 无前视（T-1 9:40 / T-2 9:40 远早于 T 日 9:41 决策）。与 §25 尾盘 shift1
-# 同构。handler $field 直接消费（与 14 分钟因子零 Ref 模式统一）。
-MINUTE_FACTOR_OPENING_T1_FIELDS = (
-    "startup_mom_5m_t1",      # shift1(c[9]/c[4]-1)：T-1 开盘 5min 动量
-    "startup_total_t1",       # shift1(c[9]/o[0]-1)：T-1 开盘整体涨幅（共振强度代理）
-    "accel_5m_t1",            # shift1((c[9]/o[5]-1)-(c[3]/o[0]-1))：T-1 开盘加速度
-    "close_pos_5m_t1",        # shift1((c[9]-l5)/(h5-l5))：T-1 开盘收盘在振幅位置
-    "vol_ratio_5m_t1",        # shift1(v[5:10].mean/v[0:4].mean)：T-1 开盘量比
-)
-MINUTE_FACTOR_OPENING_T2_FIELDS = (
-    "startup_mom_5m_t2",      # shift2 同上 5 公式：T-2 开盘（测动量持续 2 日 vs 1 日，更深 regime）
-    "startup_total_t2",
-    "accel_5m_t2",
-    "close_pos_5m_t2",
-    "vol_ratio_5m_t2",
-)
-
-# 36th-38th materialized bins — 上证指数 T 日 9:30-9:40 开盘共振因子（goal 2026-07-08「分钟尺度
-# regime」实做，唯一原则性未测杠杆）。来源 SH000001 1min bin（cn_data_1min/features/sh000001/，
-# probe-verified：604 天覆盖，factor≈1.0，test W1/W2/valid 三窗 0 缺失，仅 train 早期 29 天 6%
-# 缺失 → DropnaProcessor drop，与 §L1 已接受的 4.4% 误杀同量级）。
-#
-# 用户领域模型（faithful 重解读）：「分钟频只能观测 T 日的开盘阶段，所以我需要结合指数（大势）
-# 和 T-1 之前的 K 线来判断个股是否是共振、启动、高潮或者惯性冲高」—— 本质是 **T 日 9:30-9:40
-# 开盘分钟内，个股 vs 指数的横截面相对强度信号**（尺度恰与 ~1.5 天 label 对齐，无 §28 日频
-# regime 的 scale 错配）。champion 18 因子全 per-stock、无指数维度 → idx 因子是真增量；
-# LGBModel 自动学「个股开盘动量 × 大势开盘强度」交互 = 用户「共振」语义（市场强势开盘日，
-# 个股开盘动量排序权重更高）。
-#
-# 3 因子与 champion 3 个代表早盘因子精确配对（公式同构，仅输入从个股换成 SH000001 1min 早盘
-# slot 1-10），刻画的都是「大势开盘态势」单一维度，供树模型学个股×大势交互：
-#   - idx_open_ret_10   = idx_close[9]/idx_open[0]-1   （配 startup_total，开盘整体强度）
-#   - idx_open_mom_5m   = idx_close[9]/idx_close[4]-1  （配 startup_mom_5m，开盘 5min 动量）
-#   - idx_open_accel_5m = (idx_c[9]/idx_o[5]-1)-(idx_c[3]/idx_o[0]-1)（配 accel_5m，开盘加速度）
-# slot 口径：open[0]/close[4]/close[9] = slot 1/5/10（09:31/09:35/09:40），与个股 morning2d
-# 列索引完全一致（FIRST_FEATURE_SLOT=1 起）。物化 broadcast：每只股 overlay bin 存同日同值的
-# idx 因子（Plan A per-stock broadcast，复用 scatter 的 valid/rel_v，仅依赖 code 的 si_dc，
-# 与因子来源无关）→ handler $idx_open_ret_10 等直接消费，无前视（T 日 9:40 ≪ 9:41 决策）。
-INDEX_OPENING_SRC = "SH000001"   # 上证综指 1min 共振源（区别 benchmark SH000300）
-INDEX_OPENING_FIELDS = (
-    "idx_open_ret_10",       # 指数开盘 10min 整体涨幅 → 配 startup_total，大势开盘强度
-    "idx_open_mom_5m",       # 指数开盘 5min 动量 → 配 startup_mom_5m，大势加速
-    "idx_open_accel_5m",     # 指数开盘加速度 → 配 accel_5m，大势启动/高潮共振
 )

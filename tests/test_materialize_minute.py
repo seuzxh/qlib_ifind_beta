@@ -10,8 +10,7 @@ from qlib_ifind_beta.binio import read_bin
 from qlib_ifind_beta.config import (
     BUY_SLOT, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FIRST_FEATURE_SLOT,
     MINUTE_DEAL_PRICE_FIELD, MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS,
-    MINUTE_FACTOR_OPENING_T1_FIELDS, MINUTE_FACTOR_OPENING_T2_FIELDS,
-    MINUTE_FACTOR_TAIL_FIELDS, SLOTS_PER_DAY, TAIL_FIRST_SLOT, TAIL_SLOT_COUNT,
+    SLOTS_PER_DAY,
 )
 from qlib_ifind_beta.minute_factors import compute_day_factors
 
@@ -85,24 +84,18 @@ def test_materialize_returns_true_for_liquid_stock():
     assert mm.materialize_minute_instrument("SH600519") is True
 
 
-def test_materialize_writes_35_bins():
-    """All 35 day.bins present after materialize: 14 baseline minute factors +
-    4 enhanced extras (vol_vs_yest_t2/t3/t5 + overnight_gap) +
-    5 tail factors (MINUTE_FACTOR_TAIL_FIELDS, T-1 尾盘族) +
-    5 T-1 opening + 5 T-2 opening (MINUTE_FACTOR_OPENING_T1/_T2_FIELDS, goal 2026-07-08)
-    + price_941 + change_941."""
+def test_materialize_writes_20_bins():
+    """All 20 day.bins present after materialize: 14 baseline minute factors +
+    4 enhanced extras (vol_vs_yest_t2/t3/t5 + overnight_gap) + price_941 + change_941."""
     mm.materialize_minute_instrument("SH600519")
     d = Path(FEATURES_DST) / "sh600519"
     from qlib_ifind_beta.config import MINUTE_CHANGE_941_FIELD
     expected = (
         list(MINUTE_FACTOR_FIELDS)               # 14 baseline
         + list(MINUTE_FACTOR_EXTRA_FIELDS)       # 4 enhanced extras (incl. overnight_gap)
-        + list(MINUTE_FACTOR_TAIL_FIELDS)        # 5 T-1 尾盘族（goal 2026-07-07）
-        + list(MINUTE_FACTOR_OPENING_T1_FIELDS)  # 5 T-1 开盘族（goal 2026-07-08）
-        + list(MINUTE_FACTOR_OPENING_T2_FIELDS)  # 5 T-2 开盘族（goal 2026-07-08）
         + [MINUTE_DEAL_PRICE_FIELD, MINUTE_CHANGE_941_FIELD]
     )
-    assert len(expected) == 35
+    assert len(expected) == 20
     for name in expected:
         assert (d / f"{name}.day.bin").exists(), name
 
@@ -345,7 +338,7 @@ def test_change_941_matches_hand_formula():
 def test_minute_window_kbar_count():
     """CLAUDE.md：分钟因子测试必须验证 K 线数量。开盘窗 = 恰好 10 根特征 K（slots
     1-10 = 09:31-09:40）+ 1 根买入 K（slot 11 = 09:41）；1min 日历每个交易日贡献
-    恰好 11 行 morning rows。（尾盘窗 10 根 = slots 232-241，由 test_tail_window_kbar_count 覆盖。）"""
+    恰好 11 行 morning rows。"""
     _, min_slots = mm._load_min_calendar()
     morning_rows = np.where(
         (min_slots >= FIRST_FEATURE_SLOT) & (min_slots <= BUY_SLOT)
@@ -451,318 +444,3 @@ def test_overnight_gap_crosscheck():
     if diff_mask.sum() > 0:
         assert np.nanmax(np.abs(og[diff_mask] - adj_gap[diff_mask])) > 1e-4, (
             "overnight_gap 与后复权口径在除权日无差异 → 口径选择未生效")
-
-
-# ---------------------------------------------------------------------------
-# T-1 尾盘族 5 因子（goal 因子优化 2026-07-07）：MINUTE_FACTOR_TAIL_FIELDS。
-# 尾盘窗 slot 232-241（14:51-15:00 时刻 bar）= 10 根，与早盘 10 特征 K 严格对称。
-# shift-1（min-cal 空间）→ T 行 bin = T-1 尾盘（无前视）。详见 backtest-log §25。
-# ---------------------------------------------------------------------------
-
-
-def test_tail_window_kbar_count():
-    """CLAUDE.md：尾盘因子验证 K 线数量。尾盘窗 = 恰好 10 根（slots 232-241 =
-    14:51-15:00 时刻 bar），与早盘 10 特征 K 对称；1min 日历每个交易日贡献恰好
-    10 行 tail rows。
-
-    注：CLAUDE.md 测试要求原文写「尾盘 20 根」，但本尾盘设计（materialize_minute.py
-    + config MINUTE_FACTOR_TAIL_FIELDS）刻意取 10 根与早盘窗严格对称——设计取舍见
-    backtest-log §25。此测试校验实际实现的 10 根口径。
-    """
-    _, min_slots = mm._load_min_calendar()
-    tail_rows = np.where(
-        (min_slots >= TAIL_FIRST_SLOT) & (min_slots < TAIL_FIRST_SLOT + TAIL_SLOT_COUNT)
-    )[0]
-    # 每个交易日恰好 10 行（整除），无溢出/缺失。
-    assert tail_rows.size % TAIL_SLOT_COUNT == 0
-    # 抽查第 0 个交易日的 10 行：slots 必须是 232..241 连续。
-    first_day_slots = min_slots[tail_rows[:TAIL_SLOT_COUNT]]
-    assert list(first_day_slots) == list(range(TAIL_FIRST_SLOT, TAIL_FIRST_SLOT + TAIL_SLOT_COUNT))
-    assert TAIL_SLOT_COUNT == 10
-
-
-def test_tail_factors_crosscheck():
-    """5 个 T-1 尾盘因子 = raw 1min 尾盘 slot 232-241 手算（shift-1 对齐 + NaN-safe）。
-
-    关键断言：
-    1. shift-1：bin[day_row(k)] = hand_compute_tail(k-1)（T 行 bin = T-1 尾盘，无前视）。
-       判据：用 min-cal 日 k-1 的尾盘手算，应等于 bin 在 day_row(k) 的值；若误用
-       shift-0（k 当天尾盘）则差一个交易日，断言失败。
-    2. 公式逐字对齐 materialize_minute.py F 块（ct/ht/lt/vt = tail2d close/high/low/vol）。
-    3. NaN-safe：min-cal 首日（k=0）shift 后无 T-1 → bin NaN；分母 ≤0 → NaN（同 vol 族 guard）。
-    4. start_index == daily close（day-cal 对齐）。
-    """
-    code = "SH600519"
-    lcode = code.lower()
-    src_dir = Path(FEATURES_1MIN_SRC) / lcode
-
-    # --- 独立读 raw 1min close/high/low/volume（各字段 start_index 一致性校验）---
-    raw = {}
-    si_m_ref = None
-    for f in ("close", "high", "low", "volume"):
-        si, a = read_bin(src_dir / f"{f}.1min.bin")
-        assert a.size > 0 and si is not None, f"{f}.1min.bin missing/empty"
-        raw[f] = a
-        if si_m_ref is None:
-            si_m_ref = si
-        else:
-            assert si == si_m_ref, f"{f} start_index {si} != {si_m_ref}"
-
-    min_dates, min_slots = mm._load_min_calendar()
-    _, date_to_row = mm._load_day_calendar_lookup()
-    tail_rows = np.where(
-        (min_slots >= TAIL_FIRST_SLOT) & (min_slots < TAIL_FIRST_SLOT + TAIL_SLOT_COUNT)
-    )[0]
-    n_min_days = tail_rows.size // TAIL_SLOT_COUNT
-    assert n_min_days > 0
-
-    def scatter_tail(arr):
-        flat = np.full(tail_rows.size, np.nan, dtype=np.float64)
-        valid = (tail_rows >= si_m_ref) & (tail_rows < si_m_ref + arr.size)
-        flat[valid] = arr[tail_rows[valid] - si_m_ref].astype(np.float64)
-        return flat.reshape(n_min_days, TAIL_SLOT_COUNT)
-
-    ct = scatter_tail(raw["close"])
-    ht = scatter_tail(raw["high"])
-    lt = scatter_tail(raw["low"])
-    vt = scatter_tail(raw["volume"])
-
-    def hand_tail(c, h, l, v):
-        """逐日手算 5 因子（与 materialize F 块逐字一致）。"""
-        out = {}
-        h_max = h.max()
-        l_min = l.min()
-        rng = h_max - l_min
-        d1 = v[0:9].mean()
-        out["tail_mom_t1"] = c[9] / c[0] - 1.0
-        out["tail_mom_last5_t1"] = c[9] / c[5] - 1.0
-        out["tail_close_pos_t1"] = (c[9] - l_min) / rng if rng > 0 else np.nan
-        out["tail_vol_ratio_t1"] = v[9] / d1 if d1 > 0 else np.nan
-        out["tail_accel_t1"] = (c[9] / c[8] - 1.0) - (c[1] / c[0] - 1.0)
-        return out
-
-    # --- 物化并读回 5 个尾盘 bin（start_index == daily close 校验）---
-    assert mm.materialize_minute_instrument(code) is True
-    si_dc_ref, _ = read_bin(Path(FEATURES_SRC) / lcode / "close.day.bin")
-    dst_dir = Path(FEATURES_DST) / lcode
-    mat = {}
-    for name in MINUTE_FACTOR_TAIL_FIELDS:
-        si_o, vals = read_bin(dst_dir / f"{name}.day.bin")
-        assert si_o == si_dc_ref, f"{name} start_index {si_o} != daily {si_dc_ref}"
-        mat[name] = vals
-
-    def _tail_day_row(k):
-        """min-cal 日 k 的 day-cal 行（用 tail_rows[k*10] 取首行定位日历日）。"""
-        first_row = tail_rows[k * TAIL_SLOT_COUNT]
-        date_ord = min_dates[first_row]
-        if date_ord < 0 or date_ord >= date_to_row.size:
-            return -1
-        return int(date_to_row[date_ord])
-
-    # --- 找近期、k>=1、k-1 尾盘 4 字段全 finite、且 k 与 k-1 都在 day-cal 的 min-cal 日 ---
-    kk = None
-    for k in range(n_min_days - 1, 0, -1):   # k>=1（shift-1 需 T-1）
-        if _tail_day_row(k) < 0 or _tail_day_row(k - 1) < 0:
-            continue   # k 或 k-1 是额外 min-cal 日（无 day-cal 对应，如 2026-07-03）
-        if (np.all(np.isfinite(ct[k - 1])) and np.all(np.isfinite(ht[k - 1]))
-                and np.all(np.isfinite(lt[k - 1])) and np.all(np.isfinite(vt[k - 1]))):
-            kk = k
-            break
-    assert kk is not None, "no valid tail day for SH600519"
-
-    # bin[day_row(kk)] 应 == hand_compute_tail(kk-1)（shift-1：T 行 = T-1 尾盘）
-    expected = hand_tail(ct[kk - 1], ht[kk - 1], lt[kk - 1], vt[kk - 1])
-    out_row = _tail_day_row(kk) - si_dc_ref
-    for name in MINUTE_FACTOR_TAIL_FIELDS:
-        m_val = float(mat[name][out_row])
-        o_val = float(expected[name])
-        if np.isnan(o_val):
-            assert np.isnan(m_val), f"{name}: oracle NaN but materialized={m_val}"
-        else:
-            assert np.isfinite(m_val), f"{name}: oracle={o_val} but materialized not finite"
-            assert abs(m_val - o_val) < 1e-4, (
-                f"{name} kk={kk} out_row={out_row}: "
-                f"mat={m_val} oracle={o_val} diff={abs(m_val - o_val)}"
-            )
-
-    # --- shift-1 专项：bin[day_row(kk)] 应 == hand_tail(kk-1) 且 ≠ hand_tail(kk) ---
-    # 注：不能用「min-cal 首日」校验 NaN——1min 日历跨 2000-2026（6420 day，与 day 日历同长），
-    # 而 SH600519 的 day.bin 仅覆盖 2020+ 子段（si_dc_ref 偏后，1573 天）；min-cal day 0
-    # (2000-01-04) 的 rel = day_row(0)-si_dc_ref < 0 → 被 scatter 的 valid 掩码跳过，不在
-    # 个股 bin 范围内。故改用正向判别：bin 与 shift-0（kk 当天尾盘）oracle 必须不同（证
-    # 用的是 T-1 非当天），与 vol_vs_yest_t{2,3,5} 的 shift 判别同模式。
-    if (np.all(np.isfinite(ct[kk])) and np.all(np.isfinite(ht[kk]))
-            and np.all(np.isfinite(lt[kk])) and np.all(np.isfinite(vt[kk]))):
-        shift0 = hand_tail(ct[kk], ht[kk], lt[kk], vt[kk])   # hand_tail(kk)，bin 应≠此
-        for name in MINUTE_FACTOR_TAIL_FIELDS:
-            o_km1 = float(expected[name])      # hand_tail(kk-1)，bin 应等于此
-            o_k = float(shift0[name])          # hand_tail(kk)，shift-0 证据
-            m_val = float(mat[name][out_row])
-            if np.isfinite(o_k) and np.isfinite(o_km1) and abs(o_k - o_km1) > 1e-4:
-                assert abs(m_val - o_k) > 1e-4, (
-                    f"{name} kk={kk}: bin={m_val} == shift-0(kk 当天){o_k} → "
-                    f"shift-1 未生效（应 = T-1={o_km1}）")
-
-
-# ---------------------------------------------------------------------------
-# T-1 / T-2 开盘族 5+5 因子（goal 2026-07-08「扩展不同区间 1min 因子」）：
-# MINUTE_FACTOR_OPENING_T1_FIELDS / _T2_FIELDS。复用 champion 早盘 5 公式（slot 1-10，
-# cols 0-9），shift 1 / 2（min-cal 空间）→ T 行 bin = T-1 / T-2 开盘（无前视）。
-# 详见 docs/superpowers/specs/2026-07-08-t1-opening-factors-design.md。
-# ---------------------------------------------------------------------------
-
-
-def _hand_opening(c, o, h, l, v):
-    """逐日手算 champion 早盘 5 公式（与 materialize A-D 块逐字一致，col j = slot 1+j，
-    仅读 cols 0-9 = slots 1-10）。
-
-    返回 champion 原名 dict；T-1/T-2 bin 名去 _t1/_t2 后缀即此 key（materialize import 期校验）。
-    """
-    out = {}
-    out["startup_mom_5m"] = c[9] / c[4] - 1.0
-    out["startup_total"] = c[9] / o[0] - 1.0
-    out["accel_5m"] = (c[9] / o[5] - 1.0) - (c[3] / o[0] - 1.0)
-    h5, l5 = h[5:10].max(), l[5:10].min()
-    out["close_pos_5m"] = (c[9] - l5) / (h5 - l5) if (h5 - l5) > 0 else np.nan
-    d5 = v[0:4].mean()
-    out["vol_ratio_5m"] = v[5:10].mean() / d5 if d5 > 0 else np.nan
-    return out
-
-
-def test_opening_t1_t2_factors_crosscheck():
-    """T-1 / T-2 开盘 5+5 因子 = raw 1min 早盘 slot 1-10 手算（shift-1/2 对齐 + NaN-safe）。
-
-    关键断言：
-    1. shift-1（T-1）：bin[day_row(k)] = hand_opening(k-1)（T 行 bin = T-1 开盘，无前视）。
-       shift-2（T-2）：bin[day_row(k)] = hand_opening(k-2)（T 行 bin = T-2 开盘）。
-       判据：T-1 bin 用 min-cal 日 k-1 的早盘手算；T-2 用 k-2。若误用 shift-0 则差交易日，失败。
-    2. 公式逐字对齐 materialize A-D 块（复用 champion 早盘 5 公式，col j = slot 1+j，仅读 cols 0-9）。
-    3. shift 专项：T-1 bin == hand(k-1) 且（若 hand(k)≠hand(k-1)）bin ≠ hand(k)；
-       T-2 bin == hand(k-2) 且（若 hand(k-1)≠hand(k-2)）bin ≠ hand(k-1)。
-    4. NaN-safe：min-cal 首 1（T-1）/ 2（T-2）日无 lag 开盘 → scatter 后 NaN；分母 ≤0 → NaN。
-    5. start_index == daily close（day-cal 对齐）。
-    """
-    code = "SH600519"
-    lcode = code.lower()
-    src_dir = Path(FEATURES_1MIN_SRC) / lcode
-
-    # --- 独立读 raw 1min close/open/high/low/volume（各字段 start_index 一致性校验）---
-    raw = {}
-    si_m_ref = None
-    for f in ("close", "open", "high", "low", "volume"):
-        si, a = read_bin(src_dir / f"{f}.1min.bin")
-        assert a.size > 0 and si is not None, f"{f}.1min.bin missing/empty"
-        raw[f] = a
-        if si_m_ref is None:
-            si_m_ref = si
-        else:
-            assert si == si_m_ref, f"{f} start_index {si} != {si_m_ref}"
-
-    min_dates, min_slots = mm._load_min_calendar()
-    _, date_to_row = mm._load_day_calendar_lookup()
-    morning_rows = np.where(
-        (min_slots >= FIRST_FEATURE_SLOT) & (min_slots <= BUY_SLOT)
-    )[0]
-    n_min_days = morning_rows.size // _MORNING_WINDOW
-    assert n_min_days > 0
-
-    def scatter_morning(arr):
-        flat = np.full(morning_rows.size, np.nan, dtype=np.float64)
-        valid = (morning_rows >= si_m_ref) & (morning_rows < si_m_ref + arr.size)
-        flat[valid] = arr[morning_rows[valid] - si_m_ref].astype(np.float64)
-        return flat.reshape(n_min_days, _MORNING_WINDOW)
-
-    c2d = scatter_morning(raw["close"]); o2d = scatter_morning(raw["open"])
-    h2d = scatter_morning(raw["high"]);   l2d = scatter_morning(raw["low"])
-    v2d = scatter_morning(raw["volume"])
-
-    # --- 物化并读回 10 个开盘 T-1/T-2 bin（start_index == daily close 校验）---
-    assert mm.materialize_minute_instrument(code) is True
-    si_dc_ref, _ = read_bin(Path(FEATURES_SRC) / lcode / "close.day.bin")
-    dst_dir = Path(FEATURES_DST) / lcode
-    opening_fields = list(MINUTE_FACTOR_OPENING_T1_FIELDS) + list(MINUTE_FACTOR_OPENING_T2_FIELDS)
-    mat = {}
-    for name in opening_fields:
-        si_o, vals = read_bin(dst_dir / f"{name}.day.bin")
-        assert si_o == si_dc_ref, f"{name} start_index {si_o} != daily {si_dc_ref}"
-        mat[name] = vals
-
-    def _day_row(k):
-        """min-cal 日 k 的 day-cal 行（复用 _min_day_in_day_cal，基于 morning_rows 定位）。"""
-        return _min_day_in_day_cal(k, morning_rows, min_dates, date_to_row)
-
-    def _finite_open(k):
-        """min-cal 日 k 早盘 cols 0-9（slots 1-10）5 字段全 finite？"""
-        return (np.all(np.isfinite(c2d[k, 0:10])) and np.all(np.isfinite(o2d[k, 0:10]))
-                and np.all(np.isfinite(h2d[k, 0:10])) and np.all(np.isfinite(l2d[k, 0:10]))
-                and np.all(np.isfinite(v2d[k, 0:10])))
-
-    # raw 名 → T-1 bin 名（去 _t1 后缀映射；与 impl `fac[fname[:-3]]` 同向）
-    raw_to_lag1 = {f[:-3]: f for f in MINUTE_FACTOR_OPENING_T1_FIELDS}
-
-    # --- T-1（shift-1）：找近期 k>=1，k 与 k-1 都在 day-cal 且早盘 cols 0-9 全 finite ---
-    k1 = None
-    for k in range(n_min_days - 1, 0, -1):
-        if _day_row(k) < 0 or _day_row(k - 1) < 0:
-            continue   # k 或 k-1 是额外 min-cal 日（无 day-cal 对应）
-        if _finite_open(k - 1) and _finite_open(k):
-            k1 = k
-            break
-    assert k1 is not None, "no valid T-1 opening day for SH600519"
-
-    expected_t1 = _hand_opening(c2d[k1 - 1], o2d[k1 - 1], h2d[k1 - 1], l2d[k1 - 1], v2d[k1 - 1])
-    shift0_t1 = _hand_opening(c2d[k1], o2d[k1], h2d[k1], l2d[k1], v2d[k1])   # hand(k1)，bin 应≠此
-    out_row1 = _day_row(k1) - si_dc_ref
-    for raw_name, lag_name in raw_to_lag1.items():
-        m_val = float(mat[lag_name][out_row1])
-        o_km1 = float(expected_t1[raw_name])
-        o_k = float(shift0_t1[raw_name])
-        if np.isnan(o_km1):
-            assert np.isnan(m_val), f"{lag_name}: oracle NaN but materialized={m_val}"
-        else:
-            assert np.isfinite(m_val), f"{lag_name}: oracle={o_km1} but materialized not finite"
-            assert abs(m_val - o_km1) < 1e-4, (
-                f"{lag_name} k1={k1} out_row={out_row1}: "
-                f"mat={m_val} oracle(T-1)={o_km1} diff={abs(m_val - o_km1)}"
-            )
-        # shift-1 专项：bin == hand(k-1) 且（若 hand(k)≠hand(k-1)）bin ≠ hand(k)
-        if np.isfinite(o_k) and np.isfinite(o_km1) and abs(o_k - o_km1) > 1e-4:
-            assert abs(m_val - o_k) > 1e-4, (
-                f"{lag_name} k1={k1}: bin={m_val} == shift-0(k1 当天){o_k} → "
-                f"shift-1 未生效（应 = T-1={o_km1}）"
-            )
-
-    # raw 名 → T-2 bin 名
-    raw_to_lag2 = {f[:-3]: f for f in MINUTE_FACTOR_OPENING_T2_FIELDS}
-
-    # --- T-2（shift-2）：找近期 k>=2，k/k-1/k-2 都在 day-cal 且早盘 cols 0-9 全 finite ---
-    k2 = None
-    for k in range(n_min_days - 1, 1, -1):
-        if _day_row(k) < 0 or _day_row(k - 1) < 0 or _day_row(k - 2) < 0:
-            continue
-        if _finite_open(k - 2) and _finite_open(k - 1) and _finite_open(k):
-            k2 = k
-            break
-    assert k2 is not None, "no valid T-2 opening day for SH600519"
-
-    expected_t2 = _hand_opening(c2d[k2 - 2], o2d[k2 - 2], h2d[k2 - 2], l2d[k2 - 2], v2d[k2 - 2])
-    shift1_t2 = _hand_opening(c2d[k2 - 1], o2d[k2 - 1], h2d[k2 - 1], l2d[k2 - 1], v2d[k2 - 1])
-    out_row2 = _day_row(k2) - si_dc_ref
-    for raw_name, lag_name in raw_to_lag2.items():
-        m_val = float(mat[lag_name][out_row2])
-        o_km2 = float(expected_t2[raw_name])
-        o_km1 = float(shift1_t2[raw_name])
-        if np.isnan(o_km2):
-            assert np.isnan(m_val), f"{lag_name}: oracle NaN but materialized={m_val}"
-        else:
-            assert np.isfinite(m_val), f"{lag_name}: oracle={o_km2} but materialized not finite"
-            assert abs(m_val - o_km2) < 1e-4, (
-                f"{lag_name} k2={k2} out_row={out_row2}: "
-                f"mat={m_val} oracle(T-2)={o_km2} diff={abs(m_val - o_km2)}"
-            )
-        # shift-2 专项：bin == hand(k-2) 且（若 hand(k-1)≠hand(k-2)）bin ≠ hand(k-1)
-        if np.isfinite(o_km1) and np.isfinite(o_km2) and abs(o_km1 - o_km2) > 1e-4:
-            assert abs(m_val - o_km1) > 1e-4, (
-                f"{lag_name} k2={k2}: bin={m_val} == shift-1(k2-1){o_km1} → "
-                f"shift-2 未生效（应 = T-2={o_km2}）"
-            )

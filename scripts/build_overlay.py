@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from qlib_ifind_beta import overlay, universe, materialize, materialize_minute
-from qlib_ifind_beta.config import BENCHMARK, INDEX_FACTOR_SOURCES, OVERLAY_ROOT, UNIVERSE_MARKET
+from qlib_ifind_beta.config import BENCHMARK, OVERLAY_ROOT, UNIVERSE_MARKET
 
 # window covering train/valid/test (2024-01-01 → 2026-07-02)
 DUMP_START, DUMP_END = "2024-01-01", "2026-07-02"
@@ -71,13 +71,6 @@ def build(start: str = DUMP_START, end: str = DUMP_END) -> dict:
         raise RuntimeError(f"failed to materialize $change for benchmark {BENCHMARK}")
     summary["benchmark"] = BENCHMARK
     print(f"✓ benchmark {BENCHMARK} linked + derived → features/{BENCHMARK.lower()}/")
-
-    # 6. index factor sources (e.g. SH000001) — link 7 base bins for ChangeInstrument refs.
-    # NOT benchmark; indices don't trade → no change/limit materialization needed.
-    for idx in INDEX_FACTOR_SOURCES:
-        overlay.link_stock(idx)
-        print(f"✓ index source {idx} linked → features/{idx.lower()}/")
-    summary["index_sources"] = list(INDEX_FACTOR_SOURCES)
 
     print("\n✅ overlay build complete")
     print(f"   provider_uri = {OVERLAY_ROOT}")

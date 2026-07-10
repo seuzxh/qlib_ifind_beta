@@ -1,6 +1,6 @@
 # 日频情绪因子 + 上证指数共振因子 设计（2026-07-07）
 
-> 状态：**设计稿，待用户确认 Q1-Q3**。承接 champion=enhanced(18)@n_drop=15（test +158.86% / IC 0.0545 / ICIR 5.12），目标「提升预测准确性」。
+> 状态：**已实现 + 已证伪（§39，2026-07-09）**。原设计承接旧 champion=enhanced(18)@n_drop=15；当前 champion 已 §33 晋升 tk10/nd8。index/日频因子在当前 champion 上的权威 A/B（shadow + W2 OOS）= W1 正向（IC +12%）→ **W2 决定性证伪（IC −15% / 超额 −51pp）**，§27 窗口过拟合。详见 backtest-log §39。本文保留作设计记录。
 > 遵循 superpowers brainstorming；本文为 spec，确认后走 writing-plans → TDD 实现。
 
 ## 1. 目标（用户原话）
