@@ -29,6 +29,9 @@ conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow.yaml
 # 4. 【champion 复现】物化分钟因子（14 baseline + 4 extra + price_941/change_941）→ 跑 enhanced
 conda run -n qlib_ifind_beta python scripts/materialize_minute.py
 conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced.yaml   # topk=10/n_drop=8（§33）
+
+# 5. 【每日滚动重训】用 qlib RollingGen(step=1, ROLL_SD) 训练滚动模型（§42）
+conda run -n qlib_ifind_beta python scripts/retrain.py   # 每日盘后，产出到 ROLLING_EXPERIMENT
 ```
 
 ---

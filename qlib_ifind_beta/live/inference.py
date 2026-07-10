@@ -14,7 +14,8 @@ import pandas as pd
 
 from qlib_ifind_beta.config import (
     CHAMPION_DATA_START, CHAMPION_EXPERIMENT, CHAMPION_FIT_END, CHAMPION_FIT_START,
-    CHAMPION_LABEL_EXPR, CHAMPION_RECORDER_ID, CHAMPION_TOPK, OVERLAY_ROOT, UNIVERSE_MARKET,
+    CHAMPION_LABEL_EXPR, CHAMPION_RECORDER_ID, CHAMPION_TOPK, OVERLAY_ROOT,
+    ROLLING_EXPERIMENT, UNIVERSE_MARKET,
 )
 
 _QLIB_INITED = False
@@ -45,8 +46,14 @@ def predict_day(date: str,
                 recorder_id: str = CHAMPION_RECORDER_ID,
                 experiment_name: str = CHAMPION_EXPERIMENT,
                 market: str = UNIVERSE_MARKET,
-                topk: int = CHAMPION_TOPK) -> dict:
+                topk: int = CHAMPION_TOPK,
+                use_online: bool = False) -> dict:
     """T 日收盘后推理：复刻 champion handler（fit 段 FROZEN）→ 冻结 model.predict → top10。
+
+    Args:
+        use_online: True 时从 ROLLING_EXPERIMENT 最新 online recorder 加载模型（每日滚动
+            重训产出的新模型），替代 FROZEN CHAMPION_RECORDER_ID。需要先跑
+            scripts/retrain.py 产出 online 模型。默认 False（向后兼容 P1 FROZEN）。
 
     Returns:
         {date, n_candidates, candidates:[{code,score,price_941,change_941,limit_up,limit_down}],
@@ -58,8 +65,20 @@ def predict_day(date: str,
     from qlib.data.dataset import DatasetH
     from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
 
-    # 1. load 冻结 model（params.pkl = LGBModel 实例，spike 2026-07-09 验证）
-    rec = R.get_recorder(recorder_id=recorder_id, experiment_name=experiment_name)
+    # 1. load model
+    if use_online:
+        # 从 ROLLING_EXPERIMENT 最新 online recorder 加载（每日滚动重训产出）
+        from qlib.workflow.online.utils import OnlineToolR
+        tool = OnlineToolR(ROLLING_EXPERIMENT)
+        online_recs = tool.online_models(exp_name=ROLLING_EXPERIMENT)
+        if not online_recs:
+            raise RuntimeError(
+                f"use_online=True 但 {ROLLING_EXPERIMENT} 无 online 模型。"
+                "请先跑 scripts/retrain.py 产出滚动重训模型，或用 use_online=False（FROZEN champion）。")
+        rec = online_recs[0]
+    else:
+        # FROZEN champion（默认，P1 向后兼容）
+        rec = R.get_recorder(recorder_id=recorder_id, experiment_name=experiment_name)
     model = rec.load_object("params.pkl")
 
     # 2. 复刻 champion handler（fit 段 FROZEN，仅 end_time 扩到 date）

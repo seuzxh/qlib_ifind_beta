@@ -46,6 +46,16 @@ CHAMPION_FIT_END = "2025-12-31"           # FROZEN = champion train 段
 CHAMPION_LABEL_EXPR = "Ref($close, -1) / $price_941 - 1"   # FROZEN label（P1 仅 fetch 结构，不读值）
 CHAMPION_TOPK = 10
 
+# --- rolling retrain（2026-07-10，item 3 每日滚动重训）-------------------------
+# 用 qlib 原生 RollingGen（task.gen）+ task_train + OnlineToolR（online utils）实现。
+# 每个交易日生成新任务（step=1），滑动窗口（ROLL_SD = train/valid/test 同步前移），
+# 训练后将新 recorder 标记为 online（旧模型自动 offline）。inference use_online=True
+# 时从最新 online recorder 加载模型，替代 FROZEN CHAMPION_RECORDER_ID。
+# 详见 scripts/retrain.py + qlib workflow.online 文档。
+ROLLING_EXPERIMENT = "minute_enhanced_rolling"
+ROLLING_STEP = 1                    # 每日滚动重训（step=1 交易日）
+ROLLING_RTYPE = "sliding"           # RollingGen.ROLL_SD（滑动窗口）
+
 # --- fields ------------------------------------------------------------------
 BASE_FIELDS = ("open", "high", "low", "close", "volume", "factor", "vwap")
 DERIVED_FIELDS = ("change", "limit_up", "limit_down")

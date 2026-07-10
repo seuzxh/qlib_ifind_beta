@@ -2087,3 +2087,59 @@ shadow W2 recorder = `f9227b81e9b54d5a9fd0545d84f86049`（experiment `shadow_dai
 **判定**：清理成功。champion 物化链路（materialize_minute 20 bins = 14 baseline + 4 extra + price_941 + change_941）不受影响，FROZEN 口径全维持。从 38 bins → 20 bins 的精简无任何数值后果（删的全是 champion 不消费的证伪族 bin）。
 
 **落档**：§41 清理归档。保留的文件 = champion 链路全活代码（config 20 常量 + materialize_minute 20 bins + 5 workflow + 7 test 文件）。
+
+---
+
+## §42 模型每日滚动重训（2026-07-10，用户决策 item 3）
+
+> 触发：用户裁定 §36 待决策清单 item 3「模型重训节奏」→「每天滚动重训」。
+> 方案选型：**先查 qlib github 成熟方案**（用户要求）。qlib 0.9.7 原生支持：
+> - `qlib.workflow.task.gen.RollingGen` — 滚动任务生成（step + rtype=ROLL_EX/ROLL_SD）
+> - `qlib.model.trainer.task_train` — 单任务训练（与 qrun 同入口）
+> - `qlib.workflow.online.utils.OnlineToolR` — recorder online tag 管理
+> - `qlib.workflow.online.manager.OnlineManager` + `RollingStrategy` — 完整在线框架（多策略）
+>
+> 设计决策：**用 RollingGen + task_train + OnlineToolR 核心组件，不套用完整 OnlineManager**。
+> OnlineManager 为多策略/多模型管理设计（需每日 routine 循环 + signal 准备），本项目单策略
+> + 已有 P1 inference 系统，核心组件 + 自建轻量编排更清晰（不引入为复杂场景设计的全框架）。
+
+**滚动窗口设计（ROLL_SD 滑动，step=1）**：
+- train 固定 2 年（~488 交易日）+ valid 固定 3 个月（~60 交易日）
+- step=1：每日生成新任务，test 段 = 未来 1 天
+- 示例滚动（champion 初始锚为起点）：
+  - D0：train[2024-01-01,2025-12-31] / valid[2026-01-01,2026-03-31] / test[2026-04-01]
+  - D1：train[2024-01-02,2026-01-01] / valid[2026-01-02,2026-04-01] / test[2026-04-02]
+
+**实现（3 文件）**：
+
+| 文件 | 职责 | qlib 分层 |
+|---|---|---|
+| [config.py](../../qlib_ifind_beta/config.py) | ROLLING_EXPERIMENT/STEP/RTYPE 常量 | — |
+| [scripts/retrain.py](../../scripts/retrain.py) | 每日重训编排入口（RollingGen → task_train → OnlineToolR.reset_online_tag） | Interface/Workflow + Workflow/Model |
+| [inference.py](../../qlib_ifind_beta/live/inference.py) | `predict_day(use_online=True)` 从最新 online recorder 加载模型 | Workflow/Model + Interface/Recorder |
+| [tests/test_retrain.py](../../tests/test_retrain.py) | 4 测试（template 结构 / config 对齐 / RollingGen 滚动 segments / 防御） | — |
+
+**retrain.py 工作流**：
+1. 构建 champion FROZEN task_template（handler/model/record = 18 因子 + LGBModel + label）
+2. RollingGen(step=1, ROLL_SD) 生成滚动任务（首次 generate，后续 gen_following_tasks）
+3. task_train 训练每个任务 → 新 recorder
+4. OnlineToolR.reset_online_tag(新 recorder) — 标记 online，旧模型自动 offline
+
+**inference.py 向后兼容**：
+- `use_online=False`（默认）：FROZEN champion recorder（P1 零偏离口径不变）
+- `use_online=True`：从 ROLLING_EXPERIMENT 最新 online recorder 加载模型
+
+**偏离点（spec 声明，均为 qlib 原生 API 合法组合）**：
+- task_template 手动构建（替代 yaml 加载）—— RollingGen 接受 dict 格式 task
+- online tag 管理用 OnlineToolR（替代 OnlineManager 多策略框架）—— 单策略简化
+
+**验证**：`pytest tests/` → **48 passed**（含 test_retrain 4 测试）。task_template 结构校验 = champion FROZEN；RollingGen step=1 ROLL_SD 滚动 segments 正确（test 段 1 天、后续任务 test_start 前移）。
+
+**运行方式**：
+```bash
+# 每日盘后（P1 物化后）
+conda run -n qlib_ifind_beta python scripts/retrain.py
+# inference 切换到滚动模型（live_forward.py 内调 use_online=True）
+```
+
+**落档**：§42 每日滚动重训归档。champion FROZEN 口径全维持（use_online 默认 False）。P1 可在 FROZEN（零偏离）和滚动重训（每日新模型）间切换。
