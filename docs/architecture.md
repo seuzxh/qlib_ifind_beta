@@ -75,7 +75,7 @@
 │   ├── materialize.py           #  89 行 · 衍生字段物化（change/limit_up/limit_down）
 │   ├── materialize_minute.py    # 325 行 · 14 分钟因子 + 4 extra + price_941/change_941 物化
 │   ├── minute_factors.py        #  73 行 · 14 分钟因子纯函数定义（T 日 9:30-9:40）
-│   ├── universe.py              # 216 行 · 883926 成分股（iFinD p03473，T-1 lag）
+│   ├── universe.py              # 216 行 · 883926 成分股（iFinD p03473，T 日盘前更新）
 │   ├── dump_index.py            #  97 行 · SH883926 行情 dump（当前未启用，见技术方案 §5）
 │   ├── ifind.py                 # 211 行 · iFinD HTTP client + token 管理
 │   ├── highbeta_handler.py      #  73 行 · HighBetaAlpha158（Alpha158 子类，v3 rolling[5,10] + L1 护栏）
@@ -160,8 +160,8 @@
 - **`compute_change(close, factor)`**：不复权价日涨跌幅 `raw=close/factor; out[i]=raw[i]/raw[i-1]-1`，`out[0]=NaN`。按不复权价判定，避免除权日 `factor` 跳变误判涨跌停。
 - **`materialize_instrument(code)`**：从 `FEATURES_SRC` 读 `close/factor`，写 `change/limit_up/limit_down` 到 `FEATURES_DST`；返回 `bool`（源缺失/错位则 False）。
 
-### 4.5 [universe.py](../qlib_ifind_beta/universe.py) — 883926 时变成分股（T-1 lag）
-通过 iFinD `data_pool` 报表 `p03473` 取 883926 **每日**成分股快照，构建 T-1 lag 时变 instruments（T 日观察池 = 883926 的 T-1 在册集，无前视）：
+### 4.5 [universe.py](../qlib_ifind_beta/universe.py) — 883926 时变成分股（T 日盘前更新）
+通过 iFinD `data_pool` 报表 `p03473` 取 883926 **每日**成分股快照，构建时变 instruments（T 日观察池 = 883926 的 T 日在册集，盘前更新无前视）：
 
 - `fetch_constituents(iv_date)` → `p03473`（`iv_zsdm=883926.TI`）→ 当日 100 行 `[date, code_ifind, name, code_qlib]`；历史 `iv_date` 已实测可用。
 - `fetch_history_snapshots(start, end)`：逐交易日拉快照，可恢复 CSV 缓存 `data/universe_snapshots.csv`（已缓存天跳过，每 50 天 flush）。

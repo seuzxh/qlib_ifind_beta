@@ -16,7 +16,7 @@
 # 0. 验证环境
 conda run -n qlib_ifind_beta python -c "import qlib; print(qlib.__version__)"   # → 0.9.7
 
-# 1. 构建 overlay（一次性，幂等可重跑）—— symlink qlib_data + 物化涨跌停衍生字段 + 拉 883926 时变成分股（p03473 每日快照 T-1 lag）
+# 1. 构建 overlay（一次性，幂等可重跑）—— symlink qlib_data + 物化涨跌停衍生字段 + 拉 883926 时变成分股（p03473 每日快照，T 日盘前更新）
 conda run -n qlib_ifind_beta python -m scripts.build_overlay
 
 # 2. 烟雾测试（2025 子窗口，快速跑通全链路）
@@ -51,7 +51,7 @@ conda run -n qlib_ifind_beta python scripts/retrain.py   # 每日盘后，产出
 | 来源 | 用途 | 访问 |
 |---|---|---|
 | `/home/zxh/qlib_data` | 行情（7 字段 × 6419 天）、instruments、calendars | 文件系统，只读，symlink 复用 |
-| iFinD `quantapi.51ifind.com` | 883926 时变成分股（`data_pool p03473` 每日快照，T-1 lag） | HTTPS + token；token 复用 `qlib_data/.ifind_token`（secret） |
+| iFinD `quantapi.51ifind.com` | 883926 时变成分股（`data_pool p03473` 每日快照，T 日盘前更新） | HTTPS + token；token 复用 `qlib_data/.ifind_token`（secret） |
 | `data/qlib_root/`（生成本项目） | overlay provider_uri | build_overlay 产出，`.gitignore` |
 
 **7 字段**：`open / high / low / close / volume / factor / vwap`（后复权；无 `$turn/$amount/$change/$pct_chg/$pre_close`）。
@@ -69,7 +69,7 @@ conda run -n qlib_ifind_beta python scripts/retrain.py   # 每日盘后，产出
 │   ├── materialize.py             #   衍生字段物化（change/limit_up/limit_down）
 │   ├── materialize_minute.py      #   14 分钟因子 + 4 extra + price_941/change_941 物化
 │   ├── minute_factors.py          #   T 日 9:30-9:40 分钟因子定义
-│   ├── universe.py                #   883926 时变成分股（iFinD p03473，T-1 lag）
+│   ├── universe.py                #   883926 时变成分股（iFinD p03473，T 日盘前更新）
 │   ├── highbeta_handler.py        #   HighBetaAlpha158（Alpha158 子类，v3 rolling + L1 护栏）
 │   ├── minute_only_handler.py     #   MinuteOnlyHandler（m14 实验分支）
 │   ├── minute_enhanced_handler.py #   MinuteEnhancedHandler（★ champion，18 因子）

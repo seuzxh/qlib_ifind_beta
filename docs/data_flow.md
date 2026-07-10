@@ -11,7 +11,7 @@
    qlib_data (只读)                iFinD p03473
    7 字段 × 26 年                   883926 每日成分股快照
         │                                 │
-        │ symlink 复用                    │ 拉 603 天 + T-1 lag
+        │ symlink 复用                    │ 拉 603 天（T 日盘前快照）
         ▼                                 ▼
    ┌──────── data/qlib_root（overlay，可写层）─────────────┐
    │  calendars/            ← 整目录链接 qlib_data         │
@@ -74,13 +74,15 @@
 - 实现：[universe.py](../qlib_ifind_beta/universe.py) 的 `fetch_history_snapshots` 逐日拉，缓存到 `data/universe_snapshots.csv`（断点续拉，每 50 天落盘一次）。
 - 规模：603 天里累计出现过 **5116 只**不同的票，每只平均在池里约 12 天、分约 10 段进出。
 
-### 2.3 T-1 lag（防止未来函数，核心）
+### 2.3 T 日盘前更新（无前视，核心）
 
-p03473 的 `iv_date=D` 给的是「D 日收盘后计算的名单」，最早 D+1 日开盘才能用来交易。所以做了一次右移：
+> **2026-07-10 修正**：经实测验证，883926 股池是 T 日盘前更新的（非此前假设的 T-1 日收盘后更新）。T 日开盘前即可获取当日最新成分股，无需 T-1 lag。
 
-> **T 日能用的股池 = 883926 的 T-1 日在册集**
+> **T 日能用的股池 = 883926 的 T 日在册集**
 
-每一段成分股的进出区间 `[入场日 d_in, 离场日 d_out]`，写入 instruments 文件时整体右移到 `[下一个交易日(d_in), 下一个交易日(d_out)]`。这样 qlib 在 T 日取数时，只能看到 T-1 已确定的名单，不可能偷看未来。
+每一段成分股的进出区间 `[入场日 d_in, 离场日 d_out]`，直接写入 instruments 文件（不再右移）。qlib 在 T 日取数时返回 T 日在册集，盘前更新 ≪ 9:30 开盘 ≪ 9:41 决策 → 无前视。
+
+> 历史：2026-07-05 ~ 07-09 使用 T-1 lag（shift_T1 右移 +1 交易日），基于「p03473 给的是 D 日收盘后名单」的假设。2026-07-10 验证推翻该假设后取消 shift。`shift_T1` 函数保留在 universe.py 中供参考。
 
 ### 2.4 产物
 
@@ -88,7 +90,7 @@ p03473 的 `iv_date=D` 给的是「D 日收盘后计算的名单」，最早 D+1
 
 ### 2.5 验证
 
-`/tmp/verify_t1.py` 做了端到端不变量检查：随机抽 6 个交易日 T，验证 `qlib 取到的 T 日股池 == 缓存里 T-1 日的快照`。结果 **6/6 全过**（无漏票、无多票）。
+`/tmp/verify_t1.py` 做了端到端不变量检查：随机抽 6 个交易日 T，验证 `qlib 取到的 T 日股池 == 缓存里 T 日的快照`。结果 **6/6 全过**（无漏票、无多票）。
 
 ---
 
@@ -127,7 +129,7 @@ qlib 只认一个数据根目录（`provider_uri`）。但 qlib_data 是只读�
 过滤不需要手写——qlib 的 `D.features(instruments, fields, start_time, end_time)` 会读 instruments 文件里的日期段，**自动只取该票在池期间的数据**。
 
 时变股池的效果就体现在这：
-- T 日取数时，qlib 只返回 T-1 在册的那些票（第 2.3 节的 T-1 lag 在这里生效）；
+- T 日取数时，qlib 只返回 T 日在册的那些票（第 2.3 节的 T 日盘前更新在这里生效）；
 - 某只票不在池的日期，qlib 直接不返回它的数据——自动剔除「未来才入池」的票，无前视。
 
 容错：76 只缺 bin 的票，qlib 对它们返回空 Series（全 NaN），不报错、不影响其他票。
@@ -227,7 +229,7 @@ qlib.init(provider_uri = data/qlib_root)    ← overlay：qlib_data 只读视图
       │
       ▼
 ┌─ Alpha158 Handler（qlib 原生，零子类）─────────────────┐
-│  输入：7 字段 × highbeta883926 时变池（T-1 lag）       │
+│  输入：7 字段 × highbeta883926 时变池（T 日盘前更新）    │
 │  产出：158 特征 + 1 label                              │
 │  label = Ref($close,-2) / Ref($open,-1) - 1            │
 │        （T 日出信号 → T+1 开盘买 → T+2 收盘卖）         │
@@ -307,7 +309,7 @@ qlib.init(provider_uri = data/qlib_root)    ← overlay：qlib_data 只读视图
 | 文件 | 作用 |
 |---|---|
 | [config.py](../qlib_ifind_beta/config.py) | 集中配置：路径、字段、代码、URL、分钟 slot 映射 |
-| [universe.py](../qlib_ifind_beta/universe.py) | 883926 时变股池（p03473 拉取 + T-1 lag） |
+| [universe.py](../qlib_ifind_beta/universe.py) | 883926 时变股池（p03473 拉取，T 日盘前更新） |
 | [overlay.py](../qlib_ifind_beta/overlay.py) | symlink 叠加层构建 |
 | [materialize.py](../qlib_ifind_beta/materialize.py) | 3 个衍生字段物化（涨跌停用） |
 | [minute_factors.py](../qlib_ifind_beta/minute_factors.py) | ⚡ 14 个 T 日 9:30-9:40 分钟因子（纯函数） |

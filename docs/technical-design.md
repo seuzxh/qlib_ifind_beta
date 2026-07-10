@@ -112,7 +112,7 @@
 | test | 2026-04-01 → 2026-07-02 | out-of-sample 回测 + IC |
 | backtest | 2026-04-01 → **2026-07-01** | ⚠️ 比 test 少 1 天，见 §6 坑 3 |
 
-**时变池已消除幸存者偏差**（2026-07-05 升级）：[universe.py](../qlib_ifind_beta/universe.py) 按每日 p03473 快照构建 T-1 lag 时变 instruments（T 日观察池 = 883926 的 T-1 在册集），缩窗 2.5 年不再含 hindsight（见 §5 C1）。
+**时变池已消除幸存者偏差**（2026-07-05 升级，2026-07-10 修正）：[universe.py](../qlib_ifind_beta/universe.py) 按每日 p03473 快照构建时变 instruments（T 日观察池 = 883926 的 T 日在册集，盘前更新无前视），缩窗 2.5 年不再含 hindsight（见 §5 C1）。
 
 ---
 
@@ -173,7 +173,7 @@
 
 | 编号 | 妥协 | 影响 | 触发条件/升级路径 |
 |---|---|---|---|
-| ~~C1~~ | ~~幸存者偏差~~ → **已于 2026-07-05 解决** | — | ✅ p03473 历史 `iv_date` 实测通过 + [universe.py](../qlib_ifind_beta/universe.py) 时变 T-1 lag instruments 已落地（每日快照→连续段→+1 交易日 shift），静态池 hindsight 已消除。注：883926 是每日重平衡高贝塔榜（每日 ~80-90% 换手），时变池每日约 100 只、池子每日换血 |
+| ~~C1~~ | ~~幸存者偏差~~ → **已于 2026-07-05 解决** | — | ✅ p03473 历史 `iv_date` 实测通过 + [universe.py](../qlib_ifind_beta/universe.py) 时变 instruments 已落地（每日快照→连续段，T 日盘前更新无前视），静态池 hindsight 已消除。注：883926 是每日重平衡高贝塔榜（每日 ~80-90% 换手），时变池每日约 100 只、池子每日换血。**2026-07-10 修正**：883926 盘前更新，取消 T-1 shift（§43）。 |
 | C2 | **ST/*ST 涨跌停未区分**（±5%） | ST 股按各自板块 ±10/20/30% 处理 | 接入 iFinD ST 状态 → `limit_up/down` 升级为按日 bin |
 | ~~C3~~ | ~~Alpha158 baseline IC≈0~~ → **已被超越（2026-07-07）** | — | ✅ m14（14 分钟因子）IC 0→+0.034，enhanced(18)@n_drop=15 IC +0.0545 / 组合 ICIR 5.12 / 含成本超额 +159%（backtest-log §22）。→ **§33（2026-07-08）策略层 sweep 晋升 @topk10/nd8：IC 0.0545 不变（模型层，与 topk/n_drop 无关）/ IR 5.41 / 含成本超额 +191%（backtest-log §33）**。baseline IC≈0 根因（日频因子与 ~1.5 天 label 尺度错配）见 §D6 m14 段。 |
 | C4 | **`dump_index.py` 当前 dead code** | benchmark 走 SH000300 后未被引用 | 883926.TI 数据问题解决后可复活 |
