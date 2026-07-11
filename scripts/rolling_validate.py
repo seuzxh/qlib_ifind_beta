@@ -30,8 +30,8 @@ TRAIN_DAYS = 90      # 训练窗口（交易日）
 VALID_DAYS = 20      # 验证窗口
 STEP = 20            # 滚动步长（每 20 天重训一次）
 TEST_DAYS = STEP     # 每个 test 段 = step 天
-TEST_START = "2026-04-01"
-TEST_END = "2026-07-02"
+ROLL_START = "2025-01-02"  # 滚动起始日（2025 第一个交易日）
+TEST_END = "2026-07-02"    # 滚动结束日
 
 
 def _build_task_template() -> dict:
@@ -56,17 +56,17 @@ def _build_task_template() -> dict:
                     "module_path": "qlib_ifind_beta.minute_enhanced_handler",
                     "kwargs": {
                         "instruments": UNIVERSE_MARKET,
-                        "start_time": TEST_START,   # RollingGen 会覆盖
+                        "start_time": ROLL_START,   # 会被逐任务覆盖
                         "end_time": TEST_END,
-                        "fit_start_time": TEST_START,
+                        "fit_start_time": ROLL_START,
                         "fit_end_time": TEST_END,
                         "label": [CHAMPION_LABEL_EXPR],
                     },
                 },
                 "segments": {
-                    "train": [TEST_START, TEST_START],
-                    "valid": [TEST_START, TEST_START],
-                    "test":  [TEST_START, TEST_START],
+                    "train": [ROLL_START, ROLL_START],
+                    "valid": [ROLL_START, ROLL_START],
+                    "test":  [ROLL_START, ROLL_START],
                 },
             },
         },
@@ -86,22 +86,18 @@ def main():
 
     EXP = "rolling_90d_validate"
 
-    # 获取交易日历
-    cal = D.calendar(start_time="2024-01-01", end_time=TEST_END, freq="day")
+    # 获取交易日历（往前多取半年，确保 train 窗口有足够前置数据）
+    cal = D.calendar(start_time="2024-06-01", end_time=TEST_END, freq="day")
     cal_dates = [pd.Timestamp(d) for d in cal]
 
-    # 找 test 段在日历中的位置
-    test_start_idx = cal_dates.index(pd.Timestamp(TEST_START))
+    # 滚动起点 = ROLL_START（2025 第一个交易日）
+    roll_start_idx = cal_dates.index(pd.Timestamp(ROLL_START))
     test_end_idx = cal_dates.index(pd.Timestamp(TEST_END))
 
-    # 手动生成滚动任务（比 RollingGen 更直观可控）
-    # 从 test_start 往前推 train+valid，然后每次 step 前移
+    # 手动生成滚动任务
     tasks = []
-    pos = test_start_idx
+    pos = roll_start_idx
     while pos <= test_end_idx:
-        # train: [pos-TRAIN_DAYS-VALID_DAYS, pos-VALID_DAYS-1]
-        # valid: [pos-VALID_DAYS, pos-1]
-        # test:  [pos, min(pos+TEST_DAYS-1, test_end_idx)]
         train_start = cal_dates[pos - TRAIN_DAYS - VALID_DAYS]
         train_end = cal_dates[pos - VALID_DAYS - 1]
         valid_start = cal_dates[pos - VALID_DAYS]
@@ -198,7 +194,7 @@ def main():
     s_gross = pd.Series(rets_gross)
 
     # 基准
-    bench = D.features(["SH000300"], ["$close"], start_time=TEST_START, end_time=TEST_END)
+    bench = D.features(["SH000300"], ["$close"], start_time=ROLL_START, end_time=TEST_END)
     bench_ret = bench["$close"].pct_change().groupby(level="datetime").first()
 
     print(f"\n=== 回测（top10 equal-weight, {len(s_net)} 天）===")
