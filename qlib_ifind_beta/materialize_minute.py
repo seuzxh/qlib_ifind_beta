@@ -8,7 +8,7 @@ baseline are frozen for m14 reproducibility; the 4 extras feed MinuteEnhancedHan
 
 Reads cn_data_1min 1min bins (close/open/high/low/volume) per stock, slices each
 trading day's morning window (slots 1-11 = 09:31-09:41: 10 feature bars slots 1-10
-+ 1 buy bar slot 11), computes the 14 factors + 09:41 close, and writes them as
++ 1 buy bar slot 10), computes the 14 factors + 09:41 close, and writes them as
 day.bin aligned to qlib_data's day
 calendar (same start_index and length as the stock's daily close.bin, so
 $price_941[T] row-aligns with $close[T]).
@@ -25,9 +25,9 @@ Vectorized per stock: scatter the 1min bin onto the global (day, slot) calendar
 grid by absolute start_index, take morning slots 1-11 (09:31-09:41) →
 (n_min_days, 11), compute factors column-wise, scatter into the day-aligned
 output. Calendar-grid alignment is robust to the dataset's UNIVERSAL slot-0 NaN
-(every day's 09:30 bar is NaN pool-wide, 0/604 non-NaN — probe 2026-07-06) and
-to stock-local holes; missing cells become NaN. A naive reshape(242) is
-off-by-one. See spec §物化架构.
+(every day's bars are all real since 2026-07-11 rebuild, no NaN placeholders) and
+to stock-local holes; missing cells become NaN. A naive reshape(240) is
+off-by-one if the calendar changes. See spec §物化架构.
 
 Run: see scripts/materialize_minute.py (full universe) or call
 materialize_minute_instrument(code) directly.
@@ -166,9 +166,8 @@ def materialize_minute_instrument(code: str) -> bool:
 
     # Calendar-grid alignment: scatter each 1min bin onto the global (day, slot)
     # grid by absolute calendar row, then take morning slots FIRST_FEATURE_SLOT
-    # (1) .. BUY_SLOT (11) → 09:31-09:41. Robust to the dataset's UNIVERSAL
-    # slot-0 NaN (every day's 09:30 bar is NaN pool-wide, probe 2026-07-06) and
-    # to stock-local holes; missing cells become NaN. A naive reshape(242) is
+    # (0) .. BUY_SLOT (10) → 09:31-09:41. Robust to stock-local holes;
+    # missing cells become NaN. A naive reshape(240) is
     # off-by-one. See spec §物化架构.
     min_dates, min_slots = _load_min_calendar()
     _, date_to_row = _load_day_calendar_lookup()
@@ -185,10 +184,9 @@ def materialize_minute_instrument(code: str) -> bool:
     def morning2d(field):
         """Stock's morning bars on the global grid → (n_min_days, _MORNING_WINDOW).
 
-        Column j corresponds to calendar slot FIRST_FEATURE_SLOT+j (1..11 =
+        Column j corresponds to calendar slot FIRST_FEATURE_SLOT+j (0..10 =
         09:31-09:41). NaN where the stock has no bar at that calendar row
-        (universal slot-0 NaN doesn't enter — window starts at slot 1 — but
-        suspensions and pre-listing still produce NaN).
+        (suspensions and pre-listing produce NaN).
         """
         arr = m[field]
         flat = np.full(morning_rows.size, np.nan, dtype=np.float64)
@@ -216,7 +214,7 @@ def materialize_minute_instrument(code: str) -> bool:
     np.add.at(full_day_vol, day_idx_all[in_range], src_vals)
 
     # per-min-day date → day-calendar row → output-relative index.
-    # morning_rows[::_MORNING_WINDOW] = each day's slot-FIRST_FEATURE_SLOT (slot 1)
+    # morning_rows[::_MORNING_WINDOW] = each day's slot-FIRST_FEATURE_SLOT (slot 0)
     # cal row (date is constant in-day). clip ordinal before fancy-index
     # (defensive: a stray 1min date outside the day calendar — e.g. the extra
     # 2026-07-03 min-cal day not in day-cal — must not crash the whole stock;

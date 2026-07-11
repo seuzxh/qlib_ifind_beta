@@ -65,24 +65,20 @@ FREQ = "day"
 DAY_CAL = QLIB_DATA / "calendars" / "day.txt"
 
 # --- minute-frequency factors (T-day 9:30-9:40, materialized as day.bin) ------
-# Source: /home/zxh/cn_data_1min (readonly, 1min bins, 242 slots/day).
-# Slot map (probe-verified 2026-07-06): slot 0 (09:30) is universally NaN
-# pool-wide — every day, every stock (call-auction placeholder, 0/604 non-NaN).
-# First REAL bar = slot 1 (covers [09:30,09:31), the open continuous-bid minute); daily
-# open == minute_open[slot 1] exactly (8/8 days verified). 240 real bars/day
-# (242 − slot 0 − slot 121); slot 121 (13:00 mid-day break) is also universally NaN;
-# slot 241 (15:00) has real data (602/604 days).
+# Source: /home/zxh/cn_data_1min (readonly, 1min bins, 240 slots/day).
+# Slot map (probe-verified 2026-07-11): 240 real bars/day, 09:31~15:00, no NaN
+# placeholder slots. cn_data_1min was rebuilt (was 242 slots with slot 0 = 09:30 NaN
+# and slot 121 = 13:00 NaN placeholders; now 240 pure real bars).
+# First REAL bar = slot 0 (09:31); daily open == minute_open[slot 0].
 CN_DATA_1MIN = Path("/home/zxh/cn_data_1min")
 FEATURES_1MIN_SRC = CN_DATA_1MIN / "features"
 MIN_CAL = CN_DATA_1MIN / "calendars" / "1min.txt"
-SLOTS_PER_DAY = 242          # cn_data_1min calendar: 242 slots/day (09:30-15:00)
-REAL_BARS_PER_DAY = SLOTS_PER_DAY - 2   # 240: 242 slots − slot 0 (09:30) − slot 121 (13:00),
-                             # both universally NaN pool-wide (probe 2026-07-06). Exact, not
-                             # approximate: 240 real bars/day (used as vol_vs_yest denominator).
-FIRST_FEATURE_SLOT = 1       # slot 1 = first REAL bar (covers [09:30,09:31) open auction);
-                             # slot 0 (09:30) is universally NaN pool-wide (probe 2026-07-06)
-FEATURE_SLOT_COUNT = 10      # slots 1-10 = 09:31-09:40 factor input (10 real bars)
-BUY_SLOT = 11                # slot 11 = 09:41 close → $price_941 buy price
+SLOTS_PER_DAY = 240          # cn_data_1min calendar: 240 slots/day (09:31-15:00, all real)
+REAL_BARS_PER_DAY = 240      # 240 real bars/day (no NaN placeholders since 2026-07-11 rebuild;
+                             # was 242−2=240 before, value unchanged)
+FIRST_FEATURE_SLOT = 0       # slot 0 = 09:31 = first real bar (continuous-bid open)
+FEATURE_SLOT_COUNT = 10      # slots 0-9 = 09:31-09:40 factor input (10 real bars)
+BUY_SLOT = 10                # slot 10 = 09:41 close → $price_941 buy price
 
 # 14 minute factors materialized as <name>.day.bin per stock.
 MINUTE_FACTOR_FIELDS = (

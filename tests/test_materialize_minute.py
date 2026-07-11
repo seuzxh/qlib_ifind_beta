@@ -23,8 +23,8 @@ def _stock_arrays(code="SH600519"):
 
     Mirrors materialize_minute's calendar-grid mapping (slots 1-11 →
     (n_min_days, 11)) so hand-computed expected values are correct. The dataset's
-    slot 0 (09:30) is universally NaN pool-wide (probe 2026-07-06), so the window
-    starts at slot 1 (first real bar). A naive reshape(242) would be off-by-one
+    slot 0 = 09:31 (first real bar since 2026-07-11 rebuild, 240 slots/day).
+    A naive reshape(240) would be off-by-one
     everywhere. See spec §数据基础 / §物化架构.
     """
     si_m, c1m = read_bin(Path(FEATURES_1MIN_SRC) / code.lower() / "close.1min.bin")
@@ -135,7 +135,7 @@ def test_startup_mom_and_price941_crosscheck():
     out_row = day_row - si_out
     assert 0 <= out_row < startup.size
 
-    # startup_mom_1m = c[index9] / c[index8] - 1; price_941 = c[index10] (slot 11)
+    # startup_mom_1m = c[index9] / c[index8] - 1; price_941 = c[index10] (slot 10)
     expected_startup = c2d[km, 9] / c2d[km, 8] - 1.0
     expected_p941 = c2d[km, 10]
     assert abs(startup[out_row] - expected_startup) < 1e-4
@@ -337,7 +337,7 @@ def test_change_941_matches_hand_formula():
 
 def test_minute_window_kbar_count():
     """CLAUDE.md：分钟因子测试必须验证 K 线数量。开盘窗 = 恰好 10 根特征 K（slots
-    1-10 = 09:31-09:40）+ 1 根买入 K（slot 11 = 09:41）；1min 日历每个交易日贡献
+    0-9 = 09:31-09:40）+ 1 根买入 K（slot 10 = 09:41）；1min 日历每个交易日贡献
     恰好 11 行 morning rows。"""
     _, min_slots = mm._load_min_calendar()
     morning_rows = np.where(
