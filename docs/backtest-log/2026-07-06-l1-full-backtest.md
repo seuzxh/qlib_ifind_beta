@@ -2224,3 +2224,49 @@ bit-exact 不变（universe 口径修正对 test 段 top10 排序无影响）。
 **机制**：vol_vs_yest 用 raw volume，高低价股的同等手数不等价。amt 加权后，高价股的大额成交被正确反映 → 跨股票的量能异动更可比。W2（2025 年）市场风格与 W1（2026 年）不同，amt 的价格归一在 W2 更有效。
 
 **待决策**：W1 微负（-6%）+ W2 大幅正（+26.5%）的非对称形态需要进一步分析。rank IC 两窗都接近或更优，说明 amt 的**排序信息**有增量。是否 promote 为 champion 需要用户裁定。
+
+### 深入分析：within-top-K 条件 IC + partial IC（2026-07-12）
+
+用 §37.5 的 within-top-20 条件 IC 口径 + §37.9 partial rank IC 深入分析 amt 因子的增量来源。
+
+#### Conditional IC（within-top-K）
+
+| 窗口 | 模型 | 全截面 Rank IC | within-top-20 IC | within-top-10 IC |
+|---|---|---|---|---|
+| W1 | champion(18) | 0.0604 | **+0.0273** | +0.0350 |
+| W1 | shadow_amt(20) | 0.0595 | **−0.0059** | +0.0062 |
+| W2 | champion(18) | 0.0840 | **+0.0507** | +0.0544 |
+| W2 | shadow_amt(20) | 0.1123 | **−0.0275** | −0.0083 |
+
+**关键发现**：shadow_amt 的全截面 IC 更高（尤其 W2 +33.7%），但 **within-top-20 IC 两窗都反转成负值**。amt 因子让模型在全截面排序上更强，但在 champion 最关心的 top-20 边界内排序反而恶化。
+
+#### Partial Rank IC（残差化 champion pred 后的增量）
+
+| 窗口 | amt_ratio_5m | amt_vs_yest | vol_vs_yest（参照） |
+|---|---|---|---|
+| W1 | +0.0071 | **−0.0269** | **−0.0304** |
+
+amt_vs_yest partial IC = −0.0269，vol_vs_yest = −0.0304——两者残差化 champion pred 后都是**负值**，无正增量。说明 amt 和 vol 一样，被 champion pred 残差化后对 label 的残存相关为负。
+
+### 最终判定：证伪（FALSIFIED）— 第 10 重墙
+
+虽然 W2 全截面 IC +26.5% 看似有增量，但三层证据一致指向证伪：
+
+1. **within-top-20 IC 两窗转负**（W1: −0.006, W2: −0.028）——全截面 IC 的提升不转化为 top-k 排序增量
+2. **partial IC 为负**（−0.027）——amt_vs_yest 残差化 champion pred 后无正增量
+3. **与 vol_vs_yest 高度共线**（partial IC 几乎相同：−0.027 vs −0.030）——amt 的价格加权维度没有提供 vol 之外的独立信息
+
+**机制**（= §37.4/§38/§39 同源）：champion 18 个 T 日 9:30-9:40 分钟因子是真正饱和的强信号。amt 因子本质上是 vol 的价格加权版本，与 vol_vs_yest（alpha #1，gain 24.3%）高度共线。加入后：
+- 全截面 IC 因样本量增大而微升（尤其 W2 市场风格差异下）
+- but within-top-20 IC 转负 = 加因子 = 纯 top 重排 = 中性偏破坏（reshuffle 墙）
+
+**结论**：amount 因子（volume × vwap）是 §38/§39 后第 3 次撞墙的量能族增量尝试。champion 的量能信号已饱和，价格加权（vwap）不产生 raw volume 之外的独立 alpha。**item 7（扩 amount 字段）至此证伪**。
+
+### item 7 最终状态
+
+§40 将 item 7 上调为「先验最高的 IC 杠杆」（alpha 49% 在量能族 → turn/amount 可能更干净）。经 §44 实测：
+- amount（= vol × vwap）与 vol_vs_yest partial IC 几乎相同（−0.027 vs −0.030）→ 价格加权无独立增量
+- within-top-20 条件 IC 两窗转负 → 加入后 top-k 排序恶化
+- **item 7 先验从「最高」→「已证伪」**
+
+真正的 alpha 集中在 raw volume 本身（vol_vs_yest gain 24.3%），而非 volume 的任何变换（amount/turn/vwap-weighted）。量能族的优化空间不在「更干净的 volume 代理」，而在其他维度（如结构性换手 = item 6，但用户已决定不做）。
