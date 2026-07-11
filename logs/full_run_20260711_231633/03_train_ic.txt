@@ -1,0 +1,10 @@
+=== Step 3: 训练 + 预测 + IC ===
+recorder_id: 028a2de6b2fc4d0fbe35de85bacdc750
+
+IC metrics (SigAnaRecord):
+IC:       0.0511
+ICIR:     0.36
+Rank IC:  0.0604
+Rank ICIR:0.47
+IC>0 rate:64.5%
+test days:62

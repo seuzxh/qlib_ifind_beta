@@ -106,3 +106,15 @@ MINUTE_FACTOR_EXTRA_FIELDS = (
     "vol_vs_yest_t2", "vol_vs_yest_t3", "vol_vs_yest_t5",
     "overnight_gap",
 )
+
+# 21st-22nd materialized bins — amount（成交额）量能因子（item 7，2026-07-12）。
+# amount = volume × vwap（两个字段都在 cn_data_1min），无需新数据源。
+# 价格加权的量能信号：自动校正高低价股的 volume 不可比性，且部分吸收送股/拆分的结构性量变。
+#   - amt_ratio_5m：开盘后段成交额比前段 = mean(vol[5:10]×vwap[5:10]) / mean(vol[0:4]×vwap[0:4])。
+#     对标 vol_ratio_5m（champion gain 4.0%），测价格加权是否比 raw volume 更干净。
+#   - amt_vs_yest：开盘成交额 vs 昨日全天均 = sum(vol[0:10]×vwap[0:10]) / (T-1 全天 amt / 240)。
+#     对标 vol_vs_yest（champion gain 24.3%，alpha #1），测价格加权能否提升核心信号。
+MINUTE_FACTOR_AMT_FIELDS = (
+    "amt_ratio_5m",
+    "amt_vs_yest",
+)

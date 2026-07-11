@@ -1,0 +1,16 @@
+=== Step 4: 训练 + 预测 + IC ===
+recorder_id: 14b9e5db88f24238b0f537127c0dadb3
+
+best iteration:
+Early stopping, best iteration is:
+[47]	train's l2: 0.930865	valid's l2: 0.984883
+
+IC:         0.0511
+ICIR:       0.36
+Rank IC:    0.0604
+Rank ICIR:  0.47
+IC>0 rate:  64.5%
+test 天数:   62
+pred 行数:   5776
+pred std:    0.0857
+pred unique: 5632

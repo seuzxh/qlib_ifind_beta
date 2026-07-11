@@ -44,11 +44,11 @@ from .config import (
     BUY_SLOT, DAY_CAL, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FREQ,
     FIRST_FEATURE_SLOT, MIN_CAL,
     MINUTE_CHANGE_941_FIELD, MINUTE_DEAL_PRICE_FIELD,
-    MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS,
+    MINUTE_FACTOR_AMT_FIELDS, MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS,
     REAL_BARS_PER_DAY, SLOTS_PER_DAY,
 )
 
-_1MIN_FIELDS = ("close", "open", "high", "low", "volume")
+_1MIN_FIELDS = ("close", "open", "high", "low", "volume", "vwap")
 
 # Of MINUTE_FACTOR_EXTRA_FIELDS（enhanced extras），vol_vs_yest_t2/t3/t5 在 min-cal 空间（随 fac
 # scatter，复用 full_day_vol shift 2/3/5）；overnight_gap 在 day-cal 空间（与 change_941 同处
@@ -269,11 +269,35 @@ def materialize_minute_instrument(code: str) -> bool:
                 pv[k:] = full_day_vol[:-k]
             pv_safe = np.where(pv > 0, pv, np.nan)
             fac[fname] = morning_vol_sum / (pv_safe / float(REAL_BARS_PER_DAY))
+        # F. amount（成交额）量能因子（item 7, 2026-07-12）：amount = volume × vwap。
+        #    价格加权的量能信号，与 D/E 族的 raw volume 正交（vol 不变但价变 → amt 变）。
+        #    amt_ratio_5m：日内后段成交额比前段（对标 vol_ratio_5m）。
+        #    amt_vs_yest：开盘成交额 vs 昨日全天均（对标 vol_vs_yest，alpha #1）。
+        vwp = morning2d("vwap")
+        amt = v * vwp  # (n_min_days, 11) per-bar 成交额
+        d5_amt = amt[:, 0:4].mean(axis=1)
+        fac["amt_ratio_5m"] = np.full(n, np.nan)
+        np.divide(amt[:, 5:10].mean(axis=1), d5_amt, out=fac["amt_ratio_5m"],
+                  where=(d5_amt > 0))
+        morning_amt_sum = amt[:, 0:10].sum(axis=1)
+        # full_day_amt：T-1 全天总成交额（scatter 全天 vol×vwap）
+        vwp_bin = m["vwap"]
+        amt_bin_vals = vol_bin.astype(np.float64) * vwp_bin.astype(np.float64)
+        amt_bin_vals = np.where(np.isfinite(amt_bin_vals), amt_bin_vals, 0.0)
+        src_amt = amt_bin_vals[in_range]
+        src_amt = np.where(np.isfinite(src_amt), src_amt, 0.0)
+        full_day_amt = np.zeros(n_min_days, dtype=np.float64)
+        np.add.at(full_day_amt, day_idx_all[in_range], src_amt)
+        pv_amt = np.full(n_min_days, np.nan, dtype=np.float64)
+        if n_min_days > 1:
+            pv_amt[1:] = full_day_amt[:-1]
+        pv_amt_safe = np.where(pv_amt > 0, pv_amt, np.nan)
+        fac["amt_vs_yest"] = morning_amt_sum / (pv_amt_safe / float(REAL_BARS_PER_DAY))
     price_941 = c[:, 10]
 
     # scatter into day-aligned output (length = daily close.bin length)
     n_out = close_d.size
-    _scatter_fields = list(MINUTE_FACTOR_FIELDS) + list(_EXTRA_MINUTE_SPACE)
+    _scatter_fields = list(MINUTE_FACTOR_FIELDS) + list(_EXTRA_MINUTE_SPACE) + list(MINUTE_FACTOR_AMT_FIELDS)
     out = {name: np.full(n_out, np.nan, dtype=np.float32) for name in _scatter_fields}
     out_p941 = np.full(n_out, np.nan, dtype=np.float32)
     valid = (rel >= 0) & (rel < n_out) & (day_rows >= 0)

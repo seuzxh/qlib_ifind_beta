@@ -1,0 +1,48 @@
+[2923882:MainThread](2026-07-11 23:51:20,375) INFO - qlib.Initialization - [config.py:452] - default_conf: client.
+[2923882:MainThread](2026-07-11 23:51:20,376) INFO - qlib.Initialization - [__init__.py:75] - qlib successfully initialized based on client settings.
+[2923882:MainThread](2026-07-11 23:51:20,376) INFO - qlib.Initialization - [__init__.py:77] - data_path={'__DEFAULT_FREQ': PosixPath('/home/zxh/projects/3.qlib_ifind_beta/data/qlib_root')}
+[2923882:MainThread](2026-07-11 23:51:20,395) INFO - qlib.workflow - [exp.py:258] - Experiment 156869948604814731 starts running ...
+[2923882:MainThread](2026-07-11 23:51:20,603) INFO - qlib.workflow - [recorder.py:345] - Recorder 14b9e5db88f24238b0f537127c0dadb3 starts running under Experiment 156869948604814731 ...
+[run.py] limit_threshold coerce: PortAnaRecord: list(2) → tuple
+[run.py] experiment=minute_enhanced_tk10_nd8  provider_uri=/home/zxh/projects/3.qlib_ifind_beta/data/qlib_root
+ModuleNotFoundError. CatBoostModel are skipped. (optional: maybe installing CatBoostModel can fix it.)
+ModuleNotFoundError. XGBModel is skipped(optional: maybe installing xgboost can fix it).
+ModuleNotFoundError.  PyTorch models are skipped (optional: maybe installing pytorch can fix it).
+[2923882:MainThread](2026-07-11 23:51:26,918) INFO - qlib.timer - [log.py:127] - Time cost: 5.972s | Loading data Done
+[2923882:MainThread](2026-07-11 23:51:26,924) INFO - qlib.timer - [log.py:127] - Time cost: 0.006s | DropnaProcessor Done
+[2923882:MainThread](2026-07-11 23:51:26,930) INFO - qlib.timer - [log.py:127] - Time cost: 0.002s | DropnaLabel Done
+[2923882:MainThread](2026-07-11 23:51:27,326) INFO - qlib.timer - [log.py:127] - Time cost: 0.395s | CSZScoreNorm Done
+[2923882:MainThread](2026-07-11 23:51:27,327) INFO - qlib.timer - [log.py:127] - Time cost: 0.409s | fit & process data Done
+[2923882:MainThread](2026-07-11 23:51:27,327) INFO - qlib.timer - [log.py:127] - Time cost: 6.381s | Init data Done
+[2923882:MainThread](2026-07-11 23:51:27,463) INFO - qlib.fill_placeholder - [__init__.py:798] - <PRED> lookes like a placeholder, but it can't match to any given values
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+[2923882:MainThread](2026-07-11 23:51:27,540) INFO - qlib.workflow - [record_temp.py:198] - Signal record 'pred.pkl' has been saved as the artifact of the Experiment 156869948604814731
+Training until validation scores don't improve for 20 rounds
+[20]	train's l2: 0.956365	valid's l2: 0.985828
+[40]	train's l2: 0.9364	valid's l2: 0.985322
+[60]	train's l2: 0.920813	valid's l2: 0.986275
+Early stopping, best iteration is:
+[47]	train's l2: 0.930865	valid's l2: 0.984883
+'The following are prediction results of the LGBModel model.'
+                          score
+datetime   instrument          
+2026-04-01 SH600066   -0.054217
+           SH600158    0.064454
+           SH600184   -0.164881
+           SH600250    0.038592
+           SH600268    0.052835
+Downloading artifacts:   0%|          | 0/1 [00:00<?, ?it/s]Downloading artifacts:   0%|          | 0/1 [00:00<?, ?it/s]
+Downloading artifacts:   0%|          | 0/1 [00:00<?, ?it/s]Downloading artifacts: 100%|██████████| 1/1 [00:00<00:00, 2447.09it/s]Downloading artifacts: 100%|██████████| 1/1 [00:00<00:00, 1832.37it/s]
+Downloading artifacts:   0%|          | 0/1 [00:00<?, ?it/s]Downloading artifacts:   0%|          | 0/1 [00:00<?, ?it/s]
+Downloading artifacts:   0%|          | 0/1 [00:00<?, ?it/s]Downloading artifacts: 100%|██████████| 1/1 [00:00<00:00, 3318.28it/s]Downloading artifacts: 100%|██████████| 1/1 [00:00<00:00, 2570.04it/s]
+{'IC': np.float64(0.05113518033736898),
+ 'ICIR': np.float64(0.35839034535115977),
+ 'Rank IC': np.float64(0.06039294975584936),
+ 'Rank ICIR': np.float64(0.46700245461843376)}
+Downloading artifacts:   0%|          | 0/1 [00:00<?, ?it/s]Downloading artifacts:   0%|          | 0/1 [00:00<?, ?it/s]
+Downloading artifacts:   0%|          | 0/1 [00:00<?, ?it/s]Downloading artifacts: 100%|██████████| 1/1 [00:00<00:00, 1077.12it/s]Downloading artifacts: 100%|██████████| 1/1 [00:00<00:00, 982.27it/s] 
+[2923882:MainThread](2026-07-11 23:51:27,703) INFO - qlib.backtest caller - [__init__.py:93] - Create new exchange
+/tmp/tmpor_k422b: line 3: 2923882 Killed                  python -W ignore qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml

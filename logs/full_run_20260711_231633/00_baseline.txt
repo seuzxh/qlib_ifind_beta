@@ -1,0 +1,36 @@
+=== git HEAD ===
+6e4abbb fix(slot): cn_data_1min 242→240 slot 适配（全量重建后纯有效数据）
+99563d4 refactor(retrain): 删除 _coerce_limit_threshold 死代码（karpathy 原则 2）
+b2ed9f3 docs: §43 同步 T 日股池口径到 README + technical-design + architecture + data_flow
+
+=== slot config ===
+
+=== data versions ===
+qlib_data day cal: 2026-07-10
+cn_data_1min cal:  2026-07-10 15:00:00
+1min slots/day:    1542000 rows / 6425 days
+
+=== champion config ===
+
+=== conda env ===
+qlib 0.9.7
+lgbm 4.6.0
+pandas 2.3.3
+=== slot config ===
+SLOTS_PER_DAY = 240          # cn_data_1min calendar: 240 slots/day (09:31-15:00, all real)
+REAL_BARS_PER_DAY = 240      # 240 real bars/day (no NaN placeholders since 2026-07-11 rebuild;
+FIRST_FEATURE_SLOT = 0       # slot 0 = 09:31 = first real bar (continuous-bid open)
+FEATURE_SLOT_COUNT = 10      # slots 0-9 = 09:31-09:40 factor input (10 real bars)
+BUY_SLOT = 10                # slot 10 = 09:41 close → $price_941 buy price
+
+=== champion config ===
+CHAMPION_RECORDER_ID = "caf649ca6aa44aac8dec8c4e5a252aef"
+CHAMPION_EXPERIMENT = "minute_enhanced_tk10_nd8"
+CHAMPION_FIT_START = "2024-01-01"         # FROZEN = champion train 段
+CHAMPION_FIT_END = "2025-12-31"           # FROZEN = champion train 段
+CHAMPION_LABEL_EXPR = "Ref($close, -1) / $price_941 - 1"   # FROZEN label（P1 仅 fetch 结构，不读值）
+CHAMPION_TOPK = 10
+# 时从最新 online recorder 加载模型，替代 FROZEN CHAMPION_RECORDER_ID。
+
+=== slot/day check ===
+slots/day = 240.0

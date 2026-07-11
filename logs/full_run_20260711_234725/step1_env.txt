@@ -1,0 +1,22 @@
+=== 1.1 Git 版本 ===
+6e4abbb fix(slot): cn_data_1min 242→240 slot 适配（全量重建后纯有效数据）
+99563d4 refactor(retrain): 删除 _coerce_limit_threshold 死代码（karpathy 原则 2）
+b2ed9f3 docs: §43 同步 T 日股池口径到 README + technical-design + architecture + data_flow
+
+=== 1.2 Slot 配置 ===
+SLOTS_PER_DAY = 240          # cn_data_1min calendar: 240 slots/day (09:31-15:00, all real)
+REAL_BARS_PER_DAY = 240      # 240 real bars/day (no NaN placeholders since 2026-07-11 rebuild;
+FIRST_FEATURE_SLOT = 0       # slot 0 = 09:31 = first real bar (continuous-bid open)
+BUY_SLOT = 10                # slot 10 = 09:41 close → $price_941 buy price
+
+=== 1.3 数据日历 ===
+qlib_data day: 2026-07-10
+cn_data_1min:  2026-07-10 15:00:00
+1min slots/day: 240 (共 6425 天)
+
+=== 1.4 环境 ===
+qlib 0.9.7, lgbm 4.6.0, pandas 2.3.3
+
+=== 1.5 进程检查 ===
+残留 qrun 进程: 0
+内存: 1.8Ti available

@@ -1,0 +1,8 @@
+universe snapshots: 609 days in window, 609 cached, 0 to fetch
+universe: 5118 historical codes, 51070 segments (avg 10.0 seg/code) → /home/zxh/projects/3.qlib_ifind_beta/data/qlib_root/instruments/highbeta883926.txt
+codes=5118
+
+=== instruments 文件 ===
+总行数: 51070
+07-10 在册票数:
+  100

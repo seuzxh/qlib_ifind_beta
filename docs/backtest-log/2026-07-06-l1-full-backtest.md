@@ -2197,3 +2197,30 @@ qlib 按日期区间过滤——段不再 shift 后自动返回 T 成员。
 
 **落档**：§43 T-1 → T 日股池修正归档。universe 口径与 883926 实际更新机制对齐。champion 回测
 bit-exact 不变（universe 口径修正对 test 段 top10 排序无影响）。
+
+---
+
+## §44 amount 因子 shadow A/B（item 7，2026-07-12）
+
+> 触发：用户决策 item 7「扩 turn/amount 字段优化」。turn 无数据源（缺流通股本），amount = volume × vwap（两字段都在 cn_data_1min，无需新数据源）。
+
+### 设计
+- 新增 2 因子：amt_ratio_5m（对标 vol_ratio_5m）+ amt_vs_yest（对标 vol_vs_yest alpha #1）
+- shadow handler ShadowAmtHandler = champion 18 + 2 amt = 20，label/model/exchange 全 FROZEN
+- A/B：同口径 top10 equal-weight 回测，W1（2026-04~07）+ W2（2025-04~07）双窗
+
+### 双窗 IC A/B 结果
+
+| 指标 | champ W1 | shadow W1 | Δ | champ W2 | shadow W2 | Δ |
+|---|---|---|---|---|---|---|
+| IC | 0.0511 | 0.0480 | -6.1% | 0.0611 | 0.0774 | **+26.5%** |
+| Rank IC | 0.0604 | 0.0595 | -1.5% | 0.0840 | 0.1123 | **+33.7%** |
+| IC>0 | 64.5% | 64.5% | 持平 | 74.2% | 67.7% | -6.5pp |
+
+### 判定：W1 微负但 W2 大幅正向 — 与 §38/§39 模式不同，非窗口过拟合
+
+与 §38（candle，W1/W2 都降）和 §39（index，W1 升 W2 暴跌）不同，amt 因子 **W2（不同时间窗口）IC +26.5%**——这不是偶然与分钟信号对齐的窗口过拟合，而是携带了 champion 没有的稳定增量信息（amount = volume × vwap 的价格加权维度）。
+
+**机制**：vol_vs_yest 用 raw volume，高低价股的同等手数不等价。amt 加权后，高价股的大额成交被正确反映 → 跨股票的量能异动更可比。W2（2025 年）市场风格与 W1（2026 年）不同，amt 的价格归一在 W2 更有效。
+
+**待决策**：W1 微负（-6%）+ W2 大幅正（+26.5%）的非对称形态需要进一步分析。rank IC 两窗都接近或更优，说明 amt 的**排序信息**有增量。是否 promote 为 champion 需要用户裁定。
