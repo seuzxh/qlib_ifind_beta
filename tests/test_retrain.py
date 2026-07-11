@@ -109,20 +109,3 @@ def test_rolling_gen_step1_slide(qlib_init):
     next_test_start = followings[0]["dataset"]["kwargs"]["segments"]["test"][0]
     assert pd.Timestamp(next_test_start) > pd.Timestamp(test_start), (
         f"滚动后 test_start {next_test_start} 应 > 初始 {test_start}")
-
-
-# ---------------------------------------------------------------------------
-# B4-4: _coerce_limit_threshold 防御（无 PortAnaRecord 时 no-op）
-# ---------------------------------------------------------------------------
-
-def test_coerce_limit_threshold_noop_without_portana():
-    """无 PortAnaRecord 时 _coerce_limit_threshold 是 no-op。"""
-    from scripts.retrain import _coerce_limit_threshold
-
-    task = {
-        "record": [
-            {"class": "SignalRecord", "module_path": "qlib.workflow.record_temp"},
-        ]
-    }
-    _coerce_limit_threshold(task)   # 不应抛异常
-    assert task["record"][0]["class"] == "SignalRecord"

@@ -92,22 +92,6 @@ def _build_task_template() -> dict:
     }
 
 
-def _coerce_limit_threshold(task: dict) -> None:
-    """PortAnaRecord 的 limit_threshold(list) → tuple（同 qrun/run.py 本机坑绕过）。
-
-    滚动重训不带 PortAnaRecord（无需回测），但保留此防御：若未来加 PortAnaRecord，
-    list→tuple 修正自动生效。
-    """
-    for rec in task.get("record", []):
-        if rec.get("class") != "PortAnaRecord":
-            continue
-        exk = (((rec.get("kwargs", {}).get("config") or {})
-                .get("backtest") or {}).get("exchange_kwargs") or {})
-        lt = exk.get("limit_threshold")
-        if isinstance(lt, list):
-            exk["limit_threshold"] = tuple(lt)
-
-
 def _list_latest_online(tool, exp_name: str):
     """返回 (latest_recorders, max_test_end) —— 最新 online recorder 及其 test 末日。"""
     online = tool.online_models(exp_name=exp_name)
@@ -172,7 +156,6 @@ def run(test_end: str | None = None) -> dict:
     # 3. 训练每个任务
     new_ids = []
     for i, task in enumerate(tasks):
-        _coerce_limit_threshold(task)
         segs = task["dataset"]["kwargs"]["segments"]
         print(f"  [{i+1}/{len(tasks)}] train={segs['train']} valid={segs['valid']} test={segs['test']}")
         recorder = task_train(task, experiment_name=ROLLING_EXPERIMENT)
