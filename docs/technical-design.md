@@ -272,6 +272,7 @@
 | 成分股池 | [qlib_ifind_beta/universe.py](../qlib_ifind_beta/universe.py) |
 | **因子 Handler 族** | [highbeta_handler.py](../qlib_ifind_beta/highbeta_handler.py)（HighBetaAlpha158，85）/ [minute_only_handler.py](../qlib_ifind_beta/minute_only_handler.py)（m14 实验分支）/ [minute_enhanced_handler.py](../qlib_ifind_beta/minute_enhanced_handler.py)（**champion，18**） |
 | **T 日成交策略** | [qlib_ifind_beta/td0_strategy.py](../qlib_ifind_beta/td0_strategy.py)（TopkDropoutStrategyTD0，shift=0） |
+| **仓位层 overlay（§55）** | [qlib_ifind_beta/position_sizing.py](../qlib_ifind_beta/position_sizing.py)（C1 基准 20 日动量连续仓位，NAV 层 Calmar 4.88→9.56）+ [live/track.py](../qlib_ifind_beta/live/track.py)::compute_nav(position_scale) |
 | iFinD 客户端/token | [qlib_ifind_beta/ifind.py](../qlib_ifind_beta/ifind.py) |
 | 全链路配置 | [qrun/workflow.yaml](../qrun/workflow.yaml)（日频 baseline）/ [qrun/workflow_minute_enhanced.yaml](../qrun/workflow_minute_enhanced.yaml)（**champion**）/ [qrun/workflow_smoke.yaml](../qrun/workflow_smoke.yaml)（烟雾） |
 | 入口（坑绕过） | [qrun/run.py](../qrun/run.py) |

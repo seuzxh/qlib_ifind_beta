@@ -1,10 +1,10 @@
 # qlib_ifind_beta
 
 > 基于 [qlib](https://github.com/microsoft/qlib) 的 A 股因子挖掘 MVP。
-> 标的：**883926（同花顺高贝塔值指数）成分股**；形态：日频 baseline（`Alpha158`，IC≈0）→ **champion = enhanced(18)@topk10/nd8**（14 个 T 日 9:30-9:40 分钟因子 + 4 extra，9:41 成交），全链路（因子 → 模型 → 回测 → 报告）。详见 [backtest-log §22/§33](docs/backtest-log/2026-07-06-l1-full-backtest.md)。
+> 标的：**883926（同花顺高贝塔值指数）成分股**；形态：日频 baseline（`Alpha158`，IC≈0）→ **champion = enhanced(18)@topk10/nd8**（14 个 T 日 9:30-9:40 分钟因子 + 4 extra，9:41 成交）+ §55 仓位层 overlay（C1 基准趋势连续仓位，NAV 层 Calmar 4.88→9.56），全链路（因子 → 模型 → 回测 → 报告）。详见 [backtest-log §22/§33/§55](docs/backtest-log/2026-07-06-l1-full-backtest.md)。
 > 数据：**只读消费** [`/home/zxh/qlib_data`](../../qlib_data)（7 字段 × 26 年，日频）+ [`/home/zxh/cn_data_1min`](../../cn_data_1min)（1min，分钟因子源），不生产行情数据。
 
-**状态**：MVP 已端到端跑通 → 已演进到 **champion = enhanced(18)@topk10/nd8**（test 2026-04→07 +191.1% w/cost / IC 0.0545 / ICIR 5.41 / drawdown −5.59%，§33 sweep 双窗双赢晋升自 @n_drop=15，详见 backtest-log §22/§33）；本地 git 初始化（`feat/minute-factors` 分支，未接远端）。
+**状态**：MVP 已端到端跑通 → 已演进到 **champion = enhanced(18)@topk10/nd8**（test 2026-04→07 +191.1% w/cost / IC 0.0545 / ICIR 5.41 / drawdown −5.59%，§33 sweep 双窗双赢晋升自 @n_drop=15，详见 backtest-log §22/§33）；§55 仓位层 overlay（C1 基准趋势连续仓位）将绝对 NAV Calmar 4.88→9.56 / DD −34%→−18.5%（excess 指标不变，详见 backtest-log §55，代码在 `feat/position-sizing` worktree）；本地 git 初始化（`feat/minute-factors` 分支，未接远端）。
 
 ---
 
@@ -74,6 +74,7 @@ conda run -n qlib_ifind_beta python scripts/retrain.py   # 每日盘后，产出
 │   ├── minute_only_handler.py     #   MinuteOnlyHandler（m14 实验分支）
 │   ├── minute_enhanced_handler.py #   MinuteEnhancedHandler（★ champion，18 因子）
 │   ├── td0_strategy.py            #   TopkDropoutStrategyTD0（shift=1→0，9:41 成交）
+│   ├── position_sizing.py         #   §55 C1 基准趋势连续仓位 overlay（Calmar 4.88→9.56）
 │   ├── ifind.py / binio.py / dump_index.py   #  iFinD client / bin 读写 / index dump
 ├── scripts/build_overlay.py       # 一次性编排：overlay 端到端
 ├── scripts/materialize_minute.py  # 仅重物化分钟因子（改公式后免重拉 universe）

@@ -28,6 +28,7 @@ This file guides Claude Code when working in this repository.
 | Workflow / Feature Engineering | `qlib.data.dataset.processor.Processor`<br>Resample1minProcessor（highfreq 示例） | `factors/` 下各因子模块 |
 | Workflow / Model | `qlib.contrib.model.gbdt.LGBModel`<br>`qlib.contrib.model.highfreq_gdbt_model.HFLGBModel` | ✅ 原生 `HFLGBModel`（§50 从 LGBModel 升级，binary loss） |
 | Workflow / Strategy | `qlib.contrib.strategy.TopkDropoutStrategy`<br>`qlib.contrib.strategy.EnhancedIndexingStrategy` | ✅ 子类化 [TopkDropoutStrategyTD0](qlib_ifind_beta/td0_strategy.py)（shift=1→0，T 日 9:41 成交） |
+| Portfolio / 仓位层（§55，非 qlib 原生层） | —（NAV 层 overlay，非 qrun 链内） | ✅ [position_sizing.py](qlib_ifind_beta/position_sizing.py)（C1 基准趋势连续仓位，Calmar 4.88→9.56） |
 | Workflow / Backtest | `qlib.contrib.evaluate.backtest` | ✅ `SimulatorExecutor` + `PortAnaRecord`（qrun yaml `port_analysis_config`） |
 | Interface / Recorder | `qlib.workflow.recorder` | `factors/recorder.py` |
 | Interface / Workflow | `qrun` / `qlib.workflow` | `qrun/workflow*.yaml` |
@@ -109,15 +110,16 @@ conda run -n qlib_ifind_beta python -c "import qlib; print(qlib.__version__)"
 - **路径**：手写 qlib 因子（非 RDAgent）
 - **范围**：全链路（因子 → 模型 → 回测 → 报告）
 - **因子来源**：MVP 原生 `Alpha158`（IC≈0，日频因子与 ~1.5 天 label 尺度错配，详见 technical-design §D6 基线段）；2026-07-06 起子类化 → champion = [MinuteEnhancedHandler](qlib_ifind_beta/minute_enhanced_handler.py)（18 = 14 个 T 日 9:30-9:40 分钟因子 + 4 extra，纯分钟族 + 隔夜跳空，无日频 Alpha158）。详见 technical-design §D6 + backtest-log §22
-- **架构**：`qrun` YAML + `qlib.contrib` 原生类全链路（`HFLGBModel` / `SimulatorExecutor` / `SignalRecord-SigAnaRecord-PortAnaRecord`）；2026-07-06 起因子层子类化（`Alpha158 → HighBetaAlpha158 → MinuteEnhancedHandler`，含 §3.5 L1 前视护栏）、策略层子类化（`TopkDropoutStrategy → TopkDropoutStrategyTD0`，shift=1→0 实现 T 日 9:41 成交）。模型 §50 从 LGBModel 升级为 HFLGBModel（binary loss 横截面 alpha 二分类），执行/记录仍原生。详见 technical-design §D1 标注
+- **架构**：`qrun` YAML + `qlib.contrib` 原生类全链路（`HFLGBModel` / `SimulatorExecutor` / `SignalRecord-SigAnaRecord-PortAnaRecord`）；2026-07-06 起因子层子类化（`Alpha158 → HighBetaAlpha158 → MinuteEnhancedHandler`，含 §3.5 L1 前视护栏）、策略层子类化（`TopkDropoutStrategy → TopkDropoutStrategyTD0`，shift=1→0 实现 T 日 9:41 成交）。模型 §50 从 LGBModel 升级为 HFLGBModel（binary loss 横截面 alpha 二分类），执行/记录仍原生。§55 起叠加仓位层 overlay（C1 基准 20 日动量连续仓位，在 `compute_nav` 应用，不改选股/td0_strategy）。详见 technical-design §D1 标注
 - **Universe**：`highbeta883926` 时变成分股池（iFinD p03473 每日快照，T 日盘前更新无前视：T 日观察池 = 883926 的 T 日在册集；2026-07-10 起生效，此前为 T-1 lag。详见 [universe.py](qlib_ifind_beta/universe.py) + technical-design §3）
 - **Benchmark**：`SH000300`（883926.TI 因 iFinD `history_data` 序列不连贯暂搁置，见 technical-design §2 D5）
 - **切分**：train 2024-01-01→2025-12-31 / valid 2026-01-01→2026-03-31 / test 2026-04-01→2026-07-02（仅用 2024-2026 \~2.5 年，不用 26 年全段）
-- **频率**：日频 baseline（Alpha158）+ T 日 9:30-9:40 分钟因子（物化为 day.bin、Handler 层不混频）；champion = enhanced(18)@topk10/nd8（§33 策略层 sweep 双窗双赢晋升自 20/15，含成本超额 +191%）
+- **频率**：日频 baseline（Alpha158）+ T 日 9:30-9:40 分钟因子（物化为 day.bin、Handler 层不混频）；champion = enhanced(18)@topk10/nd8（§33 策略层 sweep 双窗双赢晋升自 20/15，含成本超额 +191%）；§55 仓位层 overlay（C1 基准趋势连续仓位）将绝对 NAV Calmar 4.88→9.56（qlib 链 excess 指标不变）
 
 ## 待定
 
 - ~~自定义因子起步集最终清单~~ → ✅ 已完成（champion = enhanced(18)@topk10/nd8，详见 technical-design §D6 + backtest-log §22/§33）
+- ~~仓位层优化~~ → ✅ 已完成（§55 C1 基准趋势连续仓位，NAV 层 Calmar 4.88→9.56，详见 backtest-log §55，代码在 `feat/position-sizing` worktree）
 - 扩段评估（用 26 年全数据）/ 追加新分钟因子族 —— 待用户决策（champion 已达成「一套有效 min 因子组合」目标）
 
 

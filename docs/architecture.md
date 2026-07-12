@@ -59,7 +59,7 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-> ⚡ **演进后现状**（上图 as-is 仍为 MVP 期）：数据工程层扩为 **14 模块 ~1580 行**（含 minute_factors / materialize_minute / handler 族 / td0_strategy）；overlay 每股 **20 bins**（7 base + 3 衍生 + 14 分钟 + 4 extra + price_941 + change_941，§41 清理后）；qrun 链 `MinuteEnhancedHandler → HFLGBModel → TopkDropoutStrategyTD0`（§50 模型从 LGBModel 升级）。真实清单见下方 §3 目录 + §4 模块详解 + §6 overlay 结构。
+> ⚡ **演进后现状**（上图 as-is 仍为 MVP 期）：数据工程层扩为 **15 模块 ~1680 行**（含 minute_factors / materialize_minute / handler 族 / td0_strategy / position_sizing）；overlay 每股 **20 bins**（7 base + 3 衍生 + 14 分钟 + 4 extra + price_941 + change_941，§41 清理后）；qrun 链 `MinuteEnhancedHandler → HFLGBModel → TopkDropoutStrategyTD0`（§50 模型从 LGBModel 升级）；§55 仓位层 overlay（C1 基准趋势连续仓位，在 `compute_nav` 应用，非 qrun 链内，NAV 层 Calmar 4.88→9.56）。真实清单见下方 §3 目录 + §4 模块详解 + §6 overlay 结构。
 
 ---
 
