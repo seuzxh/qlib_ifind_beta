@@ -2620,4 +2620,26 @@ pytest: 15/15 position_sizing 测试通过；59 个已有测试通过（3 个 te
 （+96%），回撤 -34%→-18.5%，且 excess 不降反升。FROZEN champion 的选股逻辑不变，
 仓位层作为 overlay 在 NAV 计算层应用。
 
+### 补充：B3 (IC z-score) 前视偏差证伪（2026-07-13）
+
+B3 原版 Calmar 22.76 异常高，复查发现**前视偏差**：
+
+B3 用 `ic_series[T]` 决定 T 日仓位，但 `ic_series[T] = Spearman(pred[T], label[T])`，
+而 `label[T] = Ref($close,-1)/$price_941-1` 需要 **T+1 收盘价**才能算出。
+即 position[T] 用到了 T+1 的信息。
+
+**验证**：将 ic_series shift 1 天（position[T] 只用 ic_series[T-1]，消除前视）：
+
+| 方案 | Excess | DD | Calmar |
+|---|---|---|---|
+| baseline | 166.7% | -34.2% | 4.88 |
+| **B3 原版（有前视）** | **429.6%** | -18.9% | **22.76** |
+| **B3 修正（IC shift 1d，无前视）** | **116.2%** | -28.7% | **4.05** |
+| C1（无前视） | 176.5% | -18.5% | 9.56 |
+
+修正前视后 B3 Calmar 从 22.76 暴跌到 4.05——**比 baseline（4.88）还差**。
+B3 的"优势"完全是前视幻觉。C1 不受此影响（信号源是基准动量，不依赖 label）。
+
+**结论**：B3 证伪。C1（Calmar 9.56）确认为最优方案，无前视偏差。
+
 ---
