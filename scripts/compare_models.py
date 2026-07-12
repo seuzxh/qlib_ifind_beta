@@ -40,13 +40,21 @@ MODELS = {
                    "num_leaves": 64, "num_threads": 20,
                    "lambda_l1": 5.0, "lambda_l2": 10.0},
     },
+    "XGBModel": {
+        "class": "XGBModel", "module_path": "qlib.contrib.model.xgboost",
+        "kwargs": {"eta": 0.05, "max_depth": 6, "n_estimators": 200,
+                   "reg_alpha": 5.0, "reg_lambda": 10.0,
+                   "n_jobs": 20, "early_stopping_rounds": 20},
+    },
+    "CatBoostModel": {
+        "class": "CatBoostModel", "module_path": "qlib.contrib.model.catboost_model",
+        "kwargs": {"iterations": 200, "learning_rate": 0.05, "depth": 6,
+                   "l2_leaf_reg": 10.0, "silent": True,
+                   "early_stopping_rounds": 20},
+    },
     "LinearModel": {
         "class": "LinearModel", "module_path": "qlib.contrib.model.linear",
         "kwargs": {},
-    },
-    "DEnsembleModel": {
-        "class": "DEnsembleModel", "module_path": "qlib.contrib.model.double_ensemble",
-        "kwargs": {"base_model": "rf", "n_estimators": 50, "learning_rate": 0.1},
     },
 }
 

@@ -2461,3 +2461,20 @@ predict 方法返回 "not implemented"（qlib 0.9.7 的 DEnsembleModel 不完整
 **HFLGBModel 是 90 天滚动重训的最优模型**。在 361 天 OOS 中 IC 0.0676、超额 204%、
 Calmar 6.81。与 LGBModel 相比全面更优，特别是在滚动重训短窗口场景下 binary loss 的
 稳健性优势显著。
+
+### §49 更新：5 模型完整对比（含 XGBoost + CatBoost）
+
+| 模型 | IC | ICIR | IC>0% | 超额(net) | IR | 回撤 | Calmar |
+|---|---|---|---|---|---|---|---|
+| LGBModel (MSE) | 0.0631 | 0.45 | 66.5% | 166.7% | 1.71 | -34.2% | 4.88 |
+| HFLGBModel (binary) | 0.0676 | 0.51 | 69.8% | 204.2% | 1.99 | -30.0% | 6.81 |
+| **XGBModel** | **0.0729** | **0.58** | **71.2%** | **204.7%** | 1.94 | **-29.9%** | **6.84** |
+| CatBoostModel | 0.0835 | 0.57 | 73.4% | 151.5% | 1.63 | -37.0% | 4.09 |
+| LinearModel | 0.0381 | 0.25 | 60.4% | -54.4% | — | — | — |
+
+**XGBModel 和 HFLGBModel 并列最优**（Calmar 6.84 vs 6.81）。XGBModel IC 更高（+7.8%），
+HFLGBModel IR 更高（+2.6%），两者超额/回撤几乎相同。
+
+CatBoost IC 最高（0.0835）但 IC→超额传导最弱（top10 头部分辨力不足）。
+
+**LinearModel 完全不可用**（IC 0.038，超额 -54%）——18 因子的非线性交互必须用树模型。
