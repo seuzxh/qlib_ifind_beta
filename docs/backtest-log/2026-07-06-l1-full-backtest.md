@@ -2478,3 +2478,28 @@ HFLGBModel IR 更高（+2.6%），两者超额/回撤几乎相同。
 CatBoost IC 最高（0.0835）但 IC→超额传导最弱（top10 头部分辨力不足）。
 
 **LinearModel 完全不可用**（IC 0.038，超额 -54%）——18 因子的非线性交互必须用树模型。
+
+---
+
+## §50 Champion 模型升级 LGBModel → HFLGBModel（2026-07-12）
+
+> 基于 §49 模型对比结论，champion 模型从 LGBModel(MSE) 升级为 HFLGBModel(binary)。
+
+### 变更清单
+- `qrun/workflow_minute_enhanced_tk10_nd8.yaml`：model 段 LGBModel→HFLGBModel，loss mse→binary
+- `config.py`：CHAMPION_RECORDER_ID 更新为 93d435e0（HFLGBModel champion）
+- `scripts/retrain.py`：task_template model 段同步
+- `scripts/rolling_validate.py`：task_template model 段同步
+- `tests/test_retrain.py`：断言更新为 HFLGBModel
+
+### HFLGBModel champion 单次训练 IC
+
+| 指标 | HFLGBModel(新) | LGBModel(旧) | 差异 |
+|---|---|---|---|
+| IC | 0.0548 | 0.0511 | +7.2% |
+| ICIR | 0.51 | 0.36 | +41.7% |
+| Rank IC | 0.0612 | 0.0604 | +1.3% |
+| IC>0 | 67.7% | 64.5% | +3.2pp |
+
+recorder_id: 93d435e0ef20464784553949eb3859a5
+pytest: 47 passed（test_retrain 断言已同步）

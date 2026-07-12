@@ -1,7 +1,7 @@
 """每日滚动重训测试（item 3）。
 
 覆盖：
-  - task_template 结构 = champion FROZEN（18 因子 + label + LGBModel 超参）
+  - task_template 结构 = champion（18 因子 + label + HFLGBModel 超参）
   - RollingGen(step=1, ROLL_SD) 滚动 segments 正确性（train/valid/test 同步前移）
   - config 常量与 RollingGen.ROLL_SD 值对齐
 """
@@ -34,13 +34,13 @@ def test_task_template_champion_frozen():
 
     t = _build_task_template()
 
-    # model = LGBModel champion 超参
+    # model = HFLGBModel champion 超参
     model = t["model"]
-    assert model["class"] == "LGBModel"
+    assert model["class"] == "HFLGBModel"
+    assert model["kwargs"]["loss"] == "binary"
     assert model["kwargs"]["learning_rate"] == 0.05
     assert model["kwargs"]["lambda_l1"] == 5.0
     assert model["kwargs"]["lambda_l2"] == 10.0
-    assert model["kwargs"]["num_boost_round"] == 200
 
     # handler = MinuteEnhancedHandler(18) champion 口径
     hk = t["dataset"]["kwargs"]["handler"]["kwargs"]

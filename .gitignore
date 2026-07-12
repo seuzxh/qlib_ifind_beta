@@ -28,3 +28,4 @@ __pycache__/
 # stray path-bug artifact (empty home/zxh/.../mlruns tree from a
 # script writing an abs path as relative; safe to delete)
 /home/
+catboost_info/

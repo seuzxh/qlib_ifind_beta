@@ -34,11 +34,13 @@ UNIVERSE_MARKET = "highbeta883926"    # instruments market name for qrun
 # functionpara/CPS has zero effect. User decision: use 000300 for now.
 BENCHMARK = "SH000300"
 
-# --- champion FROZEN 推理口径（2026-07-09 实战对接 P1）-------------------------
-# champion = enhanced(18)@topk10/nd8, commit 24b18dd, recorder caf649ca（params.pkl = LGBModel）。
-# P1 inference 复刻此 fit 段（FROZEN），仅 end_time 扩到 T。spike 2026-07-09 验证零偏离
-#（predict_day("2026-07-02") vs champion pred.pkl 同日 max|diff|=0、top10 10/10 完全一致）。
-CHAMPION_RECORDER_ID = "caf649ca6aa44aac8dec8c4e5a252aef"
+# --- champion 推理口径（2026-07-12 更新 HFLGBModel）----------------------------
+# champion = enhanced(18)@topk10/nd8, 模型从 LGBModel(MSE) → HFLGBModel(binary)。
+# §49 模型对比：HFLGBModel 滚动重训 361 天 OOS IC=0.0676 / 超额+204% / Calmar 6.81，
+# 全面碾压 LGBModel（IC 0.0631 / 超额+167% / Calmar 4.88）。
+# HFLGBModel 的 binary loss（横截面 alpha 二分类）在短窗口下泛化更稳健。
+# recorder_id 在首次训练后更新。
+CHAMPION_RECORDER_ID = "93d435e0ef20464784553949eb3859a5"  # HFLGBModel champion（2026-07-12）
 CHAMPION_EXPERIMENT = "minute_enhanced_tk10_nd8"
 CHAMPION_DATA_START = "2024-01-01"        # handler start_time（含 train 段供 learned processor fit）
 CHAMPION_FIT_START = "2024-01-01"         # FROZEN = champion train 段

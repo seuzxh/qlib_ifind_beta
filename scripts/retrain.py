@@ -48,18 +48,16 @@ def _build_task_template() -> dict:
     """
     return {
         "model": {
-            "class": "LGBModel",
-            "module_path": "qlib.contrib.model.gbdt",
+            "class": "HFLGBModel",
+            "module_path": "qlib.contrib.model.highfreq_gdbt_model",
             "kwargs": {
-                "loss": "mse",
+                "loss": "binary",
                 "learning_rate": 0.05,
                 "max_depth": 6,
                 "num_leaves": 64,
                 "num_threads": 20,
                 "lambda_l1": 5.0,
                 "lambda_l2": 10.0,
-                "num_boost_round": 200,
-                "early_stopping_rounds": 20,
             },
         },
         "dataset": {
