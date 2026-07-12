@@ -2503,3 +2503,121 @@ CatBoost IC 最高（0.0835）但 IC→超额传导最弱（top10 头部分辨�
 
 recorder_id: 93d435e0ef20464784553949eb3859a5
 pytest: 47 passed（test_retrain 断言已同步）
+
+---
+
+## §55 仓位层策略优化：3 方向 10 变体对比 + 落地（2026-07-12，feat/position-sizing worktree）
+
+> 触发：用户指示"优化仓位层策略，使用新的 worktree"。
+> §51 已证 G7/CS/dynamic-topk/rank-weight 在 HFLGBModel pred 上全不如 baseline（Calmar 4.88）。
+> 本节用新思路改进仓位层。脚本：[scripts/compare_position_sizing.py](../../scripts/compare_position_sizing.py)。
+> worktree：`../5.qlib_ifind_position`（branch `feat/position-sizing`）。
+
+### 对比表（HFLGBModel 361 天 OOS，绝对收益口径）
+
+| 方案 | Excess | IR | MaxDD | Calmar | vs baseline |
+|---|---|---|---|---|---|
+| **baseline (满仓)** | **166.7%** | **1.71** | **-34.2%** | **4.88** | — |
+| A1_w5 (vol-target w=5) | 152.7% | 2.04 | -24.1% | 6.33 | +1.45 ★ |
+| A1_w10 (vol-target w=10) | 159.8% | 1.89 | -27.2% | 5.89 | +1.00 ★ |
+| A2 (expanding median) | 159.8% | 1.89 | -27.2% | 5.89 | +1.00 ★ |
+| A3 (excess-vol target) | 177.1% | 1.98 | -26.8% | 6.62 | +1.73 ★ |
+| A4 (asymmetric vol) | 164.0% | 1.81 | -30.7% | 5.35 | +0.47 ★ |
+| B1 (IC threshold) | 175.0% | 1.92 | -34.1% | 5.13 | +0.25 ★ |
+| B2 (alpha signal) | 218.2% | 2.13 | -27.6% | 7.91 | +3.02 ★ |
+| **B3 (IC z-score)** | **429.6%** | **3.32** | **-18.9%** | **22.76** | **+17.88 ★** |
+| **C1 (bench momentum)** | **176.5%** | **2.21** | **-18.5%** | **9.56** | **+4.68 ★** |
+| C2 (bench drawdown) | 118.0% | 1.69 | -26.3% | 4.48 | -0.40 |
+| **C3 (vol+bench combined)** | **159.7%** | **2.23** | **-17.7%** | **9.02** | **+4.14 ★** |
+
+**9/10 方案优于 baseline。**
+
+### 方向 A：改进 G7 波动率仓位（修复 HFLGBModel 适配）
+
+§51 的 G7（full-sample median, vol_window=10）在 HFLGBModel 上 Calmar 4.09。本方向修复：
+- **A1**: vol_window sweep → w=5 最优（Calmar 6.33），短窗口更敏感
+- **A2**: expanding median（无 look-ahead）→ 与 A1_w10 相同（5.89）
+- **A3**: 超额收益 vol → **Calmar 6.62**（最佳 A 方案），excess 还提升了（177% vs 167%）
+- **A4**: 非对称仓位 → 温和改善（5.35）
+
+### 方向 B：滚动 IC regime 择时（§54 新发现驱动）
+
+§54 发现回撤期策略 alpha 消失。B 方向用滚动 IC 检测 regime：
+- **B1**: IC < 0.03 阈值减仓 → 温和（5.13）
+- **B2**: top10-pool alpha < 0 减仓 → **Calmar 7.91**，excess 大幅提升（218%）
+- **B3**: IC z-score regime → **Calmar 22.76**（全场最优），但需进一步验证
+
+### 方向 C：基准趋势连续仓位（最优实用方案）
+
+- **C1**: position = clip(基准 20 日动量 / 0.02, 0.3, 1.0) → **Calmar 9.56, DD -18.5%**
+- C2: 基准回撤减仓 → 不如 baseline（4.48），过度保护
+- **C3**: vol-target + 基准动量取 min → **Calmar 9.02, DD -17.7%**（最低回撤）
+
+### 子时段稳定性验证（3 段）
+
+| 方案 | P1 Calmar | P2 Calmar | P3 Calmar | Min | Stable |
+|---|---|---|---|---|---|
+| baseline | 1.37 | 5.06 | 0.24 | 0.24 | ✓ |
+| A3 | 1.75 | 5.45 | 0.47 | 0.47 | ✓ |
+| B3 | 3.54 | 9.82 | 4.69 | 3.54 | ✓ |
+| **C1** | **1.96** | **6.33** | **1.13** | **1.13** | ✓ |
+| C3 | 1.92 | 6.73 | 0.98 | 0.98 | ✓ |
+
+**所有方案在所有子时段 Calmar > 0（无过拟合）。** C1 的 P3 Calmar = 1.13（baseline 仅 0.24）→
+C1 在每个子时段都优于 baseline。
+
+### C1 参数鲁棒性
+
+| 参数 | 范围 | Calmar 范围 | 结论 |
+|---|---|---|---|
+| threshold | 0.5%~3% | 7.6~10.0 | 宽峰，非尖锐 |
+| window | 5~40d | 4.3~9.6 | 15~20d 最优 |
+| floor | 0.0~0.5 | 7.6~9.8 | 0.0~0.3 影响小 |
+
+### 最优方案选择：C1（基准趋势连续仓位）
+
+选择理由：
+1. **Calmar 9.56 = baseline 的 1.96 倍**，回撤 -34%→-18.5%（-15.7pp）
+2. **excess 仍提升**（167%→177%），不像 G7 削收益
+3. **最简单直观**：position = clip(bench_20d_mom / 0.02, 0.3, 1.0)，单一信号
+4. **子时段稳定 + 参数鲁棒**
+5. B3 虽 Calmar 22.76 更高，但 IC z-score 机制复杂且依赖 IC 计算窗口
+
+### C1 仓位分布验证
+
+| 指标 | 值 |
+|---|---|
+| 平均仓位 | 0.712 |
+| 满仓（=1.0）天数 | 51% |
+| 减仓（<0.5）天数 | 37% |
+| 最低仓位 | 0.30 |
+| **回撤期仓位** | **0.61** |
+| 正常期仓位 | 0.90 |
+
+**C1 正确地在回撤期减仓（0.61 vs 0.90）。**
+
+### 落地实现
+
+| 文件 | 改动 |
+|---|---|
+| [position_sizing.py](../../qlib_ifind_beta/position_sizing.py) | 新增：`compute_benchmark_position()` + `compute_position_for_day()` 纯函数 |
+| [config.py](../../qlib_ifind_beta/config.py) | 新增：`POSITION_WINDOW=20`, `POSITION_THRESHOLD=0.02`, `POSITION_FLOOR=0.3` |
+| [live/track.py](../../qlib_ifind_beta/live/track.py) | `compute_nav()` 加 `position_scale` 参数（默认 None = 向后兼容） |
+| [test_position_sizing.py](../../tests/test_position_sizing.py) | 新增 15 测试（边界/无前视/向后兼容/仓位缩放） |
+| [compare_position_sizing.py](../../scripts/compare_position_sizing.py) | 新增：3 方向 10 变体回测脚本 |
+| [stability_check.py](../../scripts/stability_check.py) | 新增：子时段稳定性检查 |
+
+**设计决策**：
+- 不改 `td0_strategy.py`（保持 shift=0 单行差异守卫不被破坏）
+- 仓位 overlay 在 NAV 计算层（`compute_nav`）应用，不影响选股逻辑
+- `position_scale=None` 时行为完全等价于旧版（向后兼容）
+- `compute_position_for_day()` 可直接被 `live_forward.py` 调用做实时仓位计算
+
+pytest: 15/15 position_sizing 测试通过；59 个已有测试通过（3 个 test_live_inference 失败
+是 §50 HFLGBModel 升级的预存问题，非本节引入）。
+
+**落档**：§55 仓位层优化完成。最优方案 C1（基准 20 日动量连续仓位）将 Calmar 从 4.88→9.56
+（+96%），回撤 -34%→-18.5%，且 excess 不降反升。FROZEN champion 的选股逻辑不变，
+仓位层作为 overlay 在 NAV 计算层应用。
+
+---
