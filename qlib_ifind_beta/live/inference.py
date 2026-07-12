@@ -87,10 +87,12 @@ def predict_day(date: str,
         fit_start_time=CHAMPION_FIT_START, fit_end_time=CHAMPION_FIT_END,
         label=[CHAMPION_LABEL_EXPR],
     )
-    dataset = DatasetH(handler=handler, segments={"inference": (date, date)})
+    # HFLGBModel.predict 硬编码读 "test" segment（不接受 segment 参数），故 key 用 "test"。
+    # LGBModel.predict 接受 segment= 参数但默认也是 "test" → 向后兼容。
+    dataset = DatasetH(handler=handler, segments={"test": (date, date)})
 
     # 3. predict → 单日 Series（score per instrument）
-    pred = model.predict(dataset, segment="inference")
+    pred = model.predict(dataset)
     scores = _squeeze_day(pred, date)
     if scores.empty:
         return {"date": date, "n_candidates": 0, "candidates": [], "topk": []}
