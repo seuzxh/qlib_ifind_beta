@@ -89,12 +89,16 @@ def settle_prev(prev_date: str, today: str,
 
 
 def compute_nav(settle: pd.DataFrame, out_path: Path,
-                open_cost: float = 0.0005, close_cost: float = 0.0015) -> pd.DataFrame:
+                open_cost: float = 0.0005, close_cost: float = 0.0015,
+                position_scale: pd.Series | None = None) -> pd.DataFrame:
     """equal-weight compound NAV（按 sell_date 聚合日收益）。
 
     每笔：ret_gross = sell/buy - 1；ret_net = sell*(1-close_cost)/(buy*(1+open_cost)) - 1。
     日收益 = 该 sell_date 下所有可结算笔（非 NaN）的等权均值（blocked/NaN 笔 dropna）。
     gross_nav / net_nav 从 1.0 compound。
+
+    position_scale: 可选，pd.Series index=date → [0,1] 仓位比例。如提供，日收益 *= position。
+    用于 §55 仓位层 overlay（基准趋势连续仓位），默认 None = 满仓（向后兼容）。
     """
     out_path = Path(out_path)
     s = settle.dropna(subset=["buy_price", "sell_price"]).copy()
@@ -111,6 +115,16 @@ def compute_nav(settle: pd.DataFrame, out_path: Path,
         "daily_ret_net": grp["ret_net"].mean(),
         "n_held": grp.size(),
     }).reset_index()
+
+    # §55: apply position scale if provided (e.g. benchmark-trend continuous position)
+    if position_scale is not None:
+        pos = position_scale.reindex(daily["sell_date"]).fillna(1.0)
+        daily["daily_ret_gross"] *= pos.values
+        daily["daily_ret_net"] *= pos.values
+        daily["position"] = pos.values
+    else:
+        daily["position"] = 1.0
+
     daily["gross_nav"] = (1 + daily["daily_ret_gross"]).cumprod()
     daily["net_nav"] = (1 + daily["daily_ret_net"]).cumprod()
     daily.to_csv(out_path, index=False)
