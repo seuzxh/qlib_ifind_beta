@@ -59,7 +59,7 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-> ⚡ **演进后现状**（上图 as-is 仍为 MVP 期）：数据工程层扩为 **14 模块 ~1580 行**（含 minute_factors / materialize_minute / handler 族 / td0_strategy）；overlay 每股 **30 bins**（7 base + 3 衍生 + 14 分钟 + 4 extra + price_941 + change_941）；qrun 链 `MinuteEnhancedHandler → LGBModel → TopkDropoutStrategyTD0`。真实清单见下方 §3 目录 + §4 模块详解 + §6 overlay 结构。
+> ⚡ **演进后现状**（上图 as-is 仍为 MVP 期）：数据工程层扩为 **14 模块 ~1580 行**（含 minute_factors / materialize_minute / handler 族 / td0_strategy）；overlay 每股 **20 bins**（7 base + 3 衍生 + 14 分钟 + 4 extra + price_941 + change_941，§41 清理后）；qrun 链 `MinuteEnhancedHandler → HFLGBModel → TopkDropoutStrategyTD0`（§50 模型从 LGBModel 升级）。真实清单见下方 §3 目录 + §4 模块详解 + §6 overlay 结构。
 
 ---
 
@@ -243,7 +243,7 @@ flowchart LR
     A["run.py<br/>设 MLFLOW_ALLOW_FILE_STORE<br/>加载 YAML<br/>limit_threshold list→tuple"] --> B["qlib.init<br/>provider_uri=data/qlib_root"]
     B --> C["task_train(config)"]
     C --> D["DatasetH + MinuteEnhancedHandler<br/>读 overlay features<br/>（7 base + 23 分钟/衍生 → 18 因子）"]
-    D --> E["LGBModel<br/>train→valid 早停<br/>→test pred"]
+    D --> E["HFLGBModel<br/>binary loss 横截面 alpha<br/>train→valid 早停<br/>→test pred"]
     E --> F["SignalRecord<br/>pred.pkl/label.pkl"]
     F --> G["SigAnaRecord<br/>IC / RankIC / ICIR"]
     E --> H["PortAnaRecord<br/>TopkDropoutStrategyTD0<br/>（shift=0，9:41 成交）<br/>+ SimulatorExecutor<br/>+ LT_TP_EXP 涨跌停"]
@@ -293,7 +293,7 @@ data/qlib_root/
 | `/home/zxh/cn_data_1min` | 只读 1min 行情（分钟因子源） | 文件系统（materialize_minute 读） |
 | iFinD `quantapi.51ifind.com` | 成分股（p03473）/ 行情（history_data，备用） | HTTPS + access_token；token 复用 `/home/zxh/qlib_data/.ifind_token` |
 | conda env `qlib_ifind_beta` | 运行环境（Python 3.12.13 + pyqlib 0.9.7） | `conda run -n qlib_ifind_beta …`（CLAUDE.md 硬约束） |
-| `qlib.contrib` | Alpha158(基类) / LGBModel / TopkDropoutStrategy(基类) / SimulatorExecutor / Record | import + 因子/策略子类化（见 §4.10-4.13），Exchange 用原生 `LT_TP_EXP` 不子类化 |
+| `qlib.contrib` | Alpha158(基类) / HFLGBModel / TopkDropoutStrategy(基类) / SimulatorExecutor / Record | import + 因子/策略子类化（见 §4.10-4.13），Exchange 用原生 `LT_TP_EXP` 不子类化 |
 | lightgbm 4.6 / pandas 2.3 / numpy 2.4 | 模型与数据计算 | conda env 内 |
 
 ---

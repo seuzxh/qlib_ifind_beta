@@ -10,7 +10,7 @@
 | 维度 | 选型 | 理由 |
 |---|---|---|
 | 因子框架 | **qlib 0.9.7（pyqlib）+ `qlib.contrib`** | CLAUDE.md 指定；最成熟的 A 股量化全链路。MVP 用原生 Alpha158；2026-07-06 起子类化（`Alpha158 → [HighBetaAlpha158](../qlib_ifind_beta/highbeta_handler.py) → [MinuteOnlyHandler](../qlib_ifind_beta/minute_only_handler.py) / [MinuteEnhancedHandler](../qlib_ifind_beta/minute_enhanced_handler.py)`，见 §D1 标注 + §D6）。 |
-| 模型 | **LGBModel**（lightgbm 4.6） | GBDT 是 qlib 默认强基线；表格因子 + 日频场景的工业标配。 |
+| 模型 | **HFLGBModel**（lightgbm 4.6, binary loss） | §50 从 LGBModel(MSE) 升级；HFLGBModel 的横截面 alpha 二分类在短窗口滚动重训下泛化更稳健（Calmar +40%）。 |
 | 数据底座 | **只读 `/home/zxh/qlib_data`** | 26 年深度、7 字段、instruments/calendars 齐备，由独立数据项目维护；本项目只消费不生产。 |
 | 数据接入策略 | **overlay symlink farm**（非拷贝/非 symlink farm 全量） | 只读源不可写，又需追加 3 个衍生 bin；逐文件 symlink 复用 base bin（零拷贝、与源同步）+ 真实目录写衍生 bin，是改动最小、最不易腐化的形态。 |
 | 外部行情源 | **iFinD `quantapi`**（仅取成分股 p03473） | 883926 成分股 qlib_data 无；iFinD token 复用 qlib_data 既有刷新链路，零额外凭证。 |
@@ -36,7 +36,7 @@
 |---|---|---|
 | Handler | `Alpha158` | `qlib.contrib.data.handler` |
 | Dataset | `DatasetH` | `qlib.data.dataset` |
-| Model | `LGBModel` | `qlib.contrib.model.gbdt` |
+| Model | `HFLGBModel` | `qlib.contrib.model.highfreq_gdbt_model` |
 | Strategy | `TopkDropoutStrategy` | `qlib.contrib.strategy.signal_strategy` |
 | Executor | `SimulatorExecutor`（PortAnaRecord 默认） | `qlib.backtest` |
 | Exchange 涨跌停 | `LT_TP_EXP`（原生表达式型） | `qlib.backtest.exchange` |

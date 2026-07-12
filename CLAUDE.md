@@ -26,7 +26,7 @@ This file guides Claude Code when working in this repository.
 | Workflow / DataHandler | `qlib.contrib.data.handler.Alpha158` 等 | `data/data_loader.py` 中 DataHandler 适配 |
 | Workflow / Dataset | `qlib.data.dataset.DatasetH` | 当前未实现，未来接入 |
 | Workflow / Feature Engineering | `qlib.data.dataset.processor.Processor`<br>Resample1minProcessor（highfreq 示例） | `factors/` 下各因子模块 |
-| Workflow / Model | `qlib.contrib.model.gbdt.LGBModel` | ✅ 原生 `LGBModel`（qrun yaml `model` 段） |
+| Workflow / Model | `qlib.contrib.model.gbdt.LGBModel`<br>`qlib.contrib.model.highfreq_gdbt_model.HFLGBModel` | ✅ 原生 `HFLGBModel`（§50 从 LGBModel 升级，binary loss） |
 | Workflow / Strategy | `qlib.contrib.strategy.TopkDropoutStrategy`<br>`qlib.contrib.strategy.EnhancedIndexingStrategy` | ✅ 子类化 [TopkDropoutStrategyTD0](qlib_ifind_beta/td0_strategy.py)（shift=1→0，T 日 9:41 成交） |
 | Workflow / Backtest | `qlib.contrib.evaluate.backtest` | ✅ `SimulatorExecutor` + `PortAnaRecord`（qrun yaml `port_analysis_config`） |
 | Interface / Recorder | `qlib.workflow.recorder` | `factors/recorder.py` |
@@ -109,7 +109,7 @@ conda run -n qlib_ifind_beta python -c "import qlib; print(qlib.__version__)"
 - **路径**：手写 qlib 因子（非 RDAgent）
 - **范围**：全链路（因子 → 模型 → 回测 → 报告）
 - **因子来源**：MVP 原生 `Alpha158`（IC≈0，日频因子与 ~1.5 天 label 尺度错配，详见 technical-design §D6 基线段）；2026-07-06 起子类化 → champion = [MinuteEnhancedHandler](qlib_ifind_beta/minute_enhanced_handler.py)（18 = 14 个 T 日 9:30-9:40 分钟因子 + 4 extra，纯分钟族 + 隔夜跳空，无日频 Alpha158）。详见 technical-design §D6 + backtest-log §22
-- **架构**：`qrun` YAML + `qlib.contrib` 原生类全链路（`LGBModel` / `SimulatorExecutor` / `SignalRecord-SigAnaRecord-PortAnaRecord`）；2026-07-06 起因子层子类化（`Alpha158 → HighBetaAlpha158 → MinuteEnhancedHandler`，含 §3.5 L1 前视护栏）、策略层子类化（`TopkDropoutStrategy → TopkDropoutStrategyTD0`，shift=1→0 实现 T 日 9:41 成交）。模型/执行/记录仍原生。详见 technical-design §D1 标注
+- **架构**：`qrun` YAML + `qlib.contrib` 原生类全链路（`HFLGBModel` / `SimulatorExecutor` / `SignalRecord-SigAnaRecord-PortAnaRecord`）；2026-07-06 起因子层子类化（`Alpha158 → HighBetaAlpha158 → MinuteEnhancedHandler`，含 §3.5 L1 前视护栏）、策略层子类化（`TopkDropoutStrategy → TopkDropoutStrategyTD0`，shift=1→0 实现 T 日 9:41 成交）。模型 §50 从 LGBModel 升级为 HFLGBModel（binary loss 横截面 alpha 二分类），执行/记录仍原生。详见 technical-design §D1 标注
 - **Universe**：`highbeta883926` 时变成分股池（iFinD p03473 每日快照，T 日盘前更新无前视：T 日观察池 = 883926 的 T 日在册集；2026-07-10 起生效，此前为 T-1 lag。详见 [universe.py](qlib_ifind_beta/universe.py) + technical-design §3）
 - **Benchmark**：`SH000300`（883926.TI 因 iFinD `history_data` 序列不连贯暂搁置，见 technical-design §2 D5）
 - **切分**：train 2024-01-01→2025-12-31 / valid 2026-01-01→2026-03-31 / test 2026-04-01→2026-07-02（仅用 2024-2026 \~2.5 年，不用 26 年全段）

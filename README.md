@@ -92,7 +92,7 @@ conda run -n qlib_ifind_beta python scripts/retrain.py   # 每日盘后，产出
 
 ## 核心设计（详见 [docs/technical-design.md](docs/technical-design.md)）
 
-- **`qlib.contrib` 全链路 + 因子/策略子类化**：模型/执行/记录仍原生（`LGBModel` / `SimulatorExecutor` / `SignalRecord-SigAnaRecord-PortAnaRecord`）；因子层 `Alpha158 → HighBetaAlpha158 → MinuteEnhancedHandler`（champion，含 L1 前视护栏）、策略层 `TopkDropoutStrategy → TopkDropoutStrategyTD0`（9:41 成交）。Exchange 用原生 `LT_TP_EXP` 不子类化。
+- **`qlib.contrib` 全链路 + 因子/策略子类化**：模型 `HFLGBModel`（§50 从 LGBModel 升级，binary loss 横截面 alpha 二分类，滚动重训 Calmar +40%）；执行/记录仍原生（`SimulatorExecutor` / `SignalRecord-SigAnaRecord-PortAnaRecord`）；因子层 `Alpha158 → HighBetaAlpha158 → MinuteEnhancedHandler`（champion，含 L1 前视护栏）、策略层 `TopkDropoutStrategy → TopkDropoutStrategyTD0`（9:41 成交）。Exchange 用原生 `LT_TP_EXP` 不子类化。
 - **Overlay symlink farm**：只读 qlib_data 之上逐文件 symlink 7 base bin + 自有目录写 23 个衍生/分钟 bin（每股 30 bins），最小写入面。
 - **板块分级涨跌停**：原生 `LT_TP_EXP` 表达式 tuple（`$change >= $limit_up` / `<= $limit_down`）+ 按代码前缀物化阈值（主板 0.095 / 创·科 0.195 / 北交所 0.295），不子类化 Exchange。
 - **A 股 T+1**：`TopkDropoutStrategyTD0(hold_thresh=1, forbid_all_trade_at_limit=True)`，daily 模式原生强制。
