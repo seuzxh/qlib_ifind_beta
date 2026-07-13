@@ -255,6 +255,78 @@ def generate_realtime_signal(
     logger.info(f"  Loading daily close/factor...")
     daily_info = get_daily_close_factor(codes, target_date)
 
+    # 4b. Fill T-day daily open/close/factor from realtime bars (for overnight_gap)
+    # When daily bins don't have T-day data yet (intraday), derive from minute bars:
+    #   open = first bar's open, close = last bar's close, factor from T-1 (unchanged intraday)
+    logger.info(f"  Filling T-day daily open/close from realtime bars...")
+    from qlib_ifind_beta.realtime.data_fetch import _prev_trading_day, _load_day_calendar
+    prev_date_str = _prev_trading_day(target_date)
+    for code in codes:
+        if code not in bars_data:
+            continue
+        bars = bars_data[code]
+        if not bars:
+            continue
+        # Read T-1 factor from daily bin (should exist)
+        ddir = Path(FEATURES_SRC) / code.lower()
+        close_path = ddir / f"close.{FREQ}.bin"
+        if not close_path.exists():
+            continue
+        si, close_d = read_bin(close_path)
+        si_f, factor_d = read_bin(ddir / f"factor.{FREQ}.bin")
+        if factor_d.size == 0 or si_f != si:
+            continue
+
+        # Find target_row and prev_row in calendar
+        cal = _load_day_calendar()
+        target_ts = pd.Timestamp(target_date)
+        target_row = None
+        prev_row = None
+        for i, d in enumerate(cal):
+            if prev_date_str and d == prev_date_str:
+                prev_row = i
+            if d == target_ts.strftime("%Y-%m-%d") or pd.Timestamp(d) == target_ts:
+                target_row = i
+                break
+        if target_row is None:
+            continue
+        t_idx = target_row - si
+        p_idx = (prev_row - si) if prev_row is not None else None
+        if t_idx < 0 or t_idx >= close_d.size:
+            continue
+
+        # Today's open = first minute bar's open; close = last bar's close
+        today_open = float(bars[0]["open"])
+        today_close = float(bars[-1]["close"])
+        # Factor is unchanged intraday (no ex-div during the session for most stocks)
+        # Use T-1 factor if available
+        if p_idx is not None and 0 <= p_idx < factor_d.size:
+            today_factor = float(factor_d[p_idx])
+        else:
+            today_factor = float(factor_d[t_idx]) if not np.isnan(factor_d[t_idx]) else 1.0
+
+        # Write to daily bins
+        si_o, open_d = read_bin(ddir / f"open.{FREQ}.bin")
+        if si_o == si and open_d.size == close_d.size:
+            open_d[t_idx] = np.float32(today_open)
+            write_bin(ddir / f"open.{FREQ}.bin", si_o, open_d)
+        close_d[t_idx] = np.float32(today_close)
+        write_bin(close_path, si, close_d)
+        factor_d[t_idx] = np.float32(today_factor)
+        write_bin(ddir / f"factor.{FREQ}.bin", si_f, factor_d)
+
+        # Update daily_info for factor computation
+        if code not in daily_info and p_idx is not None and 0 <= p_idx < close_d.size:
+            daily_info[code] = {
+                "prev_close": float(close_d[p_idx]),
+                "prev_factor": float(factor_d[p_idx]),
+                "open": today_open,
+                "factor": today_factor,
+            }
+        elif code in daily_info:
+            daily_info[code]["open"] = today_open
+            daily_info[code]["factor"] = today_factor
+
     # 5-6. Compute factors and write to bins
     logger.info(f"  Computing factors + writing bins...")
     success = 0
@@ -288,9 +360,88 @@ def generate_realtime_signal(
         logger.debug(f"  Sample failures: {sample_fail}")
 
     # 7. Predict via FROZEN champion model
+    # Use dummy label ($close) to bypass DropnaLabel (which would drop T-day rows
+    # since Ref($close,-1) needs T+1 close that doesn't exist yet).
+    # Then manually prepare features and predict.
     logger.info(f"  Running champion model predict...")
-    from qlib_ifind_beta.live.inference import predict_day
-    result = predict_day(target_date, topk=topk)
+    result = _predict_realtime(target_date, topk)
 
     logger.info(f"  ✅ Signal generated: {len(result.get('topk', []))} stocks")
     return result
+
+
+def _predict_realtime(date: str, topk: int = 10) -> dict:
+    """Predict using FROZEN champion model, bypassing label T+1 dependency.
+
+    Uses $close as dummy label (avoids DropnaLabel dropping T-day rows where
+    Ref($close,-1) is NaN because T+1 close doesn't exist yet).
+    Manually prepares features and calls model.model.predict() directly.
+    """
+    from qlib_ifind_beta.config import OVERLAY_ROOT as _OVERLAY_ROOT
+    import qlib
+    qlib.init(provider_uri=str(_OVERLAY_ROOT), region="cn")
+    from qlib.workflow import R
+    from qlib.data import D
+    from qlib.data.dataset import DatasetH
+    from qlib.data.dataset.handler import DataHandlerLP
+    from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
+    from qlib_ifind_beta.config import (
+        CHAMPION_DATA_START, CHAMPION_EXPERIMENT, CHAMPION_FIT_END,
+        CHAMPION_FIT_START, CHAMPION_RECORDER_ID, UNIVERSE_MARKET,
+    )
+
+    # Build handler with dummy label
+    handler = MinuteEnhancedHandler(
+        instruments=UNIVERSE_MARKET,
+        start_time=CHAMPION_DATA_START, end_time=date,
+        fit_start_time=CHAMPION_FIT_START, fit_end_time=CHAMPION_FIT_END,
+        label=["$close"],  # dummy — always exists, avoids DropnaLabel
+    )
+    dataset = DatasetH(handler=handler, segments={"test": (date, date)})
+
+    # Prepare features (bypass model.predict which reads "test" segment via DatasetH)
+    test_data = dataset.prepare("test", col_set="feature", data_key=DataHandlerLP.DK_I)
+    test_clean = test_data.dropna()
+    if test_clean.shape[0] == 0:
+        logger.warning(f"No valid features for {date}")
+        return {"date": date, "n_candidates": 0, "candidates": [], "topk": []}
+
+    # Load FROZEN champion model
+    rec = R.get_recorder(recorder_id=CHAMPION_RECORDER_ID,
+                         experiment_name=CHAMPION_EXPERIMENT)
+    model = rec.load_object("params.pkl")
+
+    # Predict directly (HFLGBModel.model.predict on raw features)
+    scores = pd.Series(model.model.predict(test_clean.values), index=test_clean.index)
+    scores = scores.sort_values(ascending=False)
+
+    # Get aux fields (price_941, change_941, limit_up, limit_down)
+    aux = D.features(D.instruments(market=UNIVERSE_MARKET),
+                     ["$price_941", "$change_941", "$limit_up", "$limit_down"],
+                     start_time=date, end_time=date)
+    aux_day = {}
+    if not aux.empty:
+        level = "datetime" if "datetime" in aux.index.names else 1
+        try:
+            a = aux.xs(date, level=level)
+            for code, r in a.iterrows():
+                aux_day[code] = (float(r.iloc[0]), float(r.iloc[1]),
+                                 float(r.iloc[2]), float(r.iloc[3]))
+        except KeyError:
+            pass
+
+    # Assemble candidates
+    cands = []
+    for code, sc in scores.items():
+        code_str = code if isinstance(code, str) else (code[1] if isinstance(code, tuple) else str(code))
+        if code_str not in aux_day:
+            continue
+        price_941, change_941, limit_up, limit_down = aux_day[code_str]
+        cands.append({"code": code_str, "score": float(sc),
+                      "price_941": price_941, "change_941": change_941,
+                      "limit_up": limit_up, "limit_down": limit_down})
+
+    # Limit-up interception
+    tradable = [c for c in cands if not (c["change_941"] >= c["limit_up"])]
+    return {"date": date, "n_candidates": len(cands),
+            "candidates": cands, "topk": tradable[:topk]}
