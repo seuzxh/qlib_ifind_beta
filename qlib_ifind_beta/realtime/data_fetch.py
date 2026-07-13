@@ -243,11 +243,15 @@ def get_prev_day_volumes_multi(codes: list[str], target_date: str,
 
 # ─── universe ─────────────────────────────────────────────────────────────────
 
-def load_universe(date: str, market: str = UNIVERSE_MARKET) -> list[str]:
+def load_universe(date: str, market: str = UNIVERSE_MARKET,
+                  filter_st: bool = True) -> list[str]:
     """Load universe codes for a given date from instruments file.
 
     Format: code\tstart_date\tend_date (TSV). Returns codes where
     start_date <= date <= end_date.
+
+    filter_st: if True, exclude ST/*ST stocks (±5% limit, different risk profile).
+    ST status is checked via kline-fetcher get_stock_info name lookup.
     """
     instr_path = OVERLAY_ROOT / "instruments" / f"{market}.txt"
     if not instr_path.exists():
@@ -266,7 +270,43 @@ def load_universe(date: str, market: str = UNIVERSE_MARKET) -> list[str]:
                     codes.append(code)
             except Exception:
                 continue
+
+    if filter_st and codes:
+        codes = _filter_st_stocks(codes)
+
     return codes
+
+
+def _filter_st_stocks(codes: list[str]) -> list[str]:
+    """Remove ST/*ST stocks from the list using kline-fetcher name lookup."""
+    _ensure_kline_env()
+    try:
+        from kline_fetcher.min_kline import MinKLineFetcher
+        fetcher = MinKLineFetcher()
+        filtered = []
+        st_found = []
+        for code in codes:
+            try:
+                info = fetcher.get_stock_info(code)
+                name = ""
+                if isinstance(info, dict):
+                    name = info.get("name", "")
+                elif isinstance(info, str):
+                    name = info
+                if "ST" in name.upper():
+                    st_found.append((code, name))
+                    continue
+                filtered.append(code)
+            except Exception:
+                # If we can't check, keep the stock (don't penalize API errors)
+                filtered.append(code)
+        if st_found:
+            logger.info(f"  Filtered {len(st_found)} ST stocks: "
+                        + ", ".join(f"{c}({n})" for c, n in st_found))
+        return filtered
+    except Exception as e:
+        logger.warning(f"ST filter failed ({e}), skipping filter")
+        return codes
 
 
 # ─── overnight_gap / change_941 inputs from daily bins ──────────────────────
