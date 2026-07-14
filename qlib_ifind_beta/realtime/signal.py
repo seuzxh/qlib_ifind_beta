@@ -76,8 +76,9 @@ def _compute_all_factors(arrs: dict, prev_vols: list[float],
     if daily_info and daily_info.get("prev_close") and daily_info.get("prev_factor"):
         prev_close = daily_info["prev_close"]
         prev_factor = daily_info["prev_factor"]
-        today_open = daily_info.get("open", c[0])
-        today_factor = daily_info.get("factor", 1.0)
+        # today_open: prefer daily_info (filled from kline bars); fallback to bar[0] open
+        today_open = daily_info.get("open") or float(c[0])
+        today_factor = daily_info.get("factor") or prev_factor
         raw_prev_close = prev_close / prev_factor
         raw_open = today_open / today_factor
         factors["overnight_gap"] = raw_open / raw_prev_close - 1.0 if raw_prev_close > 0 else np.nan
@@ -127,18 +128,20 @@ def generate_realtime_signal(
     logger.info(f"  Loading daily close/factor...")
     daily_info = get_daily_close_factor(codes, target_date)
 
-    # 4b. Fill T-day daily open from realtime bars (first bar's open)
+    # 4b. Fill T-day daily open + factor from realtime bars.
+    # T-day factor not in daily bins → assume factor unchanged (no dividend/split
+    # overnight for most stocks). Set today_factor = prev_factor so overnight_gap
+    # and change_941 compute correctly using raw prices.
     for code in codes:
         if code not in bars_data or not bars_data[code]:
             continue
         bars = bars_data[code]
         today_open = float(bars[0]["open"])
-        # Update daily_info with today's open (factor unchanged intraday)
         di = daily_info.get(code)
         if di:
             di["open"] = today_open
+            di["factor"] = di.get("factor") or di.get("prev_factor", 1.0)
         else:
-            # Create from prev_close if available
             di = {"open": today_open, "factor": 1.0,
                   "prev_close": np.nan, "prev_factor": 1.0}
             daily_info[code] = di
@@ -286,8 +289,9 @@ def _predict_in_memory(target_date: str, factor_rows: dict[str, dict],
                        index=processed_clean.index)
     scores = scores.sort_values(ascending=False)
 
-    # 6. Get limit_up/limit_down for buy interception
-    # These come from overlay bins; if T-day not available, skip interception
+    # 6. Get limit_up/limit_down for buy interception.
+    # Primary: read from overlay bins. Fallback: board_limit() per-code constant.
+    from qlib_ifind_beta.materialize import board_limit as _board_limit
     aux_day = {}
     try:
         aux = D.features(D.instruments(market=UNIVERSE_MARKET),
@@ -304,12 +308,13 @@ def _predict_in_memory(target_date: str, factor_rows: dict[str, dict],
     except Exception:
         pass
 
-    # 7. Assemble candidates
+    # 7. Assemble candidates — fill limit_up/down from board_limit if bins missing
     cands = []
     for idx, sc in scores.items():
         code = idx[1] if isinstance(idx, tuple) else idx
         lu, ld = aux_day.get(code, (np.nan, np.nan))
-        ch941 = change_941_map.get(code, np.nan) if 'change_941_map' in dir() else np.nan
+        if not np.isfinite(lu):
+            lu, ld = _board_limit(code)
         cands.append({"code": code, "score": float(sc),
                       "limit_up": lu, "limit_down": ld})
 
