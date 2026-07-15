@@ -83,6 +83,8 @@ def run(date: str, skip_universe: bool = False, skip_materialize: bool = False) 
         print("⏭ [2] materialize 跳过")
 
     # [3] predict_day(T) → 记录信号
+    # ⚠️ 审查(2026-07-15): predict_day(date) 未传 use_online=True，始终用 FROZEN champion。
+    # rolling retrain 产出的 online 模型从未被消费。计划改为 predict_day(date, use_online=True)。
     result = predict_day(date)
     record_signal(result, SIGNALS)
     topk_codes = [c["code"] for c in result["topk"]]

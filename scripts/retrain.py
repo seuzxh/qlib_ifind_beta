@@ -1,5 +1,11 @@
 """P1 实战对接 — 模型每日滚动重训入口（qlib 原生 RollingGen）。
 
+⚠️ 审查(2026-07-15): 当前为死代码。
+  - 仅 2026-07-11 跑过一次（首次 rg.generate 分支），test 段冻结在 2026-04-01。
+  - gen_following_tasks 后续滚动分支从未执行 → rolling 窗口从未前进。
+  - inference.py predict_day(use_online=False) 始终用 FROZEN champion，从未消费 rolling 模型。
+  - 计划：修复每日滚动 + 接入 use_online=True + 加入 daily_cron。
+
 用 qlib workflow.task.gen.RollingGen（step=1, ROLL_SD 滑动窗口）+ task_train +
 OnlineToolR 实现每日重训。每个交易日生成一个新任务（train/valid/test 同步前移 1
 天），训练后把新 recorder 标记为 online（旧模型自动 offline）。inference
@@ -131,10 +137,13 @@ def run(test_end: str | None = None) -> dict:
 
     if not latest_records:
         # 首次重训：用 template 生成初始任务
+        # ⚠️ 审查(2026-07-15): 此分支仅在 2026-07-11 执行过一次，产出了 test=2026-04-01 的初始模型。
         tasks = rg.generate(template)
         print(f"▶ [retrain] 首次重训：RollingGen 生成 {len(tasks)} 个初始任务")
     else:
         # 后续重训：基于最新 online recorder 生成后续任务
+        # ⚠️ 审查(2026-07-15): 此分支从未执行——retrain.py 自首次运行后未被再次调用。
+        # gen_following_tasks 应将 test 段从 2026-04-01 逐步滚动到 day.txt 末日。
         tasks = []
         if test_end is None:
             from qlib.data import D

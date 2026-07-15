@@ -1,4 +1,25 @@
-"""Real-time signal generation: pure in-memory factor computation + prediction.
+"""实时信号生成：纯内存因子计算 + 预测（盘中 9:41 调用）。
+
+⚠️ 审查(2026-07-15): 与 predict_day（盘后路径）有 4 个已知差异待修复：
+  1. 因子计算不共享：_compute_all_factors 手算 4 个 extra 因子（vol_vs_yest_t2/t3/t5 +
+     overnight_gap），与 materialize_minute.py 公式重复。计划提取共享函数。
+  2. ZScoreNorm 死代码：_predict_in_memory 中 ZScoreNorm 查找永远返回 None
+     （handler infer_processors=[]），手动标准化分支从不执行。计划删除。
+  3. 模型硬编码：硬编码 CHAMPION_RECORDER_ID，无 rolling use_online 路径。计划接入。
+  4. universe 不自动刷新：load_universe(T) 若 T 日未刷新返回空 → RuntimeError。计划自动刷新。
+
+Pipeline（英文原文保留）:
+  1. Fetch 9:31-09:41 minute bars via kline-fetcher (parallel)
+  2. Compute 18 factors in memory (from minute bars + cn_data_1min T-1 volumes)
+  3. Build a one-day feature DataFrame
+  4. Use champion handler (fit on 2024-2025 train segment from existing bins)
+     to normalize the new data via its already-fit ZScoreNorm
+  5. Run HFLGBModel.predict → top10
+
+Key design: NO modification to qlib_data calendars or bins. The handler reads
+existing historical bins for fit; T-day factors are injected as an in-memory
+DataFrame and processed by the fitted infer_processors.
+"""
 
 Pipeline:
   1. Fetch 9:31-09:41 minute bars via kline-fetcher (parallel)
@@ -60,7 +81,13 @@ def _bars_to_arrays(bars: list[dict]) -> dict[str, np.ndarray] | None:
 
 def _compute_all_factors(arrs: dict, prev_vols: list[float],
                          daily_info: dict | None) -> dict[str, float]:
-    """Compute all 18 champion factors from morning arrays."""
+    """Compute all 18 champion factors from morning arrays.
+
+    ⚠️ 审查(2026-07-15): 4 个 extra 因子（vol_vs_yest_t2/t3/t5 + overnight_gap）
+    在此函数内手算，与 materialize_minute.py 的向量实现公式重复。
+    14 个 baseline 因子已通过 compute_day_factors 共享 ✅。
+    计划：将 extra 因子提取到 minute_factors.py 共享函数，消除重复。
+    """
     c, o, h, l, vol = arrs["c"], arrs["o"], arrs["h"], arrs["l"], arrs["vol"]
     vwap, amount = arrs["vwap"], arrs["amount"]
 
@@ -110,6 +137,8 @@ def generate_realtime_signal(
     logger.info(f"▶ Realtime signal for {target_date}")
 
     # 1. Load universe
+    # ⚠️ 审查(2026-07-15): highbeta883926.txt 的 end_date 可能未到 T 日（需上游 dump_universe
+    # 刷新），返回 0 只 → RuntimeError。计划：返回空时自动调 universe.dump_universe 刷新。
     codes = load_universe(target_date)
     logger.info(f"  Universe: {len(codes)} stocks")
     if not codes:
@@ -226,6 +255,10 @@ def _predict_in_memory(target_date: str, factor_rows: dict[str, dict],
 
     # Now handler's infer_processors (ZScoreNorm) are fitted on train data.
     # Get the ZScoreNorm fit parameters (mean_train, std_train, cols).
+    # ⚠️ 审查(2026-07-15): 死代码！MinuteEnhancedHandler 的 infer_processors=[]（空），
+    # 此 for 循环永远不进入，zscore_proc 永远为 None。下游 ZScoreNorm 手动标准化分支
+    # （~lines 260-280）从不执行，实际只执行 replace([inf,-inf],NaN).fillna(0)。
+    # 计划：删除 zscore_proc 查找 + 手动标准化分支，只保留 fillna(0)。
     zscore_proc = None
     for p in handler.infer_processors:
         if type(p).__name__ == "ZScoreNorm":
@@ -250,6 +283,11 @@ def _predict_in_memory(target_date: str, factor_rows: dict[str, dict],
     tday_df.index = pd.MultiIndex.from_tuples(multi_index, names=["datetime", "instrument"])
 
     # 3. Apply infer processors manually (ProcessInf → ZScoreNorm → Fillna)
+    # ⚠️ 审查(2026-07-15): champion handler 的 infer_processors=[]，无标准化。
+    # 下方 ZScoreNorm 分支因 zscore_proc=None 永远跳过，实际只执行：
+    #   replace([inf,-inf], NaN) → fillna(0)
+    # 这与 handler 的 DropnaProcessor（drop NaN 行）行为不同——路径 A drop，路径 B fillna(0)。
+    # 对历史数据无差异（无 NaN），对实时数据（overnight_gap 可能 NaN）会产生微小差异。
     processed = tday_df.copy()
     # ProcessInf: replace inf with NaN
     processed = processed.replace([np.inf, -np.inf], np.nan)
@@ -280,6 +318,8 @@ def _predict_in_memory(target_date: str, factor_rows: dict[str, dict],
         return {"date": target_date, "n_candidates": 0, "candidates": [], "topk": []}
 
     # 5. Load model and predict
+    # ⚠️ 审查(2026-07-15): 硬编码 CHAMPION_RECORDER_ID（FROZEN champion），无 rolling
+    # use_online 路径。计划：优先从 rolling 实验加载 online 模型，fallback 到 FROZEN。
     rec = R.get_recorder(recorder_id=CHAMPION_RECORDER_ID,
                          experiment_name=CHAMPION_EXPERIMENT)
     model = rec.load_object("params.pkl")

@@ -47,6 +47,9 @@ def predict_day(date: str,
                 experiment_name: str = CHAMPION_EXPERIMENT,
                 market: str = UNIVERSE_MARKET,
                 topk: int = CHAMPION_TOPK,
+                # ⚠️ 审查(2026-07-15): use_online 默认 False，始终加载 FROZEN champion。
+                # rolling retrain 产出的 online 模型从未被消费（live_forward.py 未传 use_online=True）。
+                # 计划改为默认 True + FROZEN fallback（rolling 无 online 模型时降级）。
                 use_online: bool = False) -> dict:
     """T 日收盘后推理：复刻 champion handler（fit 段 FROZEN）→ 冻结 model.predict → top10。
 
@@ -66,6 +69,9 @@ def predict_day(date: str,
     from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
 
     # 1. load model
+    # ⚠️ 审查(2026-07-15): use_online 分支已实现但从未被调用（live_forward.py:86
+    # predict_day(date) 不传 use_online → 永远走 else 分支 FROZEN champion）。
+    # retrain.py 只跑过一次（test=2026-04-01），rolling 实验无后续 online 模型。
     if use_online:
         # 从 ROLLING_EXPERIMENT 最新 online recorder 加载（每日滚动重训产出）
         from qlib.workflow.online.utils import OnlineToolR

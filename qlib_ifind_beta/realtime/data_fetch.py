@@ -256,8 +256,10 @@ def get_prev_day_volumes_multi(codes: list[str], target_date: str,
             missing_codes.append(code)
 
     # Fallback: for codes where 1min bin missing T-k data, fetch from kline-fetcher.
-    # NOTE: daily volume ≠ sum(minute volume) — different units/scale (verified
-    # ratio ranges 0.005-0.99 across stocks). Must use actual minute bar sums.
+    # ⚠️ 审查(2026-07-15): 不能用日频 volume 替代——实测日频 volume 与分钟 volume 之和的
+    # 比值在 0.005-0.99 之间（单位/口径完全不同），替代会导致 vol_vs_yest 因子值偏移 10-10000 倍。
+    # 必须用 kline-fetcher 拉真实分钟 bar 求和（与 cn_data_1min bin 偏差 ~14%，可接受）。
+    if missing_codes:
     if missing_codes:
         logger.info(f"  1min fallback to kline-fetcher for {len(missing_codes)} codes")
         _fill_volumes_from_kline(missing_codes, k_indices, results)
@@ -320,11 +322,15 @@ def load_universe(date: str, market: str = UNIVERSE_MARKET,
                   filter_st: bool = True) -> list[str]:
     """Load universe codes for a given date from instruments file.
 
-    Format: code\tstart_date\tend_date (TSV). Returns codes where
+    Format: code\\tstart_date\\tend_date (TSV). Returns codes where
     start_date <= date <= end_date.
 
     filter_st: if True, exclude ST/*ST stocks (±5% limit, different risk profile).
     ST status is checked via kline-fetcher get_stock_info name lookup.
+
+    ⚠️ 审查(2026-07-15): highbeta883926.txt 的 end_date 取决于上次 dump_universe 刷新时间。
+    若 T 日未刷新（如盘前未跑 live_forward step [1]），返回空列表。
+    调用方（signal.py generate_realtime_signal）需处理空返回——计划自动触发 dump_universe。
     """
     instr_path = OVERLAY_ROOT / "instruments" / f"{market}.txt"
     if not instr_path.exists():
