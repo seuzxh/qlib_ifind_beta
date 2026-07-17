@@ -10,13 +10,13 @@
 | 维度 | 选型 | 理由 |
 |---|---|---|
 | 因子框架 | **qlib 0.9.7（pyqlib）+ `qlib.contrib`** | CLAUDE.md 指定；最成熟的 A 股量化全链路。MVP 用原生 Alpha158；2026-07-06 起子类化（`Alpha158 → [HighBetaAlpha158](../qlib_ifind_beta/highbeta_handler.py) → [MinuteOnlyHandler](../qlib_ifind_beta/minute_only_handler.py) / [MinuteEnhancedHandler](../qlib_ifind_beta/minute_enhanced_handler.py)`，见 §D1 标注 + §D6）。 |
-| 模型 | **HFLGBModel**（lightgbm 4.6, binary loss） | §50 从 LGBModel(MSE) 升级；HFLGBModel 的横截面 alpha 二分类在短窗口滚动重训下泛化更稳健（Calmar +40%）。 |
+| 模型 | **HFLGBModel + 验证门控 XGBModel** | HFLGB 为主模型和最终回退；25% XGBoost 仅在 purged 验证段 IC、RankIC、精确 TD0 超额三项均改善时启用。361 日无泄漏 OOS 的 IC、超额、IR、回撤联合改善，见 backtest-log §60。 |
 | 数据底座 | **只读 `/home/zxh/qlib_data`** | 26 年深度、7 字段、instruments/calendars 齐备，由独立数据项目维护；本项目只消费不生产。 |
 | 数据接入策略 | **overlay symlink farm**（非拷贝/非 symlink farm 全量） | 只读源不可写，又需追加 3 个衍生 bin；逐文件 symlink 复用 base bin（零拷贝、与源同步）+ 真实目录写衍生 bin，是改动最小、最不易腐化的形态。 |
 | 外部行情源 | **iFinD `quantapi`**（仅取成分股 p03473） | 883926 成分股 qlib_data 无；iFinD token 复用 qlib_data 既有刷新链路，零额外凭证。 |
 | 环境 | **conda env `qlib_ifind_beta`**（Python 3.12.13） | CLAUDE.md 硬约束；从 `qlib` env clone，保证 pyqlib 版本一致。 |
 | 标的范围 | **883926 成分股 + SH000300 benchmark** | 用户指定标的；benchmark 选择见 §2 D5。 |
-| 频率 | **日频 + T 日 9:30-9:40 分钟因子** | v1 日频 baseline（Alpha158，IC≈0，§D6 基线段）；2026-07-06 起 T 日 9:30-9:40 1min 滑窗因子物化为 day.bin、Handler 层不混频（§D6 m14/enhanced 段）；champion = enhanced(18)@topk10/nd8（策略层 §33 sweep 双窗双赢晋升自 @n_drop=15；backtest-log §22/§33）。 |
+| 频率 | **日频 + T 日 9:30-9:40 分钟因子** | 因子/策略底座仍为 enhanced(18)@topk10/nd8；模型层采用 90d train / 20d valid / 1d embargo / 20d frozen test 门控集成，避免 T+1 label 边界泄漏（backtest-log §60）。 |
 
 ---
 
@@ -272,8 +272,8 @@
 | 成分股池 | [qlib_ifind_beta/universe.py](../qlib_ifind_beta/universe.py) |
 | **因子 Handler 族** | [highbeta_handler.py](../qlib_ifind_beta/highbeta_handler.py)（HighBetaAlpha158，85）/ [minute_only_handler.py](../qlib_ifind_beta/minute_only_handler.py)（m14 实验分支）/ [minute_enhanced_handler.py](../qlib_ifind_beta/minute_enhanced_handler.py)（**champion，18**） |
 | **T 日成交策略** | [qlib_ifind_beta/td0_strategy.py](../qlib_ifind_beta/td0_strategy.py)（TopkDropoutStrategyTD0，shift=0） |
-| **仓位层 overlay（§55）** | [qlib_ifind_beta/position_sizing.py](../qlib_ifind_beta/position_sizing.py)（C1 基准 20 日动量连续仓位，NAV 层 Calmar 4.88→9.56）+ [live/track.py](../qlib_ifind_beta/live/track.py)::compute_nav(position_scale) |
+| **仓位层 overlay（§55）** | [qlib_ifind_beta/position_sizing.py](../qlib_ifind_beta/position_sizing.py)（C1 研究接口；前视审计后默认不启用）+ [live/track.py](../qlib_ifind_beta/live/track.py)::compute_nav(position_scale) |
 | iFinD 客户端/token | [qlib_ifind_beta/ifind.py](../qlib_ifind_beta/ifind.py) |
-| 全链路配置 | [qrun/workflow.yaml](../qrun/workflow.yaml)（日频 baseline）/ [qrun/workflow_minute_enhanced.yaml](../qrun/workflow_minute_enhanced.yaml)（**champion**）/ [qrun/workflow_smoke.yaml](../qrun/workflow_smoke.yaml)（烟雾） |
+| 全链路配置 | [qrun/workflow.yaml](../qrun/workflow.yaml)（日频 baseline）/ [qrun/workflow_minute_enhanced_tk10_nd8.yaml](../qrun/workflow_minute_enhanced_tk10_nd8.yaml)（**champion**）/ [qrun/workflow_minute_enhanced.yaml](../qrun/workflow_minute_enhanced.yaml)（legacy）/ [qrun/workflow_smoke.yaml](../qrun/workflow_smoke.yaml)（烟雾） |
 | 入口（坑绕过） | [qrun/run.py](../qrun/run.py) |
 | 工程约束 | [CLAUDE.md](../CLAUDE.md) |

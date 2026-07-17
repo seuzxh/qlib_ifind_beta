@@ -82,13 +82,13 @@ def run(date: str, skip_universe: bool = False, skip_materialize: bool = False) 
     else:
         print("⏭ [2] materialize 跳过")
 
-    # [3] predict_day(T) → 记录信号
-    # ⚠️ 审查(2026-07-15): predict_day(date) 未传 use_online=True，始终用 FROZEN champion。
-    # rolling retrain 产出的 online 模型从未被消费。计划改为 predict_day(date, use_online=True)。
-    result = predict_day(date)
+    # [3] 优先消费覆盖 T 日的 rolling gate artifact；无匹配模型自动回退冻结冠军。
+    result = predict_day(date, use_online=True)
     record_signal(result, SIGNALS)
     topk_codes = [c["code"] for c in result["topk"]]
-    print(f"✓ [3] predict: n_candidates={result['n_candidates']} topk={topk_codes}")
+    print(f"✓ [3] predict: source={result.get('model_source')} "
+          f"weight={result.get('ensemble_weight', 0):.2f} "
+          f"n_candidates={result['n_candidates']} topk={topk_codes}")
 
     # [4] settle_prev(T-1, T)：用 T 日 close/change/limit_down 回填 T-1 信号
     #     close 按 prev candidates code 列表查（list 不受当日池过滤，持仓掉出观察池仍可查）

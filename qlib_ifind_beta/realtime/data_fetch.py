@@ -260,7 +260,6 @@ def get_prev_day_volumes_multi(codes: list[str], target_date: str,
     # 比值在 0.005-0.99 之间（单位/口径完全不同），替代会导致 vol_vs_yest 因子值偏移 10-10000 倍。
     # 必须用 kline-fetcher 拉真实分钟 bar 求和（与 cn_data_1min bin 偏差 ~14%，可接受）。
     if missing_codes:
-    if missing_codes:
         logger.info(f"  1min fallback to kline-fetcher for {len(missing_codes)} codes")
         _fill_volumes_from_kline(missing_codes, k_indices, results)
 

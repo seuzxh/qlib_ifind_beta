@@ -50,22 +50,28 @@ CHAMPION_TOPK = 10
 
 # --- position sizing（§55 基准趋势连续仓位，2026-07-12）------------------------
 # position = clip(bench_20d_momentum / threshold, floor, 1.0)
-# §55 回测：Calmar 4.88→9.56（+96%），DD -34%→-18.5%，excess 167%→177%。
-# 子时段全稳定（P1/P2/P3 Calmar 全>0），参数鲁棒（threshold 0.5%~3% Calmar 7.6~10.0）。
-# 无 look-ahead：position[T] 只用 T-1 及之前的 benchmark 收益。
+# 2026-07-16 审计发现旧 §55 批量回测把 T 日收盘收益用于 T 日 09:41 仓位，存在前视；
+# 旧 Calmar 4.88→9.56 / excess 167%→177% 结论作废。修复为 position[T] 只使用
+# T-1 及之前数据后，361 日快速代理中 C1 低于满仓基线，故默认实盘仍应保持满仓。
 POSITION_WINDOW = 20
 POSITION_THRESHOLD = 0.02   # 2% per 20 days → full position
 POSITION_FLOOR = 0.3        # never below 30% invested
 
 # --- rolling retrain（2026-07-10，item 3 每日滚动重训）-------------------------
 # 用 qlib 原生 RollingGen（task.gen）+ task_train + OnlineToolR（online utils）实现。
-# 每个交易日生成新任务（step=1），滑动窗口（ROLL_SD = train/valid/test 同步前移），
-# 训练后将新 recorder 标记为 online（旧模型自动 offline）。inference use_online=True
-# 时从最新 online recorder 加载模型，替代 FROZEN CHAMPION_RECORDER_ID。
+# 每 20 个交易日冻结一个模型段；每日入口只在当前 online artifact 不覆盖目标日时重训。
+# inference use_online=True 从覆盖目标日的 recorder 加载，否则回退冻结冠军。
 # 详见 scripts/retrain.py + qlib workflow.online 文档。
 ROLLING_EXPERIMENT = "minute_enhanced_rolling"
-ROLLING_STEP = 1                    # 每日滚动重训（step=1 交易日）
+ROLLING_XGB_EXPERIMENT = "minute_enhanced_rolling_xgb"
+ROLLING_STEP = 20                   # 与 §60 无泄漏 walk-forward 一致
 ROLLING_RTYPE = "sliding"           # RollingGen.ROLL_SD（滑动窗口）
+ROLLING_TRAIN_DAYS = 90             # 与 §60 19 段验证严格一致
+ROLLING_VALID_DAYS = 20
+ROLLING_EMBARGO_DAYS = 1            # label[T] 到 T+1 收盘才完整；测试前隔离一日
+ROLLING_TEST_DAYS = 20
+ROLLING_ENSEMBLE_WEIGHT = 0.25       # §60 冻结候选权重；验证三门槛未通过时为 0
+ROLLING_GATE_ARTIFACT = "ensemble_gate.pkl"
 
 # --- fields ------------------------------------------------------------------
 BASE_FIELDS = ("open", "high", "low", "close", "volume", "factor", "vwap")
@@ -128,4 +134,13 @@ MINUTE_FACTOR_EXTRA_FIELDS = (
 MINUTE_FACTOR_AMT_FIELDS = (
     "amt_ratio_5m",
     "amt_vs_yest",
+)
+
+# Shadow candidates that retain more of the ten-bar opening path instead of
+# reducing it to endpoint momentum/volume ratios. They are not champion fields
+# until the purged walk-forward promotion gate passes.
+MINUTE_FACTOR_PATH_FIELDS = (
+    "minute_return_vol",
+    "minute_range_mean",
+    "minute_path_max_drawdown",
 )

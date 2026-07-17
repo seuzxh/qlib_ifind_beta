@@ -15,7 +15,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from qlib_ifind_beta import materialize_minute, overlay
-from qlib_ifind_beta.config import INSTRUMENTS_DST, UNIVERSE_MARKET
+from qlib_ifind_beta.config import (
+    INSTRUMENTS_DST, UNIVERSE_MARKET,
+)
 
 
 def _load_codes():

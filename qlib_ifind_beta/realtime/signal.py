@@ -1,11 +1,10 @@
 """实时信号生成：纯内存因子计算 + 预测（盘中 9:41 调用）。
 
-⚠️ 审查(2026-07-15): 与 predict_day（盘后路径）有 4 个已知差异待修复：
+与物化推理共享同一模型选择和特征缺失口径：
   1. 因子计算不共享：_compute_all_factors 手算 4 个 extra 因子（vol_vs_yest_t2/t3/t5 +
      overnight_gap），与 materialize_minute.py 公式重复。计划提取共享函数。
-  2. ZScoreNorm 死代码：_predict_in_memory 中 ZScoreNorm 查找永远返回 None
-     （handler infer_processors=[]），手动标准化分支从不执行。计划删除。
-  3. 模型硬编码：硬编码 CHAMPION_RECORDER_ID，无 rolling use_online 路径。计划接入。
+  2. MinuteEnhancedHandler 无 infer processor；实时矩阵直接执行 shared Dropna(feature)。
+  3. 优先使用覆盖目标日的滚动门控模型，任何异常自动回退 HFLGB/FROZEN。
   4. universe 不自动刷新：load_universe(T) 若 T 日未刷新返回空 → RuntimeError。计划自动刷新。
 
 Pipeline（英文原文保留）:
@@ -21,18 +20,6 @@ existing historical bins for fit; T-day factors are injected as an in-memory
 DataFrame and processed by the fitted infer_processors.
 """
 
-Pipeline:
-  1. Fetch 9:31-09:41 minute bars via kline-fetcher (parallel)
-  2. Compute 18 factors in memory (from minute bars + cn_data_1min T-1 volumes)
-  3. Build a one-day feature DataFrame
-  4. Use champion handler (fit on 2024-2025 train segment from existing bins)
-     to normalize the new data via its already-fit ZScoreNorm
-  5. Run HFLGBModel.predict → top10
-
-Key design: NO modification to qlib_data calendars or bins. The handler reads
-existing historical bins for fit; T-day factors are injected as an in-memory
-DataFrame and processed by the fitted infer_processors.
-"""
 from __future__ import annotations
 
 import logging
@@ -46,10 +33,10 @@ from qlib_ifind_beta.config import (
     FEATURES_DST, FREQ, MINUTE_FACTOR_FIELDS, MINUTE_FACTOR_EXTRA_FIELDS,
     MINUTE_FACTOR_AMT_FIELDS, MINUTE_DEAL_PRICE_FIELD, MINUTE_CHANGE_941_FIELD,
     REAL_BARS_PER_DAY, SLOTS_PER_DAY, OVERLAY_ROOT,
-    CHAMPION_DATA_START, CHAMPION_EXPERIMENT, CHAMPION_FIT_END, CHAMPION_FIT_START,
-    CHAMPION_RECORDER_ID, CHAMPION_TOPK, UNIVERSE_MARKET,
+    CHAMPION_TOPK, UNIVERSE_MARKET,
 )
 from qlib_ifind_beta.minute_factors import compute_day_factors
+from qlib_ifind_beta.model_ensemble import load_model_bundle, predict_bundle_matrix
 
 from .data_fetch import (
     fetch_bars_parallel, get_prev_day_volumes_multi,
@@ -222,48 +209,12 @@ def generate_realtime_signal(
 
 
 def _predict_in_memory(target_date: str, factor_rows: dict[str, dict],
-                       topk: int, change_941_map: dict = None) -> dict:
-    """Predict using champion handler + model, pure in-memory.
-
-    Strategy: build a handler that reads historical bins (up to last synced day)
-    for ZScoreNorm fit, then manually inject T-day factor values as a new row
-    into the handler's cache, and run predict.
-    """
+                       topk: int, change_941_map: dict = None,
+                       use_online: bool = True) -> dict:
+    """Predict a T-day feature matrix with the date-matched model bundle."""
     import qlib
     qlib.init(provider_uri=str(OVERLAY_ROOT), region="cn")
-    from qlib.workflow import R
     from qlib.data import D
-    from qlib.data.dataset import DatasetH
-    from qlib.data.dataset.handler import DataHandlerLP
-    from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
-
-    # 1. Build handler on historical data (fit ZScoreNorm on train segment)
-    # Use the last synced date as end_time (don't need target_date in calendar)
-    handler = MinuteEnhancedHandler(
-        instruments=UNIVERSE_MARKET,
-        start_time=CHAMPION_DATA_START, end_time=CHAMPION_FIT_END,
-        fit_start_time=CHAMPION_FIT_START, fit_end_time=CHAMPION_FIT_END,
-        label=["$close"],  # dummy label
-    )
-
-    # Force the handler to load + fit its processors
-    # We use a dummy DatasetH to trigger fit_process_data
-    # Get the last trading date from calendar
-    cal = D.calendar(freq="day")
-    last_date = cal[-1]
-    dataset = DatasetH(handler=handler, segments={"test": (last_date, last_date)})
-
-    # Now handler's infer_processors (ZScoreNorm) are fitted on train data.
-    # Get the ZScoreNorm fit parameters (mean_train, std_train, cols).
-    # ⚠️ 审查(2026-07-15): 死代码！MinuteEnhancedHandler 的 infer_processors=[]（空），
-    # 此 for 循环永远不进入，zscore_proc 永远为 None。下游 ZScoreNorm 手动标准化分支
-    # （~lines 260-280）从不执行，实际只执行 replace([inf,-inf],NaN).fillna(0)。
-    # 计划：删除 zscore_proc 查找 + 手动标准化分支，只保留 fillna(0)。
-    zscore_proc = None
-    for p in handler.infer_processors:
-        if type(p).__name__ == "ZScoreNorm":
-            zscore_proc = p
-            break
 
     # 2. Build T-day feature DataFrame
     rows = []
@@ -282,51 +233,16 @@ def _predict_in_memory(target_date: str, factor_rows: dict[str, dict],
     tday_df = pd.DataFrame(rows)
     tday_df.index = pd.MultiIndex.from_tuples(multi_index, names=["datetime", "instrument"])
 
-    # 3. Apply infer processors manually (ProcessInf → ZScoreNorm → Fillna)
-    # ⚠️ 审查(2026-07-15): champion handler 的 infer_processors=[]，无标准化。
-    # 下方 ZScoreNorm 分支因 zscore_proc=None 永远跳过，实际只执行：
-    #   replace([inf,-inf], NaN) → fillna(0)
-    # 这与 handler 的 DropnaProcessor（drop NaN 行）行为不同——路径 A drop，路径 B fillna(0)。
-    # 对历史数据无差异（无 NaN），对实时数据（overnight_gap 可能 NaN）会产生微小差异。
-    processed = tday_df.copy()
-    # ProcessInf: replace inf with NaN
-    processed = processed.replace([np.inf, -np.inf], np.nan)
-
-    # ZScoreNorm: (x - mean_train) / std_train, per-column
-    if zscore_proc is not None and hasattr(zscore_proc, 'mean_train'):
-        cols = zscore_proc.cols  # list of column names to normalize
-        mean = zscore_proc.mean_train  # numpy array
-        std = zscore_proc.std_train    # numpy array
-        # Normalize only the columns that exist in both
-        valid_cols = [c for c in cols if c in processed.columns]
-        if valid_cols:
-            col_idx = [cols.index(c) for c in valid_cols]
-            vals = processed[valid_cols].values
-            m = mean[col_idx]
-            s = std[col_idx]
-            normalized = (vals - m) / s
-            processed.loc[:, valid_cols] = normalized
-
-    # Fillna: replace NaN with 0
-    processed = processed.fillna(0)
-
-    # 4. Drop rows with all-NaN features (matching DropnaProcessor behavior)
-    # After Fillna, this shouldn't drop any rows
-    processed_clean = processed.dropna()
+    # 3. Match MinuteEnhancedHandler.shared DropnaProcessor(feature): any
+    # missing/inf feature removes that stock-day from the tradable universe.
+    processed_clean = tday_df.replace([np.inf, -np.inf], np.nan).dropna()
     if processed_clean.shape[0] == 0:
         logger.warning(f"No valid features after processing")
         return {"date": target_date, "n_candidates": 0, "candidates": [], "topk": []}
 
-    # 5. Load model and predict
-    # ⚠️ 审查(2026-07-15): 硬编码 CHAMPION_RECORDER_ID（FROZEN champion），无 rolling
-    # use_online 路径。计划：优先从 rolling 实验加载 online 模型，fallback 到 FROZEN。
-    rec = R.get_recorder(recorder_id=CHAMPION_RECORDER_ID,
-                         experiment_name=CHAMPION_EXPERIMENT)
-    model = rec.load_object("params.pkl")
-
-    # HFLGBModel: model.model.predict(x.values)
-    scores = pd.Series(model.model.predict(processed_clean.values),
-                       index=processed_clean.index)
+    # 4. Load and predict the frozen/date-matched model bundle.
+    bundle = load_model_bundle(target_date, use_online=use_online)
+    scores = predict_bundle_matrix(bundle, processed_clean)
     scores = scores.sort_values(ascending=False)
 
     # 6. Get limit_up/limit_down for buy interception.
@@ -370,4 +286,5 @@ def _predict_in_memory(target_date: str, factor_rows: dict[str, dict],
                         c.get("change_941", np.nan) >= c["limit_up"])]
 
     return {"date": target_date, "n_candidates": len(cands),
-            "candidates": cands, "topk": tradable[:topk]}
+            "candidates": cands, "topk": tradable[:topk],
+            "model_source": bundle.source, "ensemble_weight": bundle.weight}

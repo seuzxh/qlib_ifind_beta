@@ -24,6 +24,7 @@ import pandas as pd
 from qlib_ifind_beta.config import (
     CHAMPION_LABEL_EXPR, OVERLAY_ROOT, UNIVERSE_MARKET,
 )
+from scripts.validate_factor_challengers import _backtest, _daily_corr
 
 # --- 滚动窗口参数 ---
 TRAIN_DAYS = 90      # 训练窗口（交易日）
@@ -156,25 +157,19 @@ def main():
     label_all = pd.concat(all_labels).reindex(pred_all.index)
     print(f"\n✅ 拼接完成：{len(pred_all)} 行，{pred_all.index.get_level_values(0).nunique()} 天")
 
-    # 汇总 IC
+    # Pearson IC and Spearman RankIC are different diagnostics; report both.
     dates = sorted(pred_all.index.get_level_values(0).unique())
-    ics = []
-    for d in dates:
-        dp = pred_all.xs(d, level=0).dropna()
-        dl = label_all.xs(d, level=0).dropna()
-        common = dp.index.intersection(dl.index)
-        if len(common) < 5:
-            continue
-        c = dp.reindex(common).corr(dl.reindex(common), method="spearman")
-        if pd.notna(c):
-            ics.append(c)
-    ics = np.array(ics)
+    pearson_ics = _daily_corr(pred_all, label_all, "pearson")
+    rank_ics = _daily_corr(pred_all, label_all, "spearman")
 
-    print(f"\n=== 滚动重训汇总 IC ===")
-    print(f"IC:        {ics.mean():.4f}")
-    print(f"ICIR:      {ics.mean()/ics.std():.2f}")
-    print(f"IC>0 rate: {(ics>0).mean()*100:.1f}%")
-    print(f"天数:      {len(ics)}")
+    print("\n=== 滚动重训相关性汇总 ===")
+    print(f"IC:            {pearson_ics.mean():.4f}")
+    print(f"ICIR:          {pearson_ics.mean()/pearson_ics.std():.2f}")
+    print(f"IC>0 rate:     {(pearson_ics>0).mean()*100:.1f}%")
+    print(f"RankIC:        {rank_ics.mean():.4f}")
+    print(f"RankICIR:      {rank_ics.mean()/rank_ics.std():.2f}")
+    print(f"RankIC>0 rate: {(rank_ics>0).mean()*100:.1f}%")
+    print(f"天数:          {len(rank_ics)}")
 
     # 回测（top10 equal-weight）
     OPEN_COST, CLOSE_COST, TOPK = 0.0005, 0.0015, 10
@@ -196,16 +191,27 @@ def main():
     bench = D.features(["SH000300"], ["$close"], start_time=ROLL_START, end_time=TEST_END)
     bench_ret = bench["$close"].pct_change().groupby(level="datetime").first()
 
-    print(f"\n=== 回测（top10 equal-weight, {len(s_net)} 天）===")
-    print(f"累计超额(net):   {((1+s_net).prod()-1)*100:.1f}%")
-    print(f"累计超额(gross): {((1+s_gross).prod()-1)*100:.1f}%")
-    print(f"IR(net):         {s_net.mean()/s_net.std()*np.sqrt(250):.2f}")
+    print(f"\n=== 快速近似诊断（每日全量重建 top10，非正式策略回测，{len(s_net)} 天）===")
+    print(f"组合累计收益(net):   {((1+s_net).prod()-1)*100:.1f}%")
+    print(f"组合累计收益(gross): {((1+s_gross).prod()-1)*100:.1f}%")
+    print(f"组合 Sharpe(net):    {s_net.mean()/s_net.std()*np.sqrt(250):.2f}")
     print(f"最大回撤(net):   {((1+s_net).cumprod()/(1+s_net).cumprod().cummax()-1).min()*100:.2f}%")
+
+    # Promotion-grade backtest: exact project strategy/exchange semantics.
+    # The shared helper preserves n_drop holdings, T+1 hold constraint, limit
+    # blocks and actual-order costs, and avoids Qlib's slow expression query.
+    bt_metrics = _backtest(pred_all.to_frame("score"), str(dates[0].date()),
+                           str(dates[-1].date()))
+    print("\n=== Qlib 正式策略回测 ===")
+    for key, value in bt_metrics.items():
+        print(f"{key}: {value:.6f}")
 
     # 保存结果
     out = Path("data/rolling_90d_result.pkl")
     with open(out, "wb") as f:
-        pickle.dump({"pred": pred_all, "label": label_all, "ics": ics}, f)
+        pickle.dump({"pred": pred_all, "label": label_all,
+                     "ics": pearson_ics, "rank_ics": rank_ics,
+                     "backtest_metrics": bt_metrics}, f)
     print(f"\n结果已保存: {out}")
 
 

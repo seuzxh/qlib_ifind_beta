@@ -10,9 +10,9 @@ Only the two endpoints the MVP needs:
 * ``history_data`` (quant gateway, CPS=0 raw price) — dump SH883926 benchmark.
 * ``data_pool`` (quant gateway) — p03473 = current 883926 constituents.
 
-Secrets discipline: the refresh_token is parsed at runtime from
-``qlib_data/scripts/daily_update.py`` (mirroring the canonical loader) — it is
-NEVER hardcoded, printed, or committed here.
+Secrets discipline: the refresh token is read from the environment or parsed
+at runtime from an existing ``qlib_data`` script — it is NEVER hardcoded,
+printed, or committed here.
 """
 from __future__ import annotations
 
@@ -30,8 +30,12 @@ IFIND_TOKEN_URL = "https://quantapi.51ifind.com/api/v1/get_access_token"
 IFIND_HISTORY_URL = "https://quantapi.51ifind.com/api/v1/history_data"
 IFIND_DATAPOOL_URL = "https://quantapi.51ifind.com/api/v1/data_pool"
 
-# refresh_token source-of-truth (canonical project's own convention; parsed, not copied)
-_DAILY_UPDATE_PATH = Path("/home/zxh/qlib_data/scripts/daily_update.py")
+# Existing qlib_data credential sources (parsed at runtime, never copied here).
+_REFRESH_TOKEN_PATHS = (
+    Path("/home/zxh/qlib_data/scripts/daily_update.py"),
+    Path("/home/zxh/qlib_data/scripts/verify_data.py"),
+    Path("/home/zxh/qlib_data/scripts/qlib_dumper/instrument_source.py"),
+)
 
 # history_data indicator → output column (matches sibling _HD_FIELD_MAP; CPS=0 = raw)
 HD_FIELD_MAP = {
@@ -49,13 +53,23 @@ class IfindError(RuntimeError):
 
 # --- refresh_token loader (mirrors qlib_data canonical _load_ifind_refresh_token) ---
 def load_refresh_token() -> str:
-    """Parse ``IFIND_REFRESH_TOKEN`` from qlib_data/scripts/daily_update.py source."""
-    with open(_DAILY_UPDATE_PATH) as f:
-        for line in f:
-            if line.startswith("IFIND_REFRESH_TOKEN"):
-                _, rhs = line.split("=", 1)
-                return rhs.strip().strip('"').strip("'")
-    raise RuntimeError(f"IFIND_REFRESH_TOKEN not found in {_DAILY_UPDATE_PATH}")
+    """Load ``IFIND_REFRESH_TOKEN`` without copying it into this repository."""
+    token = os.environ.get("IFIND_REFRESH_TOKEN", "").strip()
+    if token:
+        return token
+    for path in _REFRESH_TOKEN_PATHS:
+        if not path.exists():
+            continue
+        with path.open() as source:
+            for line in source:
+                stripped = line.strip()
+                if stripped.startswith("IFIND_REFRESH_TOKEN") and "=" in stripped:
+                    _, rhs = stripped.split("=", 1)
+                    token = rhs.strip().strip('"').strip("'")
+                    if token:
+                        return token
+    searched = ", ".join(str(path) for path in _REFRESH_TOKEN_PATHS)
+    raise RuntimeError(f"IFIND_REFRESH_TOKEN not found in environment or: {searched}")
 
 
 # --- token cache (flat file: access_token=... / expired_time=...) ---
