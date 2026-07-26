@@ -2,7 +2,7 @@
 # 运行：conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml
 #
 # 目的：策略参数 sweep——唯一变量 topk/n_drop（champion 20/15 → 10/8），handler/label/model/exchange/切分
-# 全 FROZEN vs champion workflow_minute_enhanced.yaml。第一性依据同 tk10_nd5（D9 top-10 alpha 尾部）。
+# 当前生产 Champion：18 因子、Top10/n_drop=8，配置与模型参数全冻结。
 # n_drop=8=80% 换手帽：同 topk=10 浓缩度下测高换手 regime（§22.3 在小 topk 下换手帽对成本/alpha 的边界）。
 qlib_init:
     provider_uri: /home/zxh/projects/3.qlib_ifind_beta/data/qlib_root

@@ -1,9 +1,7 @@
-"""P1 实战对接 — 纸面前向跟踪（live forward）。
+"""盘中生产与历史影子回放。
 
-子模块：
-- inference: T 日收盘后用冻结 champion 模型推理 → top10 信号。
-- track: 信号记录 / T+1 结算 / NAV 累积 / 日度 IC（纯 pandas 状态机）。
-- materialize_live: T 日池增量物化 day.bins（薄封装 overlay+materialize）。
+- intraday: 单日目录、分钟K线门禁、调仓计划、CSV/JSON/Parquet 产物。
+- historical_replay: 用历史行情适配同一套盘中状态转换。
 
-入口：scripts/live_forward.py（工作日 15:35 触发）。
+生产入口为 ``scripts/intraday_production.py``，只生成文件，不提交券商订单。
 """

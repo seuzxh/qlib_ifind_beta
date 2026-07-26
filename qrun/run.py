@@ -12,8 +12,8 @@
 其余逻辑等同 `qlib.cli.run.workflow`（qlib_init → task_train）。
 
 用法：
-    conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow.yaml
-    conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_smoke.yaml
+    conda run -n qlib_ifind_beta python qrun/run.py \
+        qrun/workflow_minute_enhanced_tk10_nd8.yaml
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from pathlib import Path
 # 必须在 import qlib / mlflow 前设置
 os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
 
-# 让 handler 的 module_path: qlib_ifind_beta.highbeta_handler 可 import。
+# 让 handler 的 module_path: qlib_ifind_beta.* 可 import。
 # `python qrun/run.py` 把 qrun/（脚本目录）放 sys.path[0]，项目根不在路径上。
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

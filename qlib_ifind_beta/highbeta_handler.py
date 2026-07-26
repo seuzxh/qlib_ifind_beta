@@ -15,8 +15,8 @@ v3 (2026-07-06): rolling windows 砍到 [5,10]（剔除 20/30/60，−87 慢因�
 label / deal_price via qrun YAML (handler.kwargs.label, exchange_kwargs.deal_price).
 pred[T]→T-day execution needs TopkDropoutStrategyTD0 — see td0_strategy.py.
 
-L1 前视护栏（用户 2026-07-06 选定，shared DropnaProcessor(feature)）：详见类
-_DEFAULT_SHARED_PROCESSORS 注释 + docs/technical-design.md §L1。
+L1 前视护栏使用 shared DropnaProcessor(feature)，详见类内
+_DEFAULT_SHARED_PROCESSORS 注释。
 """
 from __future__ import annotations
 
@@ -46,11 +46,11 @@ class HighBetaAlpha158(Alpha158):
     # 误杀 ~4.4%（防前视正确 drop ~1.9%）；主因是分钟因子部分缺失（$close_pos_1m/3m/5m、
     # $vol_vs_yest，后者在 2026-07-02 因 07-01 cn_data_1min 事故连锁全局 NaN）+ 日频
     # ROC/STD/CORR 除零。用户 2026-07-06 定方案 A（接受现状）；精化版（只 drop
-    # $price_941 NaN，需自定义 Processor）见 docs/technical-design.md §3.5 + §8 演进备选。
+    # $price_941 NaN，需自定义 Processor）不属于当前生产基线。
     _DEFAULT_SHARED_PROCESSORS = [{"class": "DropnaProcessor", "kwargs": {"fields_group": "feature"}}]
 
     def __init__(self, *args, **kwargs):
-        # 默认挂上 L1 前视护栏；workflow.yaml 可显式传 shared_processors 覆盖。
+        # 默认挂上 L1 前视护栏；工作流 YAML 可显式传 shared_processors 覆盖。
         kwargs.setdefault("shared_processors", self._DEFAULT_SHARED_PROCESSORS)
         super().__init__(*args, **kwargs)
 

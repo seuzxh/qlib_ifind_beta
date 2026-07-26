@@ -4,7 +4,8 @@ Inputs are per-day 1min slot arrays (length 11). Slot map (probe-verified
 2026-07-06, cn_data_1min): index 0-9 = slots 1-10 = 09:31-09:40 (the first 10
 REAL trading bars; slot 0 is universally NaN pool-wide so the window starts at
 slot 1), index 10 = slot 11 = 09:41 (buy-price bar, NOT used in factors).
-See docs/superpowers/specs/2026-07-06-minute-factors-design.md.
+The active timing and data contract is documented in
+docs/superpowers/specs/2026-07-20-intraday-production-signal-design.md.
 
 Pure (no IO) — the materialize layer (materialize_minute.py) calls this per day
 and writes the results as day.bin. Hand-unit-tested in tests/test_minute_factors.py.
@@ -68,6 +69,63 @@ def compute_day_factors(c, o, h, l, vol, prev_day_minute_vol=None) -> dict:
     else:
         out["vol_vs_yest"] = np.nan
 
-    # buy-price bar (index 10 = slot 11 = 09:41 close)
-    out["price_941"] = float(c[10])
+    # buy-price bar is auxiliary, not a feature.  Live production can compute
+    # the ten factor bars before the 09:41 bar closes, so expose it only when
+    # the caller supplied the eleventh value.
+    if c.size > 10:
+        out["price_941"] = float(c[10])
+    return out
+
+
+def compute_champion_factors(
+    c, o, h, l, vol, prev_volumes,
+    *, prev_close=None, prev_factor=None, today_open=None, today_factor=None,
+    execution_close=None,
+) -> dict:
+    """Compute the frozen 18-factor Champion contract from ten factor bars.
+
+    ``prev_volumes`` is ordered T-1/T-2/T-3/T-5 and uses full-day minute
+    volume.  ``execution_close`` is the separately collected 09:41 close; it
+    only creates price/change auxiliary fields and never changes a feature.
+    """
+    c = np.asarray(c, dtype=np.float64)
+    o = np.asarray(o, dtype=np.float64)
+    h = np.asarray(h, dtype=np.float64)
+    l = np.asarray(l, dtype=np.float64)
+    vol = np.asarray(vol, dtype=np.float64)
+    if any(arr.size < 10 for arr in (c, o, h, l, vol)):
+        raise ValueError("champion factors require the closed 09:31-09:40 bars")
+    pv = list(prev_volumes or [])
+    pv += [0.0] * (4 - len(pv))
+    out = compute_day_factors(
+        c[:10], o[:10], h[:10], l[:10], vol[:10],
+        prev_day_minute_vol=pv[0] if pv[0] > 0 else None,
+    )
+    morning_vol = float(np.sum(vol[:10]))
+    for idx, name in ((1, "vol_vs_yest_t2"), (2, "vol_vs_yest_t3"),
+                      (3, "vol_vs_yest_t5")):
+        denominator = float(pv[idx])
+        out[name] = (
+            morning_vol / (denominator / float(REAL_BARS_PER_DAY))
+            if denominator > 0 else np.nan
+        )
+
+    values = (prev_close, prev_factor, today_open, today_factor)
+    if all(value is not None and np.isfinite(float(value)) for value in values):
+        raw_prev_close = float(prev_close) / float(prev_factor)
+        raw_open = float(today_open) / float(today_factor)
+        out["overnight_gap"] = (
+            raw_open / raw_prev_close - 1.0 if raw_prev_close > 0 else np.nan
+        )
+        if execution_close is not None and np.isfinite(float(execution_close)):
+            out["price_941"] = float(execution_close)
+            out["change_941"] = (
+                (float(execution_close) / float(today_factor)) / raw_prev_close - 1.0
+                if raw_prev_close > 0 else np.nan
+            )
+    else:
+        out["overnight_gap"] = np.nan
+        if execution_close is not None:
+            out["price_941"] = float(execution_close)
+            out["change_941"] = np.nan
     return out

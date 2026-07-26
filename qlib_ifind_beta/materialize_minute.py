@@ -45,6 +45,7 @@ from .config import (
     FIRST_FEATURE_SLOT, MIN_CAL,
     MINUTE_CHANGE_941_FIELD, MINUTE_DEAL_PRICE_FIELD,
     MINUTE_FACTOR_AMT_FIELDS, MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS,
+    MINUTE_FACTOR_PATH_FIELDS,
     REAL_BARS_PER_DAY, SLOTS_PER_DAY,
 )
 
@@ -269,6 +270,7 @@ def materialize_minute_instrument(code: str) -> bool:
                 pv[k:] = full_day_vol[:-k]
             pv_safe = np.where(pv > 0, pv, np.nan)
             fac[fname] = morning_vol_sum / (pv_safe / float(REAL_BARS_PER_DAY))
+
         # F. amount（成交额）量能因子（item 7, 2026-07-12）：amount = volume × vwap。
         #    价格加权的量能信号，与 D/E 族的 raw volume 正交（vol 不变但价变 → amt 变）。
         #    amt_ratio_5m：日内后段成交额比前段（对标 vol_ratio_5m）。
@@ -293,11 +295,37 @@ def materialize_minute_instrument(code: str) -> bool:
             pv_amt[1:] = full_day_amt[:-1]
         pv_amt_safe = np.where(pv_amt > 0, pv_amt, np.nan)
         fac["amt_vs_yest"] = morning_amt_sum / (pv_amt_safe / float(REAL_BARS_PER_DAY))
+
+        # G. Ten-bar path shape. The champion keeps only several endpoint and
+        # segment aggregates; these candidates expose opening noise and path
+        # quality without creating correlated duplicate labels at many cutoffs.
+        complete_path = np.all(
+            np.isfinite(c[:, :10]) & np.isfinite(o[:, :10])
+            & np.isfinite(h[:, :10]) & np.isfinite(l[:, :10]), axis=1
+        )
+        for name in MINUTE_FACTOR_PATH_FIELDS:
+            fac[name] = np.full(n, np.nan)
+        if complete_path.any():
+            minute_return = c[complete_path, :10] / o[complete_path, :10] - 1.0
+            fac["minute_return_vol"][complete_path] = np.std(minute_return, axis=1)
+            fac["minute_range_mean"][complete_path] = np.mean(
+                h[complete_path, :10] / l[complete_path, :10] - 1.0, axis=1
+            )
+            path_nav = c[complete_path, :10] / o[complete_path, :1]
+            path_peak = np.maximum.accumulate(path_nav, axis=1)
+            fac["minute_path_max_drawdown"][complete_path] = np.min(
+                path_nav / path_peak - 1.0, axis=1
+            )
     price_941 = c[:, 10]
 
     # scatter into day-aligned output (length = daily close.bin length)
     n_out = close_d.size
-    _scatter_fields = list(MINUTE_FACTOR_FIELDS) + list(_EXTRA_MINUTE_SPACE) + list(MINUTE_FACTOR_AMT_FIELDS)
+    _scatter_fields = (
+        list(MINUTE_FACTOR_FIELDS)
+        + list(_EXTRA_MINUTE_SPACE)
+        + list(MINUTE_FACTOR_AMT_FIELDS)
+        + list(MINUTE_FACTOR_PATH_FIELDS)
+    )
     out = {name: np.full(n_out, np.nan, dtype=np.float32) for name in _scatter_fields}
     out_p941 = np.full(n_out, np.nan, dtype=np.float32)
     valid = (rel >= 0) & (rel < n_out) & (day_rows >= 0)

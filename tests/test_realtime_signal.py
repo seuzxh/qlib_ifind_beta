@@ -165,6 +165,48 @@ class TestComputeAllFactors:
         assert abs(factors["change_941"] - expected) < 1e-10
 
 
+class TestPredictInMemory:
+    def test_uses_online_bundle_and_matches_shared_dropna(self, monkeypatch):
+        """Realtime inference consumes the bundle and drops any incomplete row."""
+        from types import SimpleNamespace
+        import qlib
+        from qlib.data import D
+        from qlib_ifind_beta import materialize
+        from qlib_ifind_beta.realtime import signal
+
+        monkeypatch.setattr(qlib, "init", lambda **kwargs: None)
+        monkeypatch.setattr(D, "instruments", lambda **kwargs: ["A", "B"], raising=False)
+        monkeypatch.setattr(D, "features", lambda *args, **kwargs: pd.DataFrame(), raising=False)
+        monkeypatch.setattr(materialize, "board_limit", lambda code: (.10, -.10))
+        bundle = SimpleNamespace(source="rolling_ensemble", weight=.25)
+        requested = {}
+        monkeypatch.setattr(
+            signal, "load_model_bundle",
+            lambda target_date, use_online=True: requested.update(
+                date=target_date, use_online=use_online
+            ) or bundle,
+        )
+
+        def predict(loaded_bundle, features):
+            requested["features"] = features
+            return pd.Series([.7], index=features.index)
+
+        monkeypatch.setattr(signal, "predict_bundle_matrix", predict)
+        complete = {field: 1.0 for field in signal.ENHANCED_FIELDS}
+        incomplete = dict(complete)
+        incomplete[signal.ENHANCED_FIELDS[0]] = np.nan
+        result = signal._predict_in_memory(
+            "2026-07-02", {"A": complete, "B": incomplete}, 10,
+            change_941_map={"A": 0.0, "B": 0.0}, use_online=True,
+        )
+        assert requested["date"] == "2026-07-02"
+        assert requested["use_online"] is True
+        assert requested["features"].index.get_level_values("instrument").tolist() == ["A"]
+        assert result["model_source"] == "rolling_ensemble"
+        assert result["ensemble_weight"] == .25
+        assert [item["code"] for item in result["topk"]] == ["A"]
+
+
 class TestDataFetchUniverse:
     def test_load_universe_returns_codes(self):
         from qlib_ifind_beta.realtime.data_fetch import load_universe

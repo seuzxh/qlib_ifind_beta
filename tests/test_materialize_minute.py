@@ -10,6 +10,7 @@ from qlib_ifind_beta.binio import read_bin
 from qlib_ifind_beta.config import (
     BUY_SLOT, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FIRST_FEATURE_SLOT,
     MINUTE_DEAL_PRICE_FIELD, MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS,
+    MINUTE_FACTOR_PATH_FIELDS,
     SLOTS_PER_DAY,
 )
 from qlib_ifind_beta.minute_factors import compute_day_factors
@@ -84,9 +85,8 @@ def test_materialize_returns_true_for_liquid_stock():
     assert mm.materialize_minute_instrument("SH600519") is True
 
 
-def test_materialize_writes_20_bins():
-    """All 20 day.bins present after materialize: 14 baseline minute factors +
-    4 enhanced extras (vol_vs_yest_t2/t3/t5 + overnight_gap) + price_941 + change_941."""
+def test_materialize_writes_required_bins():
+    """All champion execution and feature bins are present."""
     mm.materialize_minute_instrument("SH600519")
     d = Path(FEATURES_DST) / "sh600519"
     from qlib_ifind_beta.config import MINUTE_CHANGE_941_FIELD
@@ -105,6 +105,58 @@ def test_day_bin_aligned_to_daily_close():
     si_dc, _ = read_bin(Path(FEATURES_SRC) / "sh600519" / "close.day.bin")
     si_out, _ = read_bin(Path(FEATURES_DST) / "sh600519" / "price_941.day.bin")
     assert si_out == si_dc
+
+
+def test_opening_path_candidates_match_raw_ten_bars():
+    """Shadow path bins retain volatility/range/drawdown information."""
+    code = "SH600519"
+    assert mm.materialize_minute_instrument(code)
+    src = Path(FEATURES_1MIN_SRC) / code.lower()
+    raw = {}
+    start = None
+    for field in ("close", "open", "high", "low"):
+        si, values = read_bin(src / f"{field}.1min.bin")
+        start = si if start is None else start
+        assert si == start
+        raw[field] = values
+    min_dates, min_slots = mm._load_min_calendar()
+    _, date_to_row = mm._load_day_calendar_lookup()
+    rows = np.where((min_slots >= FIRST_FEATURE_SLOT) & (min_slots <= BUY_SLOT))[0]
+    n_days = len(rows) // _MORNING_WINDOW
+
+    def morning(values):
+        output = np.full(len(rows), np.nan)
+        valid = (rows >= start) & (rows < start + len(values))
+        output[valid] = values[rows[valid] - start]
+        return output.reshape(n_days, _MORNING_WINDOW)
+
+    close, opening = morning(raw["close"]), morning(raw["open"])
+    high, low = morning(raw["high"]), morning(raw["low"])
+    si_day, _ = read_bin(Path(FEATURES_SRC) / code.lower() / "close.day.bin")
+    candidates = {}
+    for field in MINUTE_FACTOR_PATH_FIELDS:
+        si, values = read_bin(Path(FEATURES_DST) / code.lower() / f"{field}.day.bin")
+        assert si == si_day
+        candidates[field] = values
+    for k in range(n_days):
+        day_row = _min_day_in_day_cal(k, rows, min_dates, date_to_row)
+        out_row = day_row - si_day
+        if day_row < 0 or not 0 <= out_row < len(candidates[MINUTE_FACTOR_PATH_FIELDS[0]]):
+            continue
+        if not all(np.isfinite(array[k, :10]).all() for array in (close, opening, high, low)):
+            continue
+        ret = close[k, :10] / opening[k, :10] - 1
+        nav = close[k, :10] / opening[k, 0]
+        expected = {
+            "minute_return_vol": np.std(ret),
+            "minute_range_mean": np.mean(high[k, :10] / low[k, :10] - 1),
+            "minute_path_max_drawdown": np.min(nav / np.maximum.accumulate(nav) - 1),
+        }
+        for field, value in expected.items():
+            assert candidates[field][out_row] == pytest.approx(value, abs=1e-6)
+        break
+    else:
+        pytest.skip("no complete ten-bar day")
 
 
 def test_startup_mom_and_price941_crosscheck():
@@ -126,6 +178,9 @@ def test_startup_mom_and_price941_crosscheck():
     for k in range(n_days_m - 1, -1, -1):
         if _min_day_in_day_cal(k, morning_rows, min_dates, date_to_row) < 0:
             continue   # min-cal day not in day-cal (extra 2026-07-03)
+        day_row = _min_day_in_day_cal(k, morning_rows, min_dates, date_to_row)
+        if not (0 <= day_row - si_out < startup.size):
+            continue   # minute source can be newer than the daily output bin
         if np.all(np.isfinite(c2d[k, [8, 9, 10]])):
             km = k
             break
@@ -161,6 +216,9 @@ def test_vol_vs_yest_crosscheck():
     for k in range(n_days_m - 1, -1, -1):
         if _min_day_in_day_cal(k, morning_rows, min_dates, date_to_row) < 0:
             continue   # extra min-cal day (e.g. 2026-07-03)
+        day_row = _min_day_in_day_cal(k, morning_rows, min_dates, date_to_row)
+        if not (0 <= day_row - si_out < vol_vs_yest.size):
+            continue
         if k == 0:
             continue   # first min-cal day → prev_day NaN
         if np.all(np.isfinite(v2d[k, 0:10])):
@@ -253,6 +311,9 @@ def test_vectorized_matches_perrow_all_fields_real_data():
     for k in range(n_min_days):
         if _min_day_in_day_cal(k, morning_rows, min_dates, date_to_row) < 0:
             continue   # min-cal day with no day-cal counterpart (e.g. extra 2026-07-03)
+        day_row = _min_day_in_day_cal(k, morning_rows, min_dates, date_to_row)
+        if not (0 <= day_row - si_dc_ref < mat[MINUTE_DEAL_PRICE_FIELD].size):
+            continue   # minute source can lead the daily source intraday
         if k == 0 or not np.isfinite(full_day_vol[k - 1]) or full_day_vol[k - 1] <= 0:
             continue   # vol_vs_yest undefined → oracle NaN; skip to keep comparison clean
         if (np.all(np.isfinite(c2d[k])) and np.all(np.isfinite(o2d[k]))
@@ -384,6 +445,9 @@ def test_vol_vs_yest_family_shift_crosscheck(shift, fname):
     for k in range(n_days_m - 1, -1, -1):
         if _min_day_in_day_cal(k, morning_rows, min_dates, date_to_row) < 0:
             continue   # 额外 min-cal 日（如 2026-07-03）
+        day_row = _min_day_in_day_cal(k, morning_rows, min_dates, date_to_row)
+        if not (0 <= day_row - si_out < fac_bin.size):
+            continue   # 分钟源可能领先日频输出
         if k < shift:
             continue   # fac[fname] 在 k<shift 处为 NaN
         if np.all(np.isfinite(v2d[k, 0:10])):

@@ -5,11 +5,16 @@ for the 7 base fields; our overlay (`data/qlib_root/`) layers derived bins on to
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # --- filesystem layout -------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-QLIB_DATA = Path("/home/zxh/qlib_data")              # readonly source (26y daily, 7 fields)
+# 行情仓在 2026-07-20 将实际 bin 迁移到 Qlib 标准目录；保留环境变量以便
+# 灾备切换，避免再次依赖易失的旧兼容路径。
+QLIB_DATA = Path(os.environ.get(
+    "QLIB_IFIND_DAY_DATA", "/home/zxh/.qlib/qlib_data/cn_data"
+))
 OVERLAY_ROOT = PROJECT_ROOT / "data" / "qlib_root"    # provider_uri target (our farm)
 
 FEATURES_SRC = QLIB_DATA / "features"                 # source feature bins (readonly)
@@ -18,7 +23,9 @@ INSTRUMENTS_DST = OVERLAY_ROOT / "instruments"
 CALENDAR_DST = OVERLAY_ROOT / "calendars"
 
 # --- iFinD -------------------------------------------------------------------
-IFIND_TOKEN_FILE = QLIB_DATA / ".ifind_token"
+IFIND_TOKEN_FILE = Path(os.environ.get(
+    "QLIB_IFIND_TOKEN_FILE", "/home/zxh/qlib_data/.ifind_token"
+))
 IFIND_BASE = "https://quantapi.51ifind.com/api/v1"
 IFIND_HISTORY_URL = f"{IFIND_BASE}/history_data"     # historical quotes (883926 etc.)
 IFIND_DATAPOOL_URL = f"{IFIND_BASE}/data_pool"       # report-style data (p03473 constituents)
@@ -50,22 +57,28 @@ CHAMPION_TOPK = 10
 
 # --- position sizing（§55 基准趋势连续仓位，2026-07-12）------------------------
 # position = clip(bench_20d_momentum / threshold, floor, 1.0)
-# §55 回测：Calmar 4.88→9.56（+96%），DD -34%→-18.5%，excess 167%→177%。
-# 子时段全稳定（P1/P2/P3 Calmar 全>0），参数鲁棒（threshold 0.5%~3% Calmar 7.6~10.0）。
-# 无 look-ahead：position[T] 只用 T-1 及之前的 benchmark 收益。
+# 2026-07-16 审计发现旧 §55 批量回测把 T 日收盘收益用于 T 日 09:41 仓位，存在前视；
+# 旧 Calmar 4.88→9.56 / excess 167%→177% 结论作废。修复为 position[T] 只使用
+# T-1 及之前数据后，361 日快速代理中 C1 低于满仓基线，故默认实盘仍应保持满仓。
 POSITION_WINDOW = 20
 POSITION_THRESHOLD = 0.02   # 2% per 20 days → full position
 POSITION_FLOOR = 0.3        # never below 30% invested
 
 # --- rolling retrain（2026-07-10，item 3 每日滚动重训）-------------------------
 # 用 qlib 原生 RollingGen（task.gen）+ task_train + OnlineToolR（online utils）实现。
-# 每个交易日生成新任务（step=1），滑动窗口（ROLL_SD = train/valid/test 同步前移），
-# 训练后将新 recorder 标记为 online（旧模型自动 offline）。inference use_online=True
-# 时从最新 online recorder 加载模型，替代 FROZEN CHAMPION_RECORDER_ID。
+# 每 20 个交易日冻结一个模型段；每日入口只在当前 online artifact 不覆盖目标日时重训。
+# inference use_online=True 从覆盖目标日的 recorder 加载，否则回退冻结冠军。
 # 详见 scripts/retrain.py + qlib workflow.online 文档。
 ROLLING_EXPERIMENT = "minute_enhanced_rolling"
-ROLLING_STEP = 1                    # 每日滚动重训（step=1 交易日）
+ROLLING_XGB_EXPERIMENT = "minute_enhanced_rolling_xgb"
+ROLLING_STEP = 20                   # 与 §60 无泄漏 walk-forward 一致
 ROLLING_RTYPE = "sliding"           # RollingGen.ROLL_SD（滑动窗口）
+ROLLING_TRAIN_DAYS = 90             # 与 §60 19 段验证严格一致
+ROLLING_VALID_DAYS = 20
+ROLLING_EMBARGO_DAYS = 1            # label[T] 到 T+1 收盘才完整；测试前隔离一日
+ROLLING_TEST_DAYS = 20
+ROLLING_ENSEMBLE_WEIGHT = 0.25       # §60 冻结候选权重；验证三门槛未通过时为 0
+ROLLING_GATE_ARTIFACT = "ensemble_gate.pkl"
 
 # --- fields ------------------------------------------------------------------
 BASE_FIELDS = ("open", "high", "low", "close", "volume", "factor", "vwap")
@@ -81,7 +94,9 @@ DAY_CAL = QLIB_DATA / "calendars" / "day.txt"
 # placeholder slots. cn_data_1min was rebuilt (was 242 slots with slot 0 = 09:30 NaN
 # and slot 121 = 13:00 NaN placeholders; now 240 pure real bars).
 # First REAL bar = slot 0 (09:31); daily open == minute_open[slot 0].
-CN_DATA_1MIN = Path("/home/zxh/cn_data_1min")
+CN_DATA_1MIN = Path(os.environ.get(
+    "QLIB_IFIND_MINUTE_DATA", "/home/zxh/.qlib/qlib_data/cn_data_1min"
+))
 FEATURES_1MIN_SRC = CN_DATA_1MIN / "features"
 MIN_CAL = CN_DATA_1MIN / "calendars" / "1min.txt"
 SLOTS_PER_DAY = 240          # cn_data_1min calendar: 240 slots/day (09:31-15:00, all real)
@@ -128,4 +143,13 @@ MINUTE_FACTOR_EXTRA_FIELDS = (
 MINUTE_FACTOR_AMT_FIELDS = (
     "amt_ratio_5m",
     "amt_vs_yest",
+)
+
+# Shadow candidates that retain more of the ten-bar opening path instead of
+# reducing it to endpoint momentum/volume ratios. They are not champion fields
+# until the purged walk-forward promotion gate passes.
+MINUTE_FACTOR_PATH_FIELDS = (
+    "minute_return_vol",
+    "minute_range_mean",
+    "minute_path_max_drawdown",
 )
