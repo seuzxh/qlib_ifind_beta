@@ -1,5 +1,9 @@
 # 数据流程
 
+> ⚠️ **历史文档（MVP baseline 期）**：本文描述日频 Alpha158 158 因子基线的数据流，
+> 项目已演进到 18 分钟因子 + 盘中生产链路。**数据流概述仍有参考价值，但具体模块
+> 引用已过时**。现役数据流见 [盘中生产设计](specs/2026-07-20-intraday-production-signal-design.md)。
+
 > 本项目怎么从「原始行情 + 成分股名单」一步步变成「回测报告」。
 > 配套文档：架构见 [architecture.md](architecture.md)，技术决策见 [technical-design.md](technical-design.md)。
 >

@@ -1,5 +1,9 @@
 # 883926 champion 实战对接 P1 — 纸面前向跟踪系统设计
 
+> ⚠️ **历史设计（2026-07-09，已被取代）**：本文描述的 P1 纸面跟踪系统
+> （live_forward.py / inference.py / track.py）已在 2026-07-24 重构中删除。
+> 现役盘中生产设计见 [2026-07-20 盘中生产设计](2026-07-20-intraday-production-signal-design.md)。
+
 > 日期：2026-07-09
 > 状态：**已实现（用户 2026-07-09 授权自主完成设计+实施，决策项延后至晨间清单）**
 > 关联：technical-design §D6 + backtest-log §22/§33/§35（champion = enhanced(18)@topk10/nd8，commit `24b18dd`）

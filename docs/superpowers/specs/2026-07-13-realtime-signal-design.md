@@ -1,5 +1,9 @@
 # 实时模拟盘信号生成系统设计（§56）
 
+> ⚠️ **历史设计（2026-07-13，已被取代）**：本文描述的 `realtime/signal.py` 单脚本方案
+> 已在 2026-07-24 被 `scripts/intraday_production.py` 可审计 6 步链路取代。
+> 现役设计见 [2026-07-20 盘中生产设计](2026-07-20-intraday-production-signal-design.md)。
+
 > 2026-07-13，`feat/realtime-signal` 分支
 
 ## 目标
