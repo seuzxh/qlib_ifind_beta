@@ -15,8 +15,9 @@ import pandas as pd
 from qlib_ifind_beta.config import (
     CHAMPION_DATA_START, CHAMPION_EXPERIMENT, CHAMPION_FIT_END, CHAMPION_FIT_START,
     CHAMPION_LABEL_EXPR, CHAMPION_RECORDER_ID, CHAMPION_TOPK, OVERLAY_ROOT,
-    ROLLING_EXPERIMENT, UNIVERSE_MARKET,
+    UNIVERSE_MARKET,
 )
+from qlib_ifind_beta.model_ensemble import blend_scores, load_model_bundle
 
 _QLIB_INITED = False
 
@@ -47,45 +48,31 @@ def predict_day(date: str,
                 experiment_name: str = CHAMPION_EXPERIMENT,
                 market: str = UNIVERSE_MARKET,
                 topk: int = CHAMPION_TOPK,
-                # ⚠️ 审查(2026-07-15): use_online 默认 False，始终加载 FROZEN champion。
-                # rolling retrain 产出的 online 模型从未被消费（live_forward.py 未传 use_online=True）。
-                # 计划改为默认 True + FROZEN fallback（rolling 无 online 模型时降级）。
-                use_online: bool = False) -> dict:
+                use_online: bool = True) -> dict:
     """T 日收盘后推理：复刻 champion handler（fit 段 FROZEN）→ 冻结 model.predict → top10。
 
     Args:
-        use_online: True 时从 ROLLING_EXPERIMENT 最新 online recorder 加载模型（每日滚动
-            重训产出的新模型），替代 FROZEN CHAMPION_RECORDER_ID。需要先跑
-            scripts/retrain.py 产出 online 模型。默认 False（向后兼容 P1 FROZEN）。
+        use_online: True 时优先加载覆盖目标日的滚动模型及其冻结门控 artifact；不存在
+            匹配模型时自动回退 FROZEN champion。False 用于复现冻结冠军。
 
     Returns:
         {date, n_candidates, candidates:[{code,score,price_941,change_941,limit_up,limit_down}],
          topk:[...剔除封涨停后的前 topk]}
     """
     _ensure_qlib()
-    from qlib.workflow import R
     from qlib.data import D
     from qlib.data.dataset import DatasetH
     from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
 
-    # 1. load model
-    # ⚠️ 审查(2026-07-15): use_online 分支已实现但从未被调用（live_forward.py:86
-    # predict_day(date) 不传 use_online → 永远走 else 分支 FROZEN champion）。
-    # retrain.py 只跑过一次（test=2026-04-01），rolling 实验无后续 online 模型。
+    # 1. Load a date-matched rolling bundle. Explicit recorder arguments remain
+    # available only for the frozen compatibility path.
     if use_online:
-        # 从 ROLLING_EXPERIMENT 最新 online recorder 加载（每日滚动重训产出）
-        from qlib.workflow.online.utils import OnlineToolR
-        tool = OnlineToolR(ROLLING_EXPERIMENT)
-        online_recs = tool.online_models(exp_name=ROLLING_EXPERIMENT)
-        if not online_recs:
-            raise RuntimeError(
-                f"use_online=True 但 {ROLLING_EXPERIMENT} 无 online 模型。"
-                "请先跑 scripts/retrain.py 产出滚动重训模型，或用 use_online=False（FROZEN champion）。")
-        rec = online_recs[0]
+        bundle = load_model_bundle(date, use_online=True)
     else:
-        # FROZEN champion（默认，P1 向后兼容）
+        from qlib.workflow import R
         rec = R.get_recorder(recorder_id=recorder_id, experiment_name=experiment_name)
-    model = rec.load_object("params.pkl")
+        from qlib_ifind_beta.model_ensemble import OnlineModelBundle
+        bundle = OnlineModelBundle(rec.load_object("params.pkl"), None, 0.0, "frozen")
 
     # 2. 复刻 champion handler（fit 段 FROZEN，仅 end_time 扩到 date）
     handler = MinuteEnhancedHandler(
@@ -98,10 +85,15 @@ def predict_day(date: str,
     dataset = DatasetH(handler=handler, segments={"test": (date, date)})
 
     # 3. predict → 单日 Series（score per instrument）
-    pred = model.predict(dataset)
-    scores = _squeeze_day(pred, date)
+    hflgb_scores = _squeeze_day(bundle.hflgb.predict(dataset), date)
+    if bundle.weight > 0 and bundle.xgb is not None:
+        xgb_scores = _squeeze_day(bundle.xgb.predict(dataset), date)
+        scores = blend_scores(hflgb_scores, xgb_scores, bundle.weight)
+    else:
+        scores = hflgb_scores
     if scores.empty:
-        return {"date": date, "n_candidates": 0, "candidates": [], "topk": []}
+        return {"date": date, "n_candidates": 0, "candidates": [], "topk": [],
+                "model_source": bundle.source, "ensemble_weight": bundle.weight}
 
     # 4. aux 字段（≤T 无前视）：成交价 + 涨跌停判定
     aux = D.features(D.instruments(market=market),
@@ -127,4 +119,5 @@ def predict_day(date: str,
     # 6. 买入拦截：change_941 >= limit_up → 封涨停剔出 topk（与回测 exchange 同源判定）
     tradable = [c for c in cands if not (c["change_941"] >= c["limit_up"])]
     return {"date": date, "n_candidates": len(cands),
-            "candidates": cands, "topk": tradable[:topk]}
+            "candidates": cands, "topk": tradable[:topk],
+            "model_source": bundle.source, "ensemble_weight": bundle.weight}

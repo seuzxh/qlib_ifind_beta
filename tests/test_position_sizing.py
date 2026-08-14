@@ -42,10 +42,19 @@ class TestComputeBenchmarkPosition:
         assert pos.max() <= 1.0 + 1e-10
 
     def test_first_window_days_full_position(self):
-        """No look-ahead: first window-1 days should be 1.0."""
+        """No look-ahead: first window days lack a complete T-1 window."""
         rets = _make_bench(50)
         pos = compute_benchmark_position(rets, window=20)
-        assert (pos.iloc[:19] == 1.0).all()
+        assert (pos.iloc[:20] == 1.0).all()
+
+    def test_target_day_return_does_not_affect_batch_position(self):
+        rets = _make_bench(50)
+        target = rets.index[40]
+        pos1 = compute_benchmark_position(rets)
+        changed = rets.copy()
+        changed.loc[target] = 0.50
+        pos2 = compute_benchmark_position(changed)
+        assert pos1.loc[target] == pytest.approx(pos2.loc[target])
 
     def test_floor_respected(self):
         """Even in severe downtrend, position >= floor."""

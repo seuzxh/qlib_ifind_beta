@@ -325,5 +325,6 @@ qlib.init(provider_uri = data/qlib_root)    ← overlay：qlib_data 只读视图
 | [scripts/build_overlay.py](../scripts/build_overlay.py) | 一次性编排：端到端建 overlay |
 | [scripts/materialize_minute.py](../scripts/materialize_minute.py) | ⚡ 仅重物化分钟因子（改公式后免重拉 universe） |
 | [qrun/workflow.yaml](../qrun/workflow.yaml) | MVP 全量回测配置（Alpha158） |
-| [qrun/workflow_minute_enhanced.yaml](../qrun/workflow_minute_enhanced.yaml) | ⚡ ★ champion 配置（enhanced(18)@n_drop=15） |
+| [qrun/workflow_minute_enhanced_tk10_nd8.yaml](../qrun/workflow_minute_enhanced_tk10_nd8.yaml) | ⚡ ★ champion 配置（enhanced(18)@topk10/n_drop=8） |
+| [qrun/workflow_minute_enhanced.yaml](../qrun/workflow_minute_enhanced.yaml) | legacy LGB / n_drop=15 配置 |
 | [qrun/workflow_smoke.yaml](../qrun/workflow_smoke.yaml) | 烟雾测试配置（2025 子窗口） |

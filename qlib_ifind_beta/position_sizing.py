@@ -5,12 +5,11 @@ position = clip(benchmark_20d_momentum / threshold, floor, 1.0)
 原理：基准指数 20 日动量为正 → 满仓；动量转负 → 按比例减仓；最低保留 floor 比例。
 与 §48 G1/G2 的 binary on/off 不同，本方案是连续仓位，避免"全仓↔空仓"的断崖切换。
 
-§55 回测（HFLGBModel 361 天 OOS）：
-  baseline (满仓):       excess 166.7%  DD -34.2%  Calmar 4.88
-  C1 (bench_mom, 20d, 0.02, floor=0.3): excess 176.5%  DD -18.5%  Calmar 9.56
-
-子时段稳定性：P1=1.96, P2=6.33, P3=1.13（全 >0，无过拟合）。
-参数鲁棒性：threshold 0.5%~3% Calmar 7.6~10.0；window 15~20d 最优，5~40d 均 >4。
+2026-07-16 审计结论：旧 §55 批量回测使用了当日收盘后才能知道的 benchmark
+return 来决定同日 09:41 仓位，旧 Calmar 9.56 及参数鲁棒性结论全部作废。修复后，
+361 日快速代理中满仓基线（绝对累计 +166.7%、几何超额 +118.1%、标准 Calmar
+2.85）优于 C1（绝对累计 +87.6%、几何超额 +53.4%、标准 Calmar 2.43）。
+因此该模块保留为研究接口，但当前默认不启用 C1 overlay。
 
 无 look-ahead：position[T] 只用 T-1 及之前的 benchmark 收益计算。
 """
@@ -55,12 +54,16 @@ def compute_benchmark_position(
     if not 0.0 <= floor <= 1.0:
         raise ValueError(f"floor must be in [0, 1], got {floor}")
 
-    # Trailing momentum = cumulative return over past `window` days
-    mom = bench_returns.rolling(window).apply(lambda x: np.prod(1 + x) - 1, raw=True)
+    # The position for row T is decided at 09:41 on T.  The benchmark's T-day
+    # close return is not known yet, therefore the rolling window must end at
+    # T-1.  Keeping the shift here (rather than at callers) makes the batch API
+    # consistent with compute_position_for_day and prevents accidental leakage.
+    known_returns = bench_returns.shift(1)
+    mom = known_returns.rolling(window).apply(lambda x: np.prod(1 + x) - 1, raw=True)
 
     position = (mom / threshold).clip(lower=floor, upper=1.0)
-    # No look-ahead: insufficient history → full position (conservative default)
-    position.iloc[:window - 1] = 1.0
+    # No look-ahead: insufficient T-1 history → full position.
+    position.iloc[:window] = 1.0
     position = position.fillna(1.0)
 
     return position

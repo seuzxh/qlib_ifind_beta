@@ -228,3 +228,22 @@ def test_dates_to_train_migrates_legacy_once_and_then_increments(qlib_init):
                                   _task_for_test_date(target, calendar), target)
     assert dates == []
     assert mode == "最新"
+
+
+def test_purged_segments_embargoes_label_horizon(qlib_init):
+    import pandas as pd
+    from qlib.data import D
+    from scripts.validate_xgb_purged_rolling_gate import purged_segments
+
+    calendar = [pd.Timestamp(date) for date in D.calendar(freq="day")]
+    segments = purged_segments(calendar, ["2026-07-02", "2026-07-02"])
+    assert segments == {
+        "train": ["2026-01-13", "2026-06-01"],
+        "valid": ["2026-06-02", "2026-06-30"],
+        "embargo": ["2026-07-01", "2026-07-01"],
+        "test": ["2026-07-02", "2026-07-02"],
+    }
+    # valid_end label uses T+1 close = embargo day close, known before test 09:41.
+    valid_end = calendar.index(pd.Timestamp(segments["valid"][1]))
+    test_start = calendar.index(pd.Timestamp(segments["test"][0]))
+    assert valid_end + 2 == test_start
