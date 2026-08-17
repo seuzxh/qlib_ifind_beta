@@ -1,0 +1,7 @@
+title: qlib_ifind_beta
+description: 基于 Qlib 的 883926 高贝塔指数增强项目文档
+lang: zh-CN
+theme: jekyll-theme-cayman
+markdown: kramdown
+plugins:
+  - jekyll-seo-tag

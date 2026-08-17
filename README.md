@@ -73,6 +73,7 @@ mlruns/                 模型与实验记录（忽略）
 
 ## 权威文档
 
+- [GitHub Pages 文档首页](docs/index.md)：项目总览、18 个现役因子、模型与生产基线。
 - [盘中生产设计](docs/superpowers/specs/2026-07-20-intraday-production-signal-design.md)：输入、产物、时间点和人工操作合同。
 - [历史影子演练](docs/backtest-log/2026-07-21-intraday-shadow-replay.md)：62日回放、风险和候选训练结论。
 - [项目规则](AGENTS.md)：下次开发必须遵守的最小约束。
