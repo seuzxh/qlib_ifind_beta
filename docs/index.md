@@ -21,6 +21,7 @@ title: qlib_ifind_beta 项目文档
 
 ## 快速导航
 
+- [全流程实跑导读](pipeline-walkthrough.md)：2026-09-06 全流程重跑实录，逐环节输入/输出与数据全旅程（新接手先读这篇）。
 - [项目总览](project-overview.md)：数据、时序、目录和当前边界。
 - [因子说明](factors.md)：18 个现役因子、计算窗口和前视约束。
 - [模型说明](models.md)：Champion、滚动候选、XGBoost 配对与晋升门控。
