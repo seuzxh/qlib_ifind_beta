@@ -25,7 +25,10 @@ title: qlib_ifind_beta 项目文档
 - [因子说明](factors.md)：18 个现役因子、计算窗口和前视约束。
 - [模型说明](models.md)：Champion、滚动候选、XGBoost 配对与晋升门控。
 - [生产基线](production-baseline.md)：日内流程、输入输出和人工操作合同。
-- [架构与数据流](architecture.md)：实现分层和 overlay 数据流。
+- [验证与研究](validation.md)：purged rolling 门控、风险叠加、已证伪方向存档。
+- [产物地图](artifacts.md)：训练/验证/回测/生产各环节产物位置与字段。
+- [运维手册](operations.md)：生产子命令、故障排查、红线。
+- [架构与数据流](architecture.md)：MVP 期架构快照（历史，带弃用标记）。
 - [历史影子回放](backtest-log/2026-07-21-intraday-shadow-replay.md)：62 日回放验收与待办。
 
 ## 运行入口

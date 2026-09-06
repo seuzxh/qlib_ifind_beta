@@ -3,7 +3,7 @@
 > ⚠️ **历史文档（2026-07-06 MVP 期）**：本文描述日频 Alpha158 基线时期的架构，
 > 引用的多个模块已在 2026-07-24 盘中生产链路重构中删除（position_sizing / risk_overlay /
 > processors / dump_index / live 旧模块等）。**不应作为现役操作依据**。
-> 现役架构见 [README.md](../README.md) + [盘中生产设计](specs/2026-07-20-intraday-production-signal-design.md)。
+> 现役架构见 [README.md](../README.md) + [盘中生产设计](superpowers/specs/2026-07-20-intraday-production-signal-design.md)。
 
 > 标的：**883926（同花顺高贝塔值指数）成分股**增强策略。
 > 形态：日频 baseline（`Alpha158`）→ 18 因子 HFLGB → **无泄漏 HFLGB/XGBoost 滚动门控优化冠军**（90d train / 20d valid / 1d embargo / 20d frozen test，T 日 9:41 成交）。双模型 artifact 已接入盘后和实时推理，冻结 HFLGB 保留为最终回退，详见 [backtest-log §60](backtest-log/2026-07-06-l1-full-backtest.md)。

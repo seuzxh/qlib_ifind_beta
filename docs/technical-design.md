@@ -3,7 +3,7 @@
 > ⚠️ **历史文档（2026-07-06 MVP 期）**：本文记录早期技术选型决策，引用的多个模块
 > 已在 2026-07-24 重构中删除（dump_index / position_sizing / live 旧模块等）。
 > 技术选型理由仍有参考价值，但**模块引用已过时，不应作为现役操作依据**。
-> 现役设计见 [盘中生产设计](specs/2026-07-20-intraday-production-signal-design.md)。
+> 现役设计见 [盘中生产设计](superpowers/specs/2026-07-20-intraday-production-signal-design.md)。
 
 > 配套 [architecture.md](architecture.md)（as-is 架构）。本文聚焦**技术选型理由、关键设计决策、qlib 原生机制对齐、工程约束、已知妥协与本机坑绕过、演进路径**。
 > 全部决策均有代码或源码出处佐证；标 ⚠️ 的为已接受妥协或待办。
