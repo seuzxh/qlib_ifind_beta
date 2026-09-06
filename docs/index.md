@@ -1,6 +1,7 @@
 ---
-layout: default
+layout: home
 title: qlib_ifind_beta 项目文档
+nav_order: 1
 ---
 
 # qlib_ifind_beta

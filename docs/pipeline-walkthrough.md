@@ -1,6 +1,7 @@
 ---
 layout: default
 title: 全流程实跑导读
+nav_order: 2
 ---
 
 # 全流程实跑导读（2026-09-06 重跑实录）

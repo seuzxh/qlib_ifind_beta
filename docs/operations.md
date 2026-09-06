@@ -1,6 +1,7 @@
 ---
 layout: default
 title: 运维手册
+nav_order: 8
 ---
 
 # 运维手册

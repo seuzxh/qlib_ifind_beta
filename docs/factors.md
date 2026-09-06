@@ -1,6 +1,7 @@
 ---
 layout: default
 title: 因子说明
+nav_order: 4
 ---
 
 # 现役因子说明

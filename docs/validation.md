@@ -1,6 +1,8 @@
 ---
 layout: default
 title: 验证与研究
+nav_order: 9
+has_children: true
 ---
 
 # 验证与研究

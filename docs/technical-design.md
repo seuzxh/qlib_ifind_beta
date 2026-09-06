@@ -1,3 +1,9 @@
+---
+layout: default
+title: "技术方案（历史）"
+nav_order: 12
+---
+
 # 技术方案文档 · qlib_ifind_beta
 
 > ⚠️ **历史文档（2026-07-06 MVP 期）**：本文记录早期技术选型决策，引用的多个模块

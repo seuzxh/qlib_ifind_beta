@@ -1,3 +1,9 @@
+---
+layout: default
+title: "架构文档（历史）"
+nav_order: 10
+---
+
 # 架构文档 · qlib_ifind_beta
 
 > ⚠️ **历史文档（2026-07-06 MVP 期）**：本文描述日频 Alpha158 基线时期的架构，
