@@ -1,3 +1,7 @@
+---
+nav_exclude: true
+---
+
 # 883926 champion 实战对接 P1 — 纸面前向跟踪 实现计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans。Steps 用 checkbox (`- [ ]`)。

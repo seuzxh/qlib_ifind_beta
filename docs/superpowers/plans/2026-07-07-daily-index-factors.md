@@ -1,3 +1,7 @@
+---
+nav_exclude: true
+---
+
 # 日频情绪 + 上证指数共振因子 实现计划（2026-07-07）
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development 或 executing-plans。Steps 用 `- [ ]` 跟踪。

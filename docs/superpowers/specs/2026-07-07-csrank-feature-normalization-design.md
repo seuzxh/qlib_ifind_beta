@@ -1,3 +1,7 @@
+---
+nav_exclude: true
+---
+
 # 特征组横截面 Rank 归一化（CSRankNorm 替换变体）— 设计 spec
 
 > 日期：2026-07-07

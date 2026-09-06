@@ -1,3 +1,7 @@
+---
+nav_exclude: true
+---
+
 # T-1/T-2 开盘因子族设计 — 破 IC→超额墙的「同 regime 滞后」假设
 
 > 日期：2026-07-08（overnight autonomous，用户已授权「仔细挖掘…明早告我结论…需要决策的记录下来」）
