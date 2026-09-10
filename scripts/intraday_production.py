@@ -23,7 +23,7 @@ from qlib_ifind_beta.config import (
 from qlib_ifind_beta.live.intraday import (
     DayPaths, FACTOR_TIMES, apply_sell_fills, assemble_features,
     build_buy_orders, build_execution_snapshot, build_sell_orders,
-    make_active_manifest, plan_topk_dropout, reconcile_positions,
+    calendar_gate, make_active_manifest, plan_topk_dropout, reconcile_positions,
     upsert_bars, validate_factor_bars, write_csv, write_json, write_parquet,
 )
 
@@ -41,8 +41,12 @@ def preflight(date: str, base: Path | None = None) -> dict:
     import qlib
     paths = DayPaths.create(date, base)
     calendar = {line.strip() for line in Path(DAY_CAL).read_text().splitlines() if line.strip()}
+    # Calendar advances at T-1 close sync, so the 08:50 pre-market run finds T
+    # missing by design; calendar_gate accepts that timing while still failing
+    # weekends/back-dates.
+    gate = calendar_gate(date, calendar)
     failures = []
-    if date not in calendar:
+    if gate == "not_in_qlib_calendar":
         failures.append("not_in_qlib_calendar")
     model = _model_path()
     active = make_active_manifest(
@@ -51,7 +55,8 @@ def preflight(date: str, base: Path | None = None) -> dict:
     )
     write_json(paths.file("active_model_manifest.json"), active)
     result = {"date": date, "status": "PASS" if not failures else "FAIL",
-              "failures": failures, "model_manifest_valid": True,
+              "failures": failures, "calendar_status": gate,
+              "model_manifest_valid": True,
               "generated_at": datetime.now().astimezone().isoformat(timespec="seconds")}
     write_json(paths.file("preflight.json"), result)
     write_json(paths.file("run_manifest.json"), {**active, "preflight_status": result["status"]})

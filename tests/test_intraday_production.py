@@ -110,6 +110,19 @@ def test_reconciliation_is_fail_closed():
     assert result["status"] == "FAIL" and result["position_mismatches"]
 
 
+def test_calendar_gate_accepts_pre_market_next_weekday():
+    from qlib_ifind_beta.live.intraday import calendar_gate
+
+    cal = ["2026-09-09", "2026-09-10"]  # Thu; T=Fri not yet synced
+    assert calendar_gate("2026-09-11", cal) == "next_trading_day_pre_market"
+    assert calendar_gate("2026-09-10", cal) == "in_calendar"
+    # Weekend and back-dated gaps still fail closed.
+    assert calendar_gate("2026-09-12", cal) == "not_in_qlib_calendar"
+    assert calendar_gate("2026-09-08", cal) == "not_in_qlib_calendar"
+    # A later calendar entry existing means the date was skipped, not pending.
+    assert calendar_gate("2026-09-11", ["2026-09-10", "2026-09-15"]) == "not_in_qlib_calendar"
+
+
 def test_candidate_sidecars_are_json_not_model_files(tmp_path, monkeypatch):
     from scripts import retrain
 

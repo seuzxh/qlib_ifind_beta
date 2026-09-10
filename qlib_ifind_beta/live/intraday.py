@@ -28,6 +28,35 @@ MIN_CANDIDATES = 80
 SCHEME_B_STATUS = "SCHEME_B_UNVALIDATED"
 
 
+def calendar_gate(date: str, calendar: "Iterable[str]") -> str:
+    """Classify a trade date against the qlib day calendar (preflight gate).
+
+    The day calendar advances at T-1 close sync, so a normal 08:50 pre-market
+    run necessarily finds T missing. Returns one of:
+
+    - ``in_calendar``: T already synced — post-market rerun timing.
+    - ``next_trading_day_pre_market``: T is a weekday strictly after the
+      calendar end and nothing later exists in the calendar — the normal
+      pre-market timing. Local weekday logic cannot distinguish CN holidays,
+      so a mis-entered holiday date also lands here; downstream steps then
+      fail closed on missing realtime bars.
+    - ``not_in_qlib_calendar``: everything else (weekends, dates before the
+      calendar end that were never synced, dates with later entries present).
+    """
+    cal = sorted(calendar)
+    if date in set(cal):
+        return "in_calendar"
+    if not cal:
+        return "not_in_qlib_calendar"
+    day = date_type.fromisoformat(date)
+    if day.weekday() >= 5:
+        return "not_in_qlib_calendar"
+    end = date_type.fromisoformat(cal[-1])
+    if day > end:
+        return "next_trading_day_pre_market"
+    return "not_in_qlib_calendar"
+
+
 @dataclass(frozen=True)
 class DayPaths:
     date: str
