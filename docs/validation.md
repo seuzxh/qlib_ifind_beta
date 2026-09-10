@@ -22,6 +22,9 @@ has_children: true
 | test 段 | 20 交易日 | 冻结段，段内不换模型 |
 | 滑动步长 | 20 交易日 | 与 test 段对齐 |
 
+embargo 隔离日的标签泄漏原理（T 日 label 依赖 T+1 收盘价）与防篡改校验，
+详见[模型说明](models.md)。
+
 ## 候选门控（validation gate）
 
 `qlib_ifind_beta/model_ensemble.py` 实现三项门控，XGBoost 候选只有在**全部三项**不低于

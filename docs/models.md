@@ -49,6 +49,25 @@ Ref($close, -1) / $price_941 - 1
 - 任意 metadata、recorder 或候选加载失败，都安全回退到 HFLGB，缺少日期匹配模型时
   再回退冻结 Champion。
 
+### embargo：测试段前的隔离日
+
+滚动切分 `train 90 / valid 20 / embargo 1 / test ≤20` 中的那 1 个交易日隔离日
+（实际示例：valid 至 03-30、embargo 为 03-31、test 从 04-01 起），用于防止
+**标签泄漏**。本项目 label `Ref($close,-1)/$price_941-1` 的 T 日样本要用 T+1
+收盘价才算完整：
+
+```text
+valid: … → 03-30 | 03-31（隔离日，谁都不用） | test: 04-01 → …
+                   ↑ valid 末日样本的 label 本会"看到" 03-31 的收盘价
+```
+
+若 valid 紧贴 test，valid 尾部样本的 label 就提前"看到"了 test 起点的行情，
+门控三项指标会被虚增。空开一日后，前段尾部样本的信息边界完全落在 test 开始
+之前。该概念出自 purged cross-validation（López de Prado《Advances in
+Financial Machine Learning》）。代码层还有防篡改校验：
+`validate_gate_metadata` 会检查 `ensemble_gate.pkl` 中的 `embargo_days`，
+无隔离证明的 gate 元数据无法启用 XGB 混合权重。
+
 截至最新回放记录，候选状态为 `CANDIDATE/REVIEW`，因为绝对最大回撤恶化，
 尚未自动或人工晋升为生产模型。项目禁止自动晋升候选模型；人工晋升命令与门控细节见
 [验证与研究](validation.md)。
