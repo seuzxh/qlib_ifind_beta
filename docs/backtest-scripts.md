@@ -60,6 +60,80 @@ PortAnaRecord  → portfolio_analysis/*.pkl
 recorder.save_objects(config) → mlruns/<实验>/<recorder>/
 ```
 
+### DK_L / DK_I 是什么
+
+Qlib `DataHandlerLP` 的三个数据视图（`handler.py:53-55`）：
+
+| Key | 全称 | 内容 | 谁在用 |
+|---|---|---|---|
+| `DK_R` | raw | 表达式引擎直出（含 NaN、label 未处理） | SigAnaRecord 对齐 label 时 |
+| `DK_I` | infer | raw + **shared** 处理器 | 模型预测 / 盘中推理 |
+| `DK_L` | learn | raw + shared + **learn** 处理器 | 训练 fit |
+
+本项目 shared 只有一个 `DropnaProcessor(feature)`（缺任一因子的行整行剔除），
+learn 处理器为空——因此 **DK_I 与 DK_L 输出完全相同**；label 永不做标准化，
+IC 直接对原始收益计算。
+
+### 数据样式与产物示例（recorder `f364dcb3` 实取）
+
+**① 特征矩阵（DK_R 视角，SZ300164，18 列节选 4 + label）：**
+
+| 日期 | startup_mom_1m | close_pos_5m | vol_vs_yest | overnight_gap | LABEL |
+|---|---|---|---|---|---|
+| 04-01 | 0.0038 | 0.8178 | 55.28 | -0.0125 | +0.0221 |
+| 04-02 | -0.0044 | 0.0479 | 92.67 | +0.0307 | -0.0181 |
+| 04-03 | -0.0032 | 0.8003 | 44.42 | -0.0139 | +0.0358 |
+
+DropnaProcessor 的效果（test 段）：**6,200 原始行 → 5,776 有效行**（缺任一因子
+的 424 行整行剔除，前视/数据事故护栏）。
+
+**② pred.pkl / label.pkl（test 段 head5）：**
+
+| datetime | instrument | score（pred） | LABEL（label） |
+|---|---|---|---|
+| 2026-04-01 | SH600066 | 0.4089 | +0.0092 |
+| 2026-04-01 | SH600158 | 0.4570 | -0.0139 |
+| 2026-04-01 | SH600184 | 0.4210 | -0.0776 |
+| 2026-04-01 | SH600250 | 0.4353 | +0.0157 |
+| 2026-04-01 | SH600268 | 0.4538 | -0.0055 |
+
+注意行数差：label.pkl 是 DK_R 口径（6,200 行），pred 是 Dropna 后（5,776 行），
+IC 计算按交集对齐——这就是上表"SigAnaRecord 用 DK_R"的体现。score 是 binary
+模型的横截面分数，只看排序不看绝对值。
+
+**③ sig_analysis/ic.pkl（62 个交易日逐日 IC，节选）：**
+
+```text
+2026-04-01  +0.1676    2026-04-07  +0.0937
+2026-04-02  -0.0595    2026-04-08  -0.0737
+2026-04-03  +0.0336    …
+mean=0.0548  std=0.1083  →  ICIR=0.51（ic.pkl 的 mean/std 即 ICIR）
+```
+
+**④ portfolio_analysis/report_normal_1day.pkl（逐日组合报告，节选）：**
+
+| 日期 | return | bench | cost | turnover |
+|---|---|---|---|---|
+| 04-01 | +0.0196 | +0.0171 | 0.0005 | 0.95 |
+| 04-02 | -0.0149 | -0.0104 | 0.0015 | 1.52 |
+| 04-03 | -0.0205 | -0.0085 | 0.0013 | 1.32 |
+
+`return`=策略日收益（含成本）、`bench`=SH000300、`cost`=当日交易成本拖累、
+`turnover`≈1.4 档对应 n_drop=8 的 80% 换手帽。risk_analysis 的年化/IR/回撤就是
+对这些日序列做的汇总。
+
+**⑤ recorder 产物树：**
+
+```text
+mlruns/156869948604814731/f364dcb3…/
+├── artifacts/   params.pkl(模型) pred.pkl label.pkl
+│                sig_analysis/{ic,ric}.pkl  portfolio_analysis/*.pkl
+│                dataset/ task/ config/ code_*.txt（代码快照与 diff）
+├── metrics/     IC  ICIR  Rank IC  Rank ICIR（四行数字）
+├── params/      完整训练配置（从 yml 展开，可复现）
+└── tags/
+```
+
 实测（2026-09-06 重跑）：IC 0.0548 / RankIC 0.0612；超额含成本年化 +148.2%、
 IR 3.98、回撤 -12.93%；与冻结 Champion pred **逐位相同**。字段口径逐项见
 [配置说明](configs.md)。
