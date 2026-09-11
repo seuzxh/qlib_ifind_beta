@@ -34,3 +34,4 @@ __pycache__/
 # script writing an abs path as relative; safe to delete)
 /home/
 catboost_info/
+.codegraph/
