@@ -20,16 +20,33 @@ nav_order: 3.5
 | 模型与预测 | `mlruns/` | Champion/滚动/研究 recorder | 运行资产 |
 | 883926 指数本体 | overlay `features/sh883926/` | 由 `dump_index.py` 从 iFinD dump | ⚠️ close 字段有源级漂移，消费前读该模块注释 |
 
-三层数据的**截止日期天然不同步**（外部行情管道几乎每日更新，其余靠手动）：
+### 三类关键数据的获取路径与更新时机
+
+| | 行情源 cn_data / cn_data_1min | universe 成分快照 | 物化因子（18 因子/price_941/涨跌停线） |
+|---|---|---|---|
+| **生产者** | 仓库外 cron 管道（kline-fetcher 服务 → qlib bin），**项目只读** | 本项目（iFinD 客户端） | 本项目（本地计算） |
+| **获取路径** | 文件系统直读；数据经 `183.242.5.14:7778` kline-fetcher 落盘 | `universe.fetch_history_snapshots` 调 iFinD `p03473`（增量断点续拉、每 50 天落盘）→ `data/universe_snapshots.csv` → instruments 股池 | `materialize_minute.py` / `materialize.py`（`build_overlay` 内置）从 1min/日频 bin 算出，写 overlay 自有 bin |
+| **更新时机** | **每交易日 15:30 自动**：crontab `30 15 * * 1-5` 跑 `~/qlib_data/scripts/cron_daily.sh`；实测 day.txt mtime 15:30:02、1min bin 15:48 | **手动**：`build_overlay --end <日期>` 批量拉，或交易日 09:00 由 S1 `universe` 子命令自动拉当日。⚠️ **`build_overlay` 默认窗口硬编码 `DUMP_END="2026-07-02"`**，重跑默认命令不会拉新日期 | **手动**：数据更新后 / 改因子公式后重跑 `build_overlay`（或单独 `materialize_minute.py`）。盘中生产**不用**物化（S4 实时组装），训练/回放才用 |
+| **当前截止** | 2026-09-11（当日已更新） | 2026-07-20（缓存）← **实际瓶颈** | 2026-09-04（上次重建时点） |
+
+一天的数据时间线：
 
 ```text
-cn_data / cn_data_1min   ────────►  2026-09-11   （外部管道自动更新）
-物化因子（price_941 等）  ─────►  2026-09-04   （上次 build_overlay/materialize 时点）
-universe 成分快照        ────►  2026-07-20   （上次 iFinD 拉取）← 实际瓶颈
+15:00 收盘
+15:30  cron 落日频 bin        → cn_data 到 T 日
+~15:48 cron 落 1min bin       → cn_data_1min 到 T 日
+手动    build_overlay --end T  → universe 增量拉 T 日快照 + 重物化因子
+手动    retrain / replay       → 用上新数据（前向回放需 --allow-unreferenced-scores）
+次日 09:31–09:41 生产链路     → 用实时 bar，不依赖物化层
 ```
 
-因此：**07-21 之后即使行情已就位，也无法回放/生产**（缺当日成分名单）；
-09-05 之后的因子 bin 也需要重物化才会存在。
+两个必须记住的坑：
+
+1. **重跑 `python -m scripts.build_overlay`（不带参数）不会扩展 universe**——默认
+   窗口停在 2026-07-02；要拉新日期必须 `--end` 显式指定（需 iFinD token）。
+2. **物化因子落后于行情源是常态且无害**——Champion 训练窗口冻结在 2026-07-02，
+   只有滚动重训新窗口或回放新日期时才需要先重物化。真正卡住流程往前走的永远是
+   universe 快照。
 
 ## 2. bin 文件解剖（一切读取的物理层）
 
@@ -122,8 +139,8 @@ index 11..239 = 09:42..15:00 ← 本策略不使用
 ```bash
 # ① 确认外部管道已更新行情（日历最后一行 ≥ 目标日）
 tail -1 ~/.qlib/qlib_data/cn_data/calendars/day.txt
-# ② 增量拉 universe 快照（需 iFinD token；build_overlay 内置这步）
-conda run -n qlib_ifind_beta python -m scripts.build_overlay
+# ② 增量拉 universe 快照并重物化（⚠️ 必须显式 --end，默认窗口停在 2026-07-02）
+conda run -n qlib_ifind_beta python -m scripts.build_overlay --end <目标日期>
 #    ——幂等：symlink 重建 + 股池刷新 + 涨跌停/18 因子/price_941 重物化到最新
 # ③ 盘后滚动候选训练（可选；默认 CANDIDATE 不发布）
 conda run -n qlib_ifind_beta python scripts/retrain.py --test-start <日期>
