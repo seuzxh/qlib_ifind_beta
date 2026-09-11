@@ -15,7 +15,7 @@ nav_order: 3.5
 |---|---|---|---|
 | 日频行情 7 字段 | `~/.qlib/qlib_data/cn_data` | 2000-01-04 → **2026-09-11**（6470 天），全 A + 指数（sh000300 基准） | 只读 |
 | 1 分钟 K 线 | `~/.qlib/qlib_data/cn_data_1min` | 同区间，**每天恰好 240 根**（09:31–15:00），含 factor 字段 | 只读 |
-| 883926 成分快照缓存 | `data/universe_snapshots.csv` | 2024-01-02 → **2026-07-20**（615 天 × 100 只/天） | 项目数据 |
+| 883926 成分快照缓存 | `data/universe_snapshots.csv` | 2024-01-02 → **2026-09-11**（654 天 × 100 只/天，08:30 cron 自动追加） | 项目数据 |
 | overlay 叠加层 | `data/qlib_root` | symlink 只读源 + 自有 bin（股池/涨跌停线/18 因子/price_941） | 可写（构建产物） |
 | 模型与预测 | `mlruns/` | Champion/滚动/研究 recorder | 运行资产 |
 | 883926 指数本体 | overlay `features/sh883926/` | 由 `dump_index.py` 从 iFinD dump | ⚠️ close 字段有源级漂移，消费前读该模块注释 |
@@ -26,27 +26,29 @@ nav_order: 3.5
 |---|---|---|---|
 | **生产者** | 仓库外 cron 管道（kline-fetcher 服务 → qlib bin），**项目只读** | 本项目（iFinD 客户端） | 本项目（本地计算） |
 | **获取路径** | 文件系统直读；数据经 `183.242.5.14:7778` kline-fetcher 落盘 | `universe.fetch_history_snapshots` 调 iFinD `p03473`（增量断点续拉、每 50 天落盘）→ `data/universe_snapshots.csv` → instruments 股池 | `materialize_minute.py` / `materialize.py`（`build_overlay` 内置）从 1min/日频 bin 算出，写 overlay 自有 bin |
-| **更新时机** | **每交易日 15:30 自动**：crontab `30 15 * * 1-5` 跑 `~/qlib_data/scripts/cron_daily.sh`；实测 day.txt mtime 15:30:02、1min bin 15:48 | **手动**：`build_overlay --end <日期>` 批量拉，或交易日 09:00 由 S1 `universe` 子命令自动拉当日。⚠️ **`build_overlay` 默认窗口硬编码 `DUMP_END="2026-07-02"`**，重跑默认命令不会拉新日期 | **手动**：数据更新后 / 改因子公式后重跑 `build_overlay`（或单独 `materialize_minute.py`）。盘中生产**不用**物化（S4 实时组装），训练/回放才用 |
-| **当前截止** | 2026-09-11（当日已更新） | 2026-07-20（缓存）← **实际瓶颈** | 2026-09-04（上次重建时点） |
+| **更新时机** | **每交易日 15:30 自动**：crontab `30 15 * * 1-5` 跑 `~/qlib_data/scripts/cron_daily.sh`；实测 day.txt mtime 15:30:02、1min bin 15:48 | **每交易日 08:30 自动**（2026-09-11 起）：crontab `30 8 * * 1-5` 跑 `scripts/cron_update_universe.sh` → `update_universe.py`（增量拉名单 + 显式拉当日盘前快照，恰好 100 行校验门禁，flock 防并发，日志 `logs/cron_universe.log`）；交易日 09:00 S1 `universe` 子命令兜底 | **手动**：数据更新后 / 改因子公式后重跑 `build_overlay`（或单独 `materialize_minute.py`）。盘中生产**不用**物化（S4 实时组装），回放实时算因子也不依赖，仅重训延伸窗口需要 |
+| **当前截止** | 2026-09-11（当日已更新） | 2026-09-11（cron 已接管，原瓶颈解除） | 2026-09-04（上次重建时点）← 唯一剩余手动项 |
 
 一天的数据时间线：
 
 ```text
+08:30  cron 拉当日成分快照     → universe 到 T 日（2026-09-11 起）
 15:00 收盘
-15:30  cron 落日频 bin        → cn_data 到 T 日
-~15:48 cron 落 1min bin       → cn_data_1min 到 T 日
-手动    build_overlay --end T  → universe 增量拉 T 日快照 + 重物化因子
+15:30  cron 落日频 bin         → cn_data 到 T 日
+~15:48 cron 落 1min bin        → cn_data_1min 到 T 日
+手动    build_overlay          → 重物化因子到行情最新（改公式/延伸重训窗口时才需要）
 手动    retrain / replay       → 用上新数据（前向回放需 --allow-unreferenced-scores）
-次日 09:31–09:41 生产链路     → 用实时 bar，不依赖物化层
+次日 09:31–09:41 生产链路      → 用实时 bar，不依赖物化层
 ```
 
 两个必须记住的坑：
 
-1. **重跑 `python -m scripts.build_overlay`（不带参数）不会扩展 universe**——默认
-   窗口停在 2026-07-02；要拉新日期必须 `--end` 显式指定（需 iFinD token）。
-2. **物化因子落后于行情源是常态且无害**——Champion 训练窗口冻结在 2026-07-02，
-   只有滚动重训新窗口或回放新日期时才需要先重物化。真正卡住流程往前走的永远是
-   universe 快照。
+1. ~~重跑 `build_overlay` 不带参数不会扩展 universe~~ **已由 08:30 cron 解决**
+   （2026-09-11）：名单由 `cron_update_universe.sh` 自动维护；`build_overlay`
+   默认窗口 `DUMP_END="2026-07-02"` 只影响其自带的拉取步骤（此时已无可拉），
+   instruments 始终按**全量缓存**重写，无需再传 `--end`。
+2. **物化因子落后于行情源是常态且无害**——生产用实时 bar、回放实时算因子都不
+   依赖物化层；只有滚动重训需要延伸物化窗口时才手动重跑。
 
 ## 2. bin 文件解剖（一切读取的物理层）
 
@@ -128,7 +130,7 @@ index 11..239 = 09:42..15:00 ← 本策略不使用
 
 | 数据 | 获取方式 | 状态 |
 |---|---|---|
-| universe 新日期快照（>07-20） | `universe.fetch_history_snapshots(start,end)` 调 iFinD `p03473`，断点续拉入 `universe_snapshots.csv`；token 走 `QLIB_IFIND_TOKEN_FILE`（默认 `~/qlib_data/.ifind_token`，refresh token 自动续期） | **当前瓶颈**，需人工触发 |
+| universe 新日期快照 | **已自动化**：08:30 cron（`scripts/cron_update_universe.sh`）增量拉取；手动备用 `python -m scripts.update_universe --end <日期>`；token 走 `QLIB_IFIND_TOKEN_FILE`（默认 `~/qlib_data/.ifind_token`，refresh 自动续期） | ✅ cron 维护 |
 | 日频/1min 新日期行情 | **仓库内无更新脚本**——只读源由仓库外的数据管道维护（实测它几乎每日在更新），项目红线"不生产行情数据" | 外部自动 |
 | 盘中实时分钟 bar | kline-fetcher 服务（路径 C） | 仅真实交易日 09:31–09:41 |
 | T 日 label | 不是下载问题而是时间边界：**T+1 收盘后才存在** | 永远晚一天 |
@@ -139,8 +141,8 @@ index 11..239 = 09:42..15:00 ← 本策略不使用
 ```bash
 # ① 确认外部管道已更新行情（日历最后一行 ≥ 目标日）
 tail -1 ~/.qlib/qlib_data/cn_data/calendars/day.txt
-# ② 增量拉 universe 快照并重物化（⚠️ 必须显式 --end，默认窗口停在 2026-07-02）
-conda run -n qlib_ifind_beta python -m scripts.build_overlay --end <目标日期>
+# ② 重物化因子（universe 已由 08:30 cron 自动维护，无需 --end）
+conda run -n qlib_ifind_beta python -m scripts.build_overlay
 #    ——幂等：symlink 重建 + 股池刷新 + 涨跌停/18 因子/price_941 重物化到最新
 # ③ 盘后滚动候选训练（可选；默认 CANDIDATE 不发布）
 conda run -n qlib_ifind_beta python scripts/retrain.py --test-start <日期>

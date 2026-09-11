@@ -16,6 +16,7 @@ scripts/ 与 qrun/ 下每个入口的用途、命令行参数与内部执行链�
 |---|---|---|---|
 | 数据准备 | `python -m scripts.build_overlay` | 端到端重建 overlay（symlink + 股池 + 涨跌停 + 18 因子物化） | 现役，幂等 |
 | 数据准备 | `scripts/materialize_minute.py` | 只重物化分钟因子（改公式后免重拉股池） | 现役 |
+| 数据准备 | `scripts/update_universe.py` | 盘前 universe 快照增量更新（08:30 cron 入口，仅名单） | 现役，cron |
 | 训练回测 | `qrun/run.py <yml>` | 训练 + IC + TD0 策略回测，落 MLflow recorder | 现役 ★ |
 | 生产/回放 | `scripts/intraday_production.py` | 盘中生产 6 步 + 治理 2 步 | 现役 ★ |
 | 生产/回放 | `scripts/replay_intraday_shadow.py` | 生产链路的历史适配回放（方案 B 全模拟） | 现役 ★ |
