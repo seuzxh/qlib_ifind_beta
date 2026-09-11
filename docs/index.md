@@ -28,6 +28,7 @@ nav_order: 1
 - [模型说明](models.md)：Champion、滚动候选、XGBoost 配对与晋升门控。
 - [生产基线](production-baseline.md)：日内流程、输入输出和人工操作合同。
 - [配置说明](configs.md)：qrun YAML 逐段图解、运行加载方式与 yml↔生产链路关系。
+- [回测与脚本解析](backtest-scripts.md)：qrun/回放/生产三条主干链的内部执行与全部脚本命令行。
 - [验证与研究](validation.md)：purged rolling 门控、风险叠加、已证伪方向存档。
 - [产物地图](artifacts.md)：训练/验证/回测/生产各环节产物位置与字段。
 - [运维手册](operations.md)：生产子命令、故障排查、红线。
