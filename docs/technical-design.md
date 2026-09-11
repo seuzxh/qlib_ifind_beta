@@ -1,7 +1,7 @@
 ---
 layout: default
 title: "技术方案（历史）"
-nav_order: 12
+nav_order: 13
 ---
 
 # 技术方案文档 · qlib_ifind_beta
