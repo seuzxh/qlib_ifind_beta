@@ -74,6 +74,59 @@ Qlib `DataHandlerLP` 的三个数据视图（`handler.py:53-55`）：
 learn 处理器为空——因此 **DK_I 与 DK_L 输出完全相同**；label 永不做标准化，
 IC 直接对原始收益计算。
 
+### 早停（early stopping）是什么
+
+LightGBM 训练是**一次加一棵树**（一轮 = 一棵树，预算上限 1000 轮）。每加一棵，
+在 **valid 段（2026-01→03，5,097 行，模型没见过的数据）**上算一次 binary_logloss；
+连续 **50 轮**（`HFLGBModel` 默认）没有刷新最低值就停止，并**回滚保留最优点那轮的
+模型**。2026-09-06 重跑的真实日志：
+
+```text
+[20]  train 0.6754   valid 0.6851
+[40]  train 0.6690   valid 0.6858   ← train 仍在降，valid 已回升
+[60]  train 0.6644   valid 0.6864   ← 继续恶化
+Early stopping, best iteration is: [12]  valid 0.6848   ← 全局最优
+```
+
+为什么需要：**train 损失单调下降，valid 损失在第 12 轮掉头上升**——这是过拟合的
+标准形态，继续加树是在背训练集噪声而不是学规律。横截面选股信噪比极低
+（IC 才 0.05），拐点来得非常早，所以 Champion 模型只有 **12 棵树**。早停的价值：
+① 自动回答"多少容量够用"，免手工调树数；② 停在 valid 最优处保住样本外表现；
+③ 省算力（1000 轮预算 60 轮出头结束）。"早停看 valid"的另一半含义：valid 段
+时间上晚于 train 段、早于 test 段——用时序上最近的一段验货，但不参与训练，
+更不等于偷看 test。
+
+### 三个 Record 分别代表什么
+
+一句话分工：**SignalRecord 出预测，SigAnaRecord 评预测准不准，PortAnaRecord 评
+预测换成钱赚不赚钱**。三者是 Qlib 记录器模板（`qlib/workflow/record_temp.py`），
+按 `task.record` 顺序串行执行、逐层依赖：
+
+```text
+模型 fit
+  └─ SignalRecord ──→ pred.pkl + label.pkl
+                       ├─→ SigAnaRecord   纯统计，不涉及任何交易规则
+                       └─→ PortAnaRecord  pred 作为策略信号
+                             └ TopkDropoutStrategyTD0 选股（topk10/ndrop8）
+                             └ Exchange 撮合（09:41 买/次日收盘卖、涨跌停、成本）
+                             └ risk_analysis 汇总（年化/IR/回撤 vs SH000300）
+```
+
+| | SignalRecord | SigAnaRecord | PortAnaRecord |
+|---|---|---|---|
+| 代表 | 信号生成器 | 信号分析器（模型层） | 组合分析器（策略层回测） |
+| 做什么 | 模型对 test 段逐日打分并落盘 | 逐日算预测分与真实收益的截面相关性 | 预测分喂给策略做完整撮合回测 |
+| 输入 | 模型 + DatasetH | pred.pkl / label.pkl | pred.pkl + yml 的 port_analysis_config |
+| 输出 | pred.pkl(5,776 行) / label.pkl | sig_analysis/{ic,ric}.pkl | portfolio_analysis/*.pkl |
+| 回答的问题 | 每只股票今天打几分 | 分数高的真的涨得多吗 | 按分数交易扣完成本净值如何 |
+| 本次实测 | 与冻结 Champion 逐位相同 | IC 0.0548 / RankIC 0.0612 | 超额含成本年化 +148.2% / IR 3.98 |
+
+两个易混点：**SigAnaRecord 不知道交易为何物**（IC 只是逐日截面相关系数，模型可以
+IC 为正但被换仓成本吃光利润，这一层看不出来）；**PortAnaRecord 才引入交易现实**
+（同样的 pred，经过选股规则、买卖价格、涨跌停、成本后变成净值曲线——日均换手
+138%、成本 13.8bp 这些数字只在这一层出现）。这也是本项目要求"信号层零漂移 +
+组合层独立回测"分开验证的原因：分别对应 SigAna 和 PortAna 各自守的一层。
+
 ### 数据样式与产物示例（recorder `f364dcb3` 实取）
 
 **① 特征矩阵（DK_R 视角，SZ300164，18 列节选 4 + label）：**
