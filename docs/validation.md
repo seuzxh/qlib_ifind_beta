@@ -74,6 +74,7 @@ Top20 候选池内部，不修改 alpha 分数：
 | 遗传规划因子挖掘（gplearn） | valid IC≈0，小规模过拟合 | 会话记录 |
 | Kronos 基础模型 zero-shot（日线/5min、base/small） | 四次 IC 全负，方向相反 | 外部项目 `quant_projects/kronos`（有 finetune checkpoint） |
 | Alpha158 日频因子（85 维） | 稀释 9:41 分钟信号，§19.1 证伪 | [backtest-log](backtest-log/2026-07-06-l1-full-backtest.md) |
+| overnight_gap 后复权口径变体 | 信息量与名义口径持平（IC 差为 label 混合基准噪声所致），组合收益持平，不切换；**衍生发现：数据源 factor 逐日漂移 + label 基准噪声待立项** | [gap 口径 A/B](backtest-log/2026-09-11-gap-caliber-ab-and-factor-drift.md) |
 
 ## 验证脚本索引
 
@@ -82,6 +83,7 @@ Top20 候选池内部，不修改 alpha 分数：
 | `scripts/validate_xgb_purged_rolling_gate.py` | XGB 门控 purged rolling 验证（含 `purged_segments` 工具函数） |
 | `scripts/validate_index_stage_joint_models.py` | 指数阶段反弹/回调联合模型验证 |
 | `scripts/validate_factor_challengers.py` | 挑战者因子验证 |
+| `scripts/validate_gap_adjusted.py` | overnight_gap 口径对照（名义 vs 后复权） |
 | `scripts/validate_prediction_blend.py` | 预测混合验证 |
 | `scripts/validate_risk_overlay_purged.py` / `_quarters.py` | 风险叠加验证（purged / 分季度） |
 | `scripts/diagnose_index_stage_tail_association.py` | 指数阶段与尾部收益关联诊断 |

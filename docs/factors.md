@@ -51,7 +51,11 @@ nav_order: 4
   `startup_mom`、`accel`、`vol_ratio` 各组（例如 `accel_3m` = 后 3 根收益 −
   前 3 根收益，用的仍是 1 分钟K线）。
 - `vol_vs_yest_t2/t3/t5` 的分母是对应历史日全天分钟成交量除以 240。
-- `overnight_gap` 用不复权价格计算，避免除权因子抵消真实跳空。
+- `overnight_gap` 用名义口径计算（开盘与昨收各除当日复权因子）。真实依据是工程
+  约束而非"复权抵消跳空"：盘中 09:40 拿不到当日 factor，名义口径是研究/生产
+  两路径唯一可逐位复算的选择。本数据源 factor 逐日微漂（±0.1%~0.3%），后复权
+  序列才是内部自洽口径，两种口径对干净 label 信息量几乎相同——对照实验见
+  [gap 口径 A/B](backtest-log/2026-09-11-gap-caliber-ab-and-factor-drift.md)。
 - 任何分钟数据缺失或特征 NaN 都必须经过 Handler 的 `DropnaProcessor` 质量护栏，
   不允许让缺失的买入价回退到 T 日收盘价。
 

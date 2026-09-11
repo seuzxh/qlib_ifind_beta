@@ -360,10 +360,13 @@ def materialize_minute_instrument(code: str) -> bool:
             raw_prev_close[1:] = raw_close[:-1]
         out_change941 = (raw_p941 / raw_prev_close - 1.0).astype(np.float32)
 
-        # overnight_gap（enhanced extra，day 空间反转因子）：不复权开盘跳空 =
+        # overnight_gap（enhanced extra，day 空间反转因子）：名义口径开盘跳空 =
         # (open[T]/factor[T]) / (close[T-1]/factor[T-1]) - 1。复用上方 raw_prev_close。
-        # 不复权口径（同 change_941 源）：除权日 factor 跳变会被分母分子同步抵消 → 反映真实
-        # 开盘情绪；若用后复权 ($open/Ref($close,1)-1) 除权缺口被复权抹平 → 口径错。
+        # 口径依据（Champion 冻结合同）：名义口径是研究/生产两路径唯一可逐位复算的选择
+        # （盘中 09:40 无当日 factor）。注：本数据源 factor 逐日微漂 ±0.1%~0.3%（非阶梯），
+        # 后复权序列才内部自洽，两口径对干净 label 信息量几乎相同（2026-09-11 A/B，
+        # backtest-log/2026-09-11-gap-caliber-ab-and-factor-drift.md）；除权日极端值由
+        # 树模型稳健性（train 段 0.031%）与生产 fail-closed 兜底。
         # 首日无昨收 → NaN；停牌日 open=NaN → NaN（NaN-safe）。9:30 集合竞价 < 9:41 买入，无前视。
         raw_open = open_d.astype(np.float64) / factor_d.astype(np.float64)
         out_overnight_gap = (raw_open / raw_prev_close - 1.0).astype(np.float32)

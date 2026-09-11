@@ -147,7 +147,8 @@ qlib 只认一个 `provider_uri`，而行情源只读、我们又需要写入自
   （窗口 1/3/5 分钟）+ `vol_vs_yest`；
 - 3 个多日量能：`vol_vs_yest_t2/t3/t5`（分母 = T-k 日全天分钟量 ÷ 240，**必须用
   分钟量口径**，不能用日频 volume 代替——单位/复权口径不一致）；
-- 1 个隔夜跳空：`overnight_gap`（不复权价，避免除权抵消真实跳空）；
+- 1 个隔夜跳空：`overnight_gap`（名义口径，保证盘中可算与研究/生产一致；
+  口径对照实验见 [backtest-log](backtest-log/2026-09-11-gap-caliber-ab-and-factor-drift.md)）；
 - 辅助字段（不进模型）：`price_941`（09:41 K 线 close = 回测买入价）、
   `change_941`（相对 T-1 不复权收盘的涨幅 = 涨停拦截依据）。
 
