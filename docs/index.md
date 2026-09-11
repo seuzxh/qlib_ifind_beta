@@ -24,6 +24,7 @@ nav_order: 1
 
 - [全流程实跑导读](pipeline-walkthrough.md)：2026-09-06 全流程重跑实录，逐环节输入/输出与数据全旅程（新接手先读这篇）。
 - [项目总览](project-overview.md)：数据、时序、目录和当前边界。
+- [数据源与读取](data-access.md)：已下载/需拉取的全部数据、bin 格式解剖、四条读取路径与截止日差异。
 - [因子说明](factors.md)：18 个现役因子、计算窗口和前视约束。
 - [模型说明](models.md)：Champion、滚动候选、XGBoost 配对与晋升门控。
 - [生产基线](production-baseline.md)：日内流程、输入输出和人工操作合同。
