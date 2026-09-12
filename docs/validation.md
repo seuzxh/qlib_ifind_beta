@@ -75,6 +75,7 @@ Top20 候选池内部，不修改 alpha 分数：
 | Kronos 基础模型 zero-shot（日线/5min、base/small） | 四次 IC 全负，方向相反 | 外部项目 `quant_projects/kronos`（有 finetune checkpoint） |
 | Alpha158 日频因子（85 维） | 稀释 9:41 分钟信号，§19.1 证伪 | [backtest-log](backtest-log/2026-07-06-l1-full-backtest.md) |
 | overnight_gap 后复权口径变体 | 信息量与名义口径持平（IC 差为 label 混合基准噪声所致），组合收益持平，不切换；**衍生发现：数据源 factor 逐日漂移 + label 基准噪声待立项** | [gap 口径 A/B](backtest-log/2026-09-11-gap-caliber-ab-and-factor-drift.md) |
+| Alpha158 网格 + 昨日因子（85 候选四层漏斗） | 网格 14 个 W1 赢家经 W2/PortAna/purged rolling 全部淘汰（vol3m_y 与基线打平、ALL4 稳定更差）；副产品：手动回测幸存者偏差修正 + 训练运行噪声实测（IC ±0.006） | [Alpha158 网格](backtest-log/2026-09-12-alpha158-grid-and-yesterday-factors.md) |
 
 ## 验证脚本索引
 
