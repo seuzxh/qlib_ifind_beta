@@ -95,7 +95,35 @@ label 的基准噪声恰好可被名义 gap 对齐解释，LightGBM 的分裂与
 而混合基准需要 12 棵——训练目标的基准噪声显著拖慢收敛。Champion 对混合评测
 的 +0.010（0.0548 vs 0.0448）即噪声对齐收益。
 
-## 6. 产物
+## 6. 根因确认（2026-09-12 补）：factor 是合成字段，非真复权因子
+
+数据管道源码（`kline_fetcher/_base.py:336`，经 `~/qlib_data/scripts/cron_daily.sh`
+→ `fetch_day_kline_with_factor`）：
+
+```python
+factor = float(hfq_close) / float(none_close)   # 每日两次独立请求的收盘价现场合成
+item["volume"] = float(none_item["volume"]) / factor   # volume 也被此噪声因子调整
+```
+
+三项数据完整性校验（test 段实测）：
+
+| 校验 | 结果 | 含义 |
+|---|---|---|
+| `close/factor × 100` 整数偏离 | 中位 0.0000（精确 0.01 网格） | 名义价=vendor 原始报价序列，合成关系成立 |
+| factor 日变化 | 中位 0.068%，>0.5% 占 10.9% 天 | 远超真实除权频率(~0.5% stock-day)——两套报价序列日收益互不一致（一字板铁证：hfq 收益 0 vs none +0.12%），低价股舍入误差更大 |
+| 涨跌停边界超界 | 名义 68 / 后复权 43 例 | 绝对数大头来自新股无涨跌幅窗口；名义多出的 ~25 例是合成噪声把边缘日推过界 |
+
+结论修正：**价格序列本身没坏**（hfq 内部自洽、none 网格精确），坏的是 factor
+字段——它携带 ±0.07%（低价股 >0.5%）的逐日合成噪声，且 volume 也被它污染
+（解释了 spec 中"日频与分钟量口径不一致"的旧审计发现）。在真阶梯 factor 的
+正常数据下，两种 gap 口径在非除权日应逐位相同，本文的 IC 塌方不会发生。
+
+修复属上游（kline-fetcher / qlib_data 管道）事项，候选方案：①factor 阶梯化重建
+（真实除权日检测 + 区间常数化）；②跨日价格口径统一用单序列内部比值绕开 factor；
+③volume 存原始值。修复前，任何"除以 factor"的口径（名义化、volume 调整）都
+带此噪声，评估结论需注明。
+
+## 7. 产物
 
 - 脚本：`scripts/validate_gap_adjusted.py`（含单因子 IC、全流程训练、对照报告）
 - 实验 `gap_adjusted_variant` / recorder `b7db9b9b9fca4b71b6becff474121b58`
