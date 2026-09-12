@@ -43,7 +43,7 @@ experiment_name: minute_enhanced_tk10_nd8        # MLflow 实验 = recorder 归�
 | `start_time / end_time` | 2024-01-01 → 2026-07-02 | Handler 取数窗口（约 2.5 年） | ✅ |
 | `fit_start_time / fit_end_time` | 2024-01-01 → 2025-12-31 | 学习型 processor 拟合窗口（= train 段） | ✅ |
 | `instruments` | `highbeta883926` | 时变股池：T 日在册集（每段 `[d_in, d_out]` 逐日精确） | ✅ |
-| `label` | `Ref($close,-1) / $price_941 - 1` | **FROZEN label**：T 日 09:41 买入、T+1 收盘卖出的收益 | 🔒 改=新 Champion |
+| `label` | `Ref($close1500,-1) / $close0941 - 1` | **label v2**（2026-09-12 采纳）：两腿取 1min 原值（close0941/close1500 bin），T 日 09:41 买、T+1 15:00 卖 | 🔒 改=新 Champion |
 
 > 股池无前视：883926 是每日重平衡高贝塔榜，instruments 按历史每日真实名单写入；
 > qlib 取 T 日数据时自动只返回 T 日在册的约 100 只（详见[因子说明](factors.md)与

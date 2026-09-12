@@ -89,13 +89,15 @@ def test_materialize_writes_required_bins():
     """All champion execution and feature bins are present."""
     mm.materialize_minute_instrument("SH600519")
     d = Path(FEATURES_DST) / "sh600519"
-    from qlib_ifind_beta.config import MINUTE_CHANGE_941_FIELD
+    from qlib_ifind_beta.config import (MINUTE_CHANGE_941_FIELD,
+        MINUTE_CLOSE_0941_FIELD, MINUTE_CLOSE_1500_FIELD)
     expected = (
         list(MINUTE_FACTOR_FIELDS)               # 14 baseline
         + list(MINUTE_FACTOR_EXTRA_FIELDS)       # 4 enhanced extras (incl. overnight_gap)
-        + [MINUTE_DEAL_PRICE_FIELD, MINUTE_CHANGE_941_FIELD]
+        + [MINUTE_DEAL_PRICE_FIELD, MINUTE_CHANGE_941_FIELD,
+           MINUTE_CLOSE_0941_FIELD, MINUTE_CLOSE_1500_FIELD]   # label v2 两腿
     )
-    assert len(expected) == 20
+    assert len(expected) == 22
     for name in expected:
         assert (d / f"{name}.day.bin").exists(), name
 

@@ -17,8 +17,8 @@ nav_order: 1
 - 因子：18 维，14 个 T 日开盘分钟因子 + 3 个多日量能因子 + 1 个隔夜跳空因子。
 - 模型：Qlib `HFLGBModel`，`loss=binary`，冻结 Champion recorder。
 - 组合：Top10，`n_drop=8`，使用 `TopkDropoutStrategyTD0` 在 T 日 09:41 执行。
-- 交易合同：label 为 `Ref($close, -1) / $price_941 - 1`，即 T 日 09:41 买入、
-  T+1 收盘卖出；第一阶段只输出 CSV，不自动提交券商订单。
+- 交易合同：label 为 `Ref($close1500, -1) / $close0941 - 1`（label v2，2026-09-12 起两腿同取 1min 序列原值），
+  即 T 日 09:41 买入、T+1 15:00 卖出；第一阶段只输出 CSV，不自动提交券商订单。
 
 ## 快速导航
 

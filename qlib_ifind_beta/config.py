@@ -52,7 +52,9 @@ CHAMPION_EXPERIMENT = "minute_enhanced_tk10_nd8"
 CHAMPION_DATA_START = "2024-01-01"        # handler start_time（含 train 段供 learned processor fit）
 CHAMPION_FIT_START = "2024-01-01"         # FROZEN = champion train 段
 CHAMPION_FIT_END = "2025-12-31"           # FROZEN = champion train 段
-CHAMPION_LABEL_EXPR = "Ref($close, -1) / $price_941 - 1"   # FROZEN label（P1 仅 fetch 结构，不读值）
+# label v2（2026-09-12 用户决策采纳）：两腿全部取 1min 序列原值，消除混合基准。
+# 验证记录见 backtest-log/2026-09-12-label-close1500.md（W2/滚动劣势如实存档）。
+CHAMPION_LABEL_EXPR = "Ref($close1500, -1) / $close0941 - 1"
 CHAMPION_TOPK = 10
 
 # --- position sizing（§55 基准趋势连续仓位，2026-07-12）------------------------
@@ -116,6 +118,8 @@ MINUTE_FACTOR_FIELDS = (
 )
 # 15th materialized bin: T-day 9:41 close (deal_price for buy, NOT a feature).
 MINUTE_DEAL_PRICE_FIELD = "price_941"
+MINUTE_CLOSE_0941_FIELD = "close0941"     # 09:41 1min 原值收盘（无 V4 校正，label v2 分母）
+MINUTE_CLOSE_1500_FIELD = "close1500"     # 15:00 1min 原值收盘（label v2 分子）
 # 16th materialized bin: 9:41 时刻涨跌幅（不复权）vs T-1 不复权收盘 —— v2 涨跌停 buy 表达式用。
 # (price_941[T]/factor[T]) / (close[T-1]/factor[T-1]) - 1；与 materialize.compute_change 同源、
 # 仅把"全天 close"换成"9:41 close"。必须不复权（除权日 factor 跳变会误判涨跌停）。

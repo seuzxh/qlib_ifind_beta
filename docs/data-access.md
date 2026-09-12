@@ -79,7 +79,7 @@ little-endian float32 数组：
 
 ```python
 qlib.init(provider_uri="data/qlib_root", region="cn")
-D.features(instruments, ["$close", "Ref($close,-1)/$price_941-1"],
+D.features(instruments, ["$close", "Ref($close1500,-1)/$close0941-1"],
            start_time=..., end_time=...)
 ```
 

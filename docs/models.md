@@ -30,12 +30,16 @@ nav_order: 5
 ## Label 与推理对齐
 
 ```text
-Ref($close, -1) / $price_941 - 1
+Ref($close1500, -1) / $close0941 - 1     # label v2（2026-09-12 采纳）
 ```
 
-该 label 对应 T 日 09:41 买入、T+1 收盘卖出。推理使用 `TopkDropoutStrategyTD0`
-的同日执行语义，买入价为 `$price_941`，卖出价为 `$close`。这一组时间对齐是模型
-合同的一部分，不能单独替换模型而不重新验证。
+v2 两腿全部取 1min 序列原值（`close0941` = 09:41 收盘原值、`close1500` = 15:00
+收盘原值），对应 T 日 09:41 买入、T+1 15:00 卖出，消除旧版
+`Ref($close,-1)/$price_941-1` 的混合复权基准（验证与决策记录见
+[backtest-log](backtest-log/2026-09-12-label-close1500.md)）。推理使用
+`TopkDropoutStrategyTD0` 的同日执行语义。这一组时间对齐是模型合同的一部分，
+不能单独替换模型而不重新验证。冻结 Champion（93d435e0）按旧 label 训练，
+label 不进推理，生产评分不受影响；一切后续训练已切换 v2。
 
 ## 滚动候选与组合模型
 
@@ -53,7 +57,7 @@ Ref($close, -1) / $price_941 - 1
 
 滚动切分 `train 90 / valid 20 / embargo 1 / test ≤20` 中的那 1 个交易日隔离日
 （实际示例：valid 至 03-30、embargo 为 03-31、test 从 04-01 起），用于防止
-**标签泄漏**。本项目 label `Ref($close,-1)/$price_941-1` 的 T 日样本要用 T+1
+**标签泄漏**。label（v2 同理）的 T 日样本要用 T+1
 收盘价才算完整：
 
 ```text

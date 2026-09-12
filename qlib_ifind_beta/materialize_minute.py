@@ -1,6 +1,6 @@
 """Materialize minute factors + $price_941 as day.bin into the overlay.
 
-Writes 20 day.bins/stock: 14 baseline minute factors (MINUTE_FACTOR_FIELDS) + 4
+Writes 22 day.bins/stock: 14 baseline minute factors (MINUTE_FACTOR_FIELDS) + 4
 enhanced extras (MINUTE_FACTOR_EXTRA_FIELDS: vol_vs_yest_t2/t3/t5 +
 overnight_gap) + $price_941 (deal price) + $change_941 (涨跌停拦截用). The 14
 baseline are frozen for m14 reproducibility; the 4 extras feed MinuteEnhancedHandler
@@ -44,6 +44,7 @@ from .config import (
     BUY_SLOT, DAY_CAL, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FREQ,
     FIRST_FEATURE_SLOT, MIN_CAL,
     MINUTE_CHANGE_941_FIELD, MINUTE_DEAL_PRICE_FIELD,
+    MINUTE_CLOSE_0941_FIELD, MINUTE_CLOSE_1500_FIELD,
     MINUTE_FACTOR_AMT_FIELDS, MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS,
     MINUTE_FACTOR_PATH_FIELDS,
     REAL_BARS_PER_DAY, SLOTS_PER_DAY,
@@ -197,6 +198,7 @@ def materialize_minute_instrument(code: str) -> bool:
 
     c, o, h, l, v = (morning2d("close"), morning2d("open"), morning2d("high"),
                      morning2d("low"), morning2d("volume"))
+    fac_close0941 = c[:, 10].astype(np.float64)   # 09:41 原值（V4 校正前）
 
     # vol_vs_yest denominator (minute-only both sides): per-day FULL-DAY minute
     # volume from cn_data_1min, summed across all real (non-NaN) slots that day.
@@ -213,6 +215,13 @@ def materialize_minute_instrument(code: str) -> bool:
     src_vals = np.where(np.isfinite(src_vals), src_vals, 0.0)
     full_day_vol = np.zeros(n_min_days, dtype=np.float64)
     np.add.at(full_day_vol, day_idx_all[in_range], src_vals)
+
+    # label v2 两腿（2026-09-12）：close1500 = 每日 slot 239 的 1min 原值收盘。
+    # 同一 day 映射；NaN-safe：NaN 槽不覆盖（保留 0 初始化后再置 NaN 见下）。
+    close_bin = m["close"]
+    close1500_vals = np.full(n_min_days, np.nan, dtype=np.float64)
+    sel = in_range & ((bin_rows % SLOTS_PER_DAY) == (SLOTS_PER_DAY - 1))
+    close1500_vals[day_idx_all[sel]] = close_bin[sel]
 
     # per-min-day date → day-calendar row → output-relative index.
     # morning_rows[::_MORNING_WINDOW] = each day's slot-FIRST_FEATURE_SLOT (slot 0)
@@ -376,5 +385,12 @@ def materialize_minute_instrument(code: str) -> bool:
         write_bin(dst_dir / f"{name}.{FREQ}.bin", si_dc, out[name])
     write_bin(dst_dir / f"{MINUTE_DEAL_PRICE_FIELD}.{FREQ}.bin", si_dc, out_p941)
     write_bin(dst_dir / f"{MINUTE_CHANGE_941_FIELD}.{FREQ}.bin", si_dc, out_change941)
+    # label v2 两腿：与因子同 day 对齐 scatter（rel_v 已含有效性）。
+    out_c0941 = np.full(n_out, np.nan, dtype=np.float32)
+    out_c1500 = np.full(n_out, np.nan, dtype=np.float32)
+    out_c0941[rel_v] = fac_close0941[valid]
+    out_c1500[rel_v] = close1500_vals[valid]
+    write_bin(dst_dir / f"{MINUTE_CLOSE_0941_FIELD}.{FREQ}.bin", si_dc, out_c0941)
+    write_bin(dst_dir / f"{MINUTE_CLOSE_1500_FIELD}.{FREQ}.bin", si_dc, out_c1500)
     write_bin(dst_dir / f"{_OVERNIGHT_GAP_FIELD}.{FREQ}.bin", si_dc, out_overnight_gap)
     return True

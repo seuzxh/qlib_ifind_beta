@@ -1,4 +1,4 @@
-"""Re-materialize minute factors (20 day.bins/stock) without redoing the full overlay.
+"""Re-materialize minute factors (22 day.bins/stock) without redoing the full overlay.
 
 Writes 14 baseline minute factors + 4 enhanced extras (vol_vs_yest_t2/t3/t5 +
 overnight_gap) + price_941 + change_941 per stock. Use after tweaking

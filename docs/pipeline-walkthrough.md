@@ -21,7 +21,7 @@ nav_order: 2
   Top10 / n_drop=8 调仓 → 09:41 生成买卖 CSV → **人工下单**。
 - **不做什么**：不生产行情、不自动提交券商订单、不自动晋升候选模型。
 - **当前基线**：`HFLGBModel(binary)` + 18 分钟因子 + `TopkDropoutStrategyTD0`，
-  label = `Ref($close,-1)/$price_941-1`（T 日 09:41 买、T+1 收盘卖）。
+  label = `Ref($close1500, -1) / $close0941 - 1`（label v2：1min 原值两腿，T 日 09:41 买、T+1 15:00 卖）。
 - **三个验证层**：研究回测（qrun）→ 62 日历史影子回放（逐日对账）→ 真实交易日
   纸面跟踪（7 信号日 / 6 结算日）。
 
@@ -350,7 +350,7 @@ PASS；模拟收益 **+39.27%**、最大回撤 **-19.81%**（方案 B 口径：0
 | 涨跌停线 | 环节②物化 | 回测/生产买卖拦截 | `.bin` |
 | 18 因子 | 环节②物化（历史）/ S4 实时组装（生产） | 模型打分 | `.bin` / parquet |
 | `price_941`/`change_941` | 环节②物化 / 09:41 实时 bar | 买入价、涨停拦截 | `.bin` / parquet |
-| label `Ref($close,-1)/$price_941-1` | Handler 表达式 | 训练目标（T+1 收盘才完整） | 内存/pkl |
+| label `Ref($close1500, -1) / $close0941 - 1` | Handler 表达式 | 训练目标（v2，T+1 15:00 才完整） | 内存/pkl |
 | 模型分数 | `params.pkl` 推理 | 排序 → TopkDropout 决策 | pkl / CSV |
 | keep/sell/buy 决策 | S5 | 订单 CSV → 人工 → 成交回填 | JSON / CSV |
 | 成交与持仓 | 人工回报 | 现金两阶段 → 收盘对账 → 次日 `positions_before` | CSV / JSON |
