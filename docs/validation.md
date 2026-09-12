@@ -76,6 +76,7 @@ Top20 候选池内部，不修改 alpha 分数：
 | Alpha158 日频因子（85 维） | 稀释 9:41 分钟信号，§19.1 证伪 | [backtest-log](backtest-log/2026-07-06-l1-full-backtest.md) |
 | overnight_gap 后复权口径变体 | 信息量与名义口径持平（IC 差为 label 混合基准噪声所致），组合收益持平，不切换；**衍生发现：数据源 factor 逐日漂移 + label 基准噪声待立项** | [gap 口径 A/B](backtest-log/2026-09-11-gap-caliber-ab-and-factor-drift.md) |
 | Alpha158 网格 + 昨日因子（85 候选四层漏斗） | 网格 14 个 W1 赢家经 W2/PortAna/purged rolling 全部淘汰（vol3m_y 与基线打平、ALL4 稳定更差）；副产品：手动回测幸存者偏差修正 + 训练运行噪声实测（IC ±0.006） | [Alpha158 网格](backtest-log/2026-09-12-alpha158-grid-and-yesterday-factors.md) |
+| 跨日分钟对齐因子（20 候选，gap 替补第二轮） | 同时刻跨日量比/动量在 W1 接近 champion 但 W2/PortAna/purged 全褪色（最佳 xdvol10 段胜率 32%）；gap 不可替代性经两轮替补检验成立 | [分钟对齐因子](backtest-log/2026-09-12-minute-aligned-cross-day-factors.md) |
 
 ## 验证脚本索引
 
