@@ -34,7 +34,6 @@ nav_order: 1
 - [产物地图](artifacts.md)：训练/验证/回测/生产各环节产物位置与字段。
 - [运维手册](operations.md)：生产子命令、故障排查、红线。
 - [模拟盘流程](paper-trading.md)：盘中信号生产六步 + 盘后纸面跟踪五步的全流程图与隔日结算闭环。
-- [架构与数据流](architecture.md)：MVP 期架构快照（历史，带弃用标记）。
 - [历史影子回放](backtest-log/2026-07-21-intraday-shadow-replay.md)：62 日回放验收与待办。
 
 ## 运行入口

@@ -24,16 +24,16 @@ scripts/ 与 qrun/ 下每个入口的用途、命令行参数与内部执行链�
 | 验证研究 | `scripts/rolling_validate.py` | 19 任务滚动重训验证（vs Champion 单次训练） | 研究 |
 | 验证研究 | `scripts/validate_factor_challengers.py` | 因子变体 × 4 窗口 A/B | 研究 |
 | 验证研究 | `scripts/validate_xgb_purged_rolling_gate.py` | 19 步 embargo walk-forward 验证 XGB 门控 | 研究（未过准入） |
-| 验证研究 | `scripts/validate_risk_overlay_purged.py` / `_quarters.py` | 风险叠加层验证 | 研究（未过准入） |
-| 验证研究 | `scripts/validate_index_stage_joint_models.py` | 指数阶段 joint 模型验证 | 研究（未过准入） |
-| 验证研究 | `scripts/validate_prediction_blend.py` | 预测混合验证 | 研究（未过准入） |
-| 对照诊断 | `compare_models.py` / `compare_position_sizing.py` / `compare_drawdown_solutions.py` / `compare_anticrowd.py` | 模型/仓位/回撤/反拥挤对照 | 研究工具 |
-| 对照诊断 | `stability_check.py` / `diag_drawdown_*.py` / `diagnose_*.py` / `cheap_falsify_reversal_tail.py` | 稳定性与归因诊断 | 研究工具 |
+| 对照诊断 | `compare_models.py` | LGBM/XGBoost/CatBoost/Linear 滚动对照 | 研究工具 |
 | 报告 | `scripts/make_report.py` | recorder → 13 个 plotly HTML 报告 | 现役 |
-| legacy | `live_forward.py` / `live_catchup.py` / `realtime_signal.py` | 旧 P1 纸面跟踪/实时信号（已被 6 步链路取代） | 历史 |
 
-> ⚠️ **无参数脚本会立即执行**：`rolling_validate`、`compare_models`、
-> `compare_position_sizing`、`stability_check` 等没有 argparse，`--help` 无效，
+> 2026-09-12 ponytail 审计清理：14 个一次性研究脚本、legacy 入口（live_forward/
+> live_catchup/realtime_signal）、死模块（position_sizing/risk_overlay/dump_index/
+> live 旧三件）已删除——结论均在 [验证与研究](validation.md) 与 backtest-log 归档，
+> 需要时从 git 历史取回。
+
+> ⚠️ **无参数脚本会立即执行**：`rolling_validate`、`compare_models` 等没有
+> argparse，`--help` 无效，
 > 调用即开始训练/分析（会写 mlruns 与 data/）。用前先看清源码窗口。
 
 ## 主干链 A：qrun 训练回测（13 秒全流程）
@@ -274,28 +274,16 @@ HFLGB 任务的深拷贝仅换 model 段。产物：两个 recorder + `ensemble_
 | `rolling_validate.py` | RollingGen(step=20) 生成 19 个滚动任务逐个训练，拼接全部 test 段 pred 统一算 IC/回测，对照 Champion 单次训练 | 无（即跑 19 次训练） |
 | `validate_factor_challengers.py` | `--window {W1'26Q2,W2'25Q2,W3'25Q4,W4'24Q4}` × `--variant {champion18,pruned15,turnover19,…,xgb18,path21}` 的因子/模型变体 A/B，`--skip-backtest` 只算 IC | 无 |
 | `validate_xgb_purged_rolling_gate.py` | 19 步 walk-forward 重训双模型，验证 XGB 门控在防泄漏口径下是否仍成立 | `data/xgb_rolling_gate_ab.json`（需先跑上游） |
-| `validate_risk_overlay_purged.py` / `_quarters.py` | 风险叠加层（回撤控制）的分季与 purged 验证 | 前者需 `xgb_purged_rolling_gate_ab.json`；后者需 `rolling_90d_purged_*` 实验 |
-| `validate_index_stage_joint_models.py` | 指数阶段 + 个股 joint 模型（joint TVT） | `xgb_purged_rolling_gate_ab.json` |
-| `validate_prediction_blend.py` | 预测层混合权重验证 | `factor_challenger_ab` 实验 |
 
 结论与门控细节统一见[验证与研究](validation.md)；已证伪方向不要重复投入。
 
 ## 对照 / 诊断 / 报告
 
 - `compare_models.py`：LGBM / XGBoost / CatBoost / Linear 滚动对照（无参数，即跑即训）；
-- `compare_position_sizing.py`：仓位层方案对比（§55：A 波动率目标 / B 滚动 IC
-  择时 / C 基准趋势，输出 Calmar 对照表）；`stability_check.py`：三子期 Calmar
-  稳定性 + 仓位分布（两者均为无参数分析脚本）；
-- `diag_drawdown_*` / `diagnose_*` / `compare_drawdown_solutions.py` /
-  `cheap_falsify_reversal_tail.py`：回撤归因、共振诊断等一次性研究工具，用前读
-  源码确认窗口；
 - `make_report.py`：`--recorder-id`（缺省取最新）→ `reports/` 下 13 个 plotly
   HTML（离线可看）。
 
-## legacy 入口（勿用于生产）
+## legacy 入口
 
-| 脚本 | 参数 | 说明 |
-|---|---|---|
-| `live_forward.py` | `--date [--skip-universe] [--skip-materialize]` | 旧 P1 纸面跟踪日入口，已被 6 步链路取代 |
-| `live_catchup.py` | `--start --end` | 旧模拟盘批量补跑 |
-| `realtime_signal.py` | `--date [--topk] [--max-workers] [--dry-run]` | 旧单脚本实时信号；`--dry-run` 用历史 1min 数据，已被 intraday_production 取代 |
+legacy 入口（`live_forward` / `live_catchup` / `realtime_signal` 及 live 旧模块）
+已于 2026-09-12 清理删除，需要时从 git 历史取回（commit `87b969b` 之前）。

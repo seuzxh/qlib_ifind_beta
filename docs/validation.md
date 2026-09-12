@@ -53,17 +53,11 @@ conda run -n qlib_ifind_beta python scripts/retrain.py \
 - `promote_candidate` 会先校验 gate metadata 与 recorder 来源，再切 online；
 - 项目红线：禁止自动晋升候选模型（见 [AGENTS.md](../AGENTS.md)）。
 
-## 风险叠加（risk_overlay，研究态）
+## 风险叠加（risk_overlay，已归档删除）
 
-`qlib_ifind_beta/risk_overlay.py` 把 T 日 09:40 前已知的信息转成软惩罚，只作用于模型
-Top20 候选池内部，不修改 alpha 分数：
-
-- `compute_chase_risk`：5 日动量 × 连续阳线 × 隔夜跳空-开盘延续 × 加速度的联合"追高"风险；
-- `compute_tracking_risk`：跟踪风险分量；
-- `apply_top_pool_penalty`：池内排名惩罚，输出仍可回 TopkDropoutStrategy。
-
-研究结论：未通过生产准入，当前默认不启用。验证脚本 `scripts/validate_risk_overlay_purged.py`、
-`scripts/validate_risk_overlay_quarters.py`。
+研究结论：未通过生产准入（2026-08），模块与验证脚本已于 2026-09-12 ponytail
+审计清理删除（追高/跟踪软惩罚作用于 Top20 池内的设计描述见 git 历史与
+Codex 线归档），不再保留研究接口。
 
 ## 已存档的研究结论
 
@@ -85,13 +79,8 @@ Top20 候选池内部，不修改 alpha 分数：
 | 脚本 | 用途 |
 | --- | --- |
 | `scripts/validate_xgb_purged_rolling_gate.py` | XGB 门控 purged rolling 验证（含 `purged_segments` 工具函数） |
-| `scripts/validate_index_stage_joint_models.py` | 指数阶段反弹/回调联合模型验证 |
 | `scripts/validate_factor_challengers.py` | 挑战者因子验证 |
 | `scripts/validate_gap_adjusted.py` | overnight_gap 口径对照（名义 vs 后复权） |
-| `scripts/validate_prediction_blend.py` | 预测混合验证 |
-| `scripts/validate_risk_overlay_purged.py` / `_quarters.py` | 风险叠加验证（purged / 分季度） |
-| `scripts/diagnose_index_stage_tail_association.py` | 指数阶段与尾部收益关联诊断 |
-| `scripts/diagnose_minute_basket_resonance.py` | 分钟篮子共振诊断 |
 
 另有 `scripts/rolling_validate.py`（滚动重训验证）与 `scripts/compare_models.py`
 （LGBM/XGBoost/CatBoost/Linear 消融对比，非生产）。

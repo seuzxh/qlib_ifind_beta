@@ -73,7 +73,7 @@ mlruns/<experiment>/<recorder>/
 | --- | --- |
 | 各 recorder `sig_analysis/ic.pkl` | ✅ valid 段逐日 IC |
 | `data/model_governance/`（CANDIDATE manifest / validation 报告） | 治理流程已就绪，尚无实际产出 |
-| `data/index_stage_joint_predictions/`（joint TVT 逐 fold pkl） | 缓存未保留，重跑 `scripts/validate_index_stage_joint_models.py` 再生 |
+| `data/index_stage_joint_predictions/`（joint TVT 逐 fold pkl） | 缓存未保留；验证脚本已随结论归档删除（2026-09-12），需要时从 git 历史取回 |
 | `logs/full_run_*/`（00_baseline → 05_summary.md） | 一次性全链路运行日志 |
 
 ## 查看入口

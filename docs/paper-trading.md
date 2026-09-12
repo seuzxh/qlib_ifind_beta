@@ -8,6 +8,8 @@ nav_order: 8.5
 
 第一阶段不接券商 API：**盘中**用六步子命令生成订单 CSV 由人工下单，
 **盘后**用 `live_forward.py` 以模拟撮合口径记录信号、隔日结算并累积净值。
+（注：`live_forward.py` 及 live 旧模块已于 2026-09-12 清理删除；纸面跟踪自 2026-07-14
+起暂停，恢复时从 git 历史取回或按 6 步生产链路重建。）
 两条线共用同一份合同（18 因子 + 冻结 Champion + Top10/n_drop=8），互为复算校验。
 
 ![模拟盘全流程](assets/paper-trading/flow.png)
@@ -21,7 +23,7 @@ nav_order: 8.5
 | T 日 09:40 后 | 信号生产 | `score-and-plan-sells` | 组装 18 因子（分母用 T-1/2/3/5 全天分钟均量，只读历史无前视）→ Champion 打分 → TopkDropout(10/8) 卖出计划 | `scores.csv`、`rebalance_decision.json`、`sell_orders.csv` |
 | T 日 09:41 闭合后 | 信号生产 | `build-buy-orders` | 独立采 09:41 bar 得 `price_941/change_941`；涨停拦截顺延；先卖后买两阶段现金，100 股取整 | `buy_orders.csv` |
 | T 日盘后 | 信号生产 | `reconcile` | 券商持仓/现金 vs 预期对账 | `daily_reconciliation.json` |
-| T 日 15:35 | 纸面跟踪 | `scripts/live_forward.py --date <T>` | 分钟数据 15:30 同步后触发五步（见下） | `live_signals.csv` 等 |
+| T 日 15:35 | 纸面跟踪 | `scripts/live_forward.py --date <T>`（**已删除**，见页首注） | 分钟数据 15:30 同步后触发五步（见下） | `live_signals.csv` 等 |
 | T+1 日 15:35 | 纸面跟踪 | 同上（`settle_prev` 步） | 用 T+1 收盘价结算 T 日信号 → **隔日闭环** | `live_settle.csv`、`live_nav.csv` |
 
 ## 盘中六步（信号生产，CSV + 人工下单）
@@ -44,7 +46,8 @@ $P reconcile               # ⑥ 盘后对账（cash_difference=0）
 
 ```bash
 conda run -n qlib_ifind_beta --no-capture-output python -W ignore \
-    scripts/live_forward.py --date 2026-07-02            # 可加 --skip-universe --skip-materialize
+    # live_forward.py 已于 2026-09-12 删除；以下为历史流程记录
+    # scripts/live_forward.py --date 2026-07-02
 ```
 
 1. **universe 增量**：T 日盘前快照刷新，失败沿用既有池继续；

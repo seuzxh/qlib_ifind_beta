@@ -218,10 +218,13 @@ def materialize_minute_instrument(code: str) -> bool:
 
     # label v2 两腿（2026-09-12）：close1500 = 每日 slot 239 的 1min 原值收盘。
     # 同一 day 映射；NaN-safe：NaN 槽不覆盖（保留 0 初始化后再置 NaN 见下）。
-    close_bin = m["close"]
-    close1500_vals = np.full(n_min_days, np.nan, dtype=np.float64)
-    sel = in_range & ((bin_rows % SLOTS_PER_DAY) == (SLOTS_PER_DAY - 1))
-    close1500_vals[day_idx_all[sel]] = close_bin[sel]
+    def slot_daily(field, slot):
+        vals = np.full(n_min_days, np.nan, dtype=np.float64)
+        sel = in_range & ((bin_rows % SLOTS_PER_DAY) == slot)
+        vals[day_idx_all[sel]] = m[field][sel]
+        return vals
+
+    close1500_vals = slot_daily("close", SLOTS_PER_DAY - 1)
 
     # per-min-day date → day-calendar row → output-relative index.
     # morning_rows[::_MORNING_WINDOW] = each day's slot-FIRST_FEATURE_SLOT (slot 0)

@@ -18,12 +18,8 @@ nav_order: 7
 | 文件 | 定位 | 状态 |
 |---|---|---|
 | `workflow_minute_enhanced_tk10_nd8.yaml` | ★ **现役 Champion**：18 因子 + Top10/n_drop=8 | 生产基线，冻结 |
-| `workflow_minute_enhanced_tk10_nd8_w2.yaml` | W2 OOS 对照窗（test 2025-04→07），防 W1 单窗过拟合 | 研究对照，可重跑 |
-| `workflow_minute_enhanced.yaml` | 上代 champion（experiment `minute_enhanced`，n_drop=15 时代） | legacy，勿用于生产 |
-| `workflow.yaml` | MVP：日频 Alpha158 全链路 | 历史（其 Universe 注释仍是 T-1 lag 旧口径，现役为 T 日盘前更新，见下） |
-| `workflow_smoke.yaml` | 2025 子窗口烟雾测试（train 9 月/valid 1 月/test 2 月） | 验证后可删 |
 
-研究新想法的正确姿势是**复制成新 yml**（如 W2 那样），不要改动 Champion 配置。
+研究新想法的正确姿势是**复制成新 yml**，不要改动 Champion 配置。（2026-09-12 清理：MVP/smoke/legacy/W2 四个历史 yaml 已删，可从 git 历史取回。）
 
 ## Champion YAML 逐段图解
 
