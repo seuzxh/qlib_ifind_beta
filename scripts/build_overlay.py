@@ -52,7 +52,7 @@ def build(start: str = DUMP_START, end: str = DUMP_END) -> dict:
             ok.append(code)
         else:
             miss.append(code)
-        if materialize_minute.materialize_minute_instrument(code):  # 14 minute factors + price_941
+        if materialize_minute.materialize_minute_instrument(code):  # 18 因子+price_941/change_941+label v2 两腿
             min_ok += 1
         else:
             min_miss += 1

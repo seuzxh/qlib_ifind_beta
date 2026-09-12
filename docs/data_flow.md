@@ -215,7 +215,7 @@ deal_price: ["$open", "$close"]   # 买入用开盘、卖出用收盘
 
 qlib 原生支持买卖不同价（[exchange.py:44/157-164](file:///home/zxh/miniconda3/envs/qlib_ifind_beta/lib/python3.12/site-packages/qlib/backtest/exchange.py)）。这样回测的买卖点和 label 完全一致：买在 open[T+1]、卖在 close[T+2]。
 
-> ⚡ **champion 撮合口径（冻结，禁止修改）**：`deal_price=["$price_941","$close"]`——买入用 **T 日 9:41 价**、卖出用 **T+1 收盘**；策略换 [TopkDropoutStrategyTD0](../qlib_ifind_beta/td0_strategy.py)（`shift=1→0` 实现 T 日 9:41 成交），与冻结 label `Ref($close,-1)/$price_941-1` 完全对齐。本节 `$open/$close` 口径是 MVP baseline 历史。
+> ⚡ **champion 撮合口径（冻结，禁止修改）**：`deal_price=["$price_941","$close"]`——买入用 **T 日 9:41 价**、卖出用 **T+1 收盘**；策略换 [TopkDropoutStrategyTD0](../qlib_ifind_beta/td0_strategy.py)（`shift=1→0` 实现 T 日 9:41 成交），与冻结 label `Ref($close,-1)/$price_941-1` 完全对齐（注：label 已于 2026-09-12 升级 v2 分钟口径，见 backtest-log；deal_price 未变）。本节 `$open/$close` 口径是 MVP baseline 历史。
 
 策略：`TopkDropoutStrategy(topk=20, n_drop=5, hold_thresh=1, forbid_all_trade_at_limit=true)`
 - topk=20：每天选预测分最高的 20 只

@@ -16,13 +16,13 @@ nav_order: 3.5
 | 日频行情 7 字段 | `~/.qlib/qlib_data/cn_data` | 2000-01-04 → **2026-09-11**（6470 天），全 A + 指数（sh000300 基准） | 只读 |
 | 1 分钟 K 线 | `~/.qlib/qlib_data/cn_data_1min` | 同区间，**每天恰好 240 根**（09:31–15:00），含 factor 字段 | 只读 |
 | 883926 成分快照缓存 | `data/universe_snapshots.csv` | 2024-01-02 → **2026-09-11**（654 天 × 100 只/天，08:30 cron 自动追加） | 项目数据 |
-| overlay 叠加层 | `data/qlib_root` | symlink 只读源 + 自有 bin（股池/涨跌停线/18 因子/price_941） | 可写（构建产物） |
+| overlay 叠加层 | `data/qlib_root` | symlink 只读源 + 自有 bin（股池/涨跌停线/18 因子/price_941/label v2 两腿 close0941+close1500） | 可写（构建产物） |
 | 模型与预测 | `mlruns/` | Champion/滚动/研究 recorder | 运行资产 |
 | 883926 指数本体 | overlay `features/sh883926/` | 由 `dump_index.py` 从 iFinD dump | ⚠️ close 字段有源级漂移，消费前读该模块注释 |
 
 ### 三类关键数据的获取路径与更新时机
 
-| | 行情源 cn_data / cn_data_1min | universe 成分快照 | 物化因子（18 因子/price_941/涨跌停线） |
+| | 行情源 cn_data / cn_data_1min | universe 成分快照 | 物化因子（18 因子/price_941/label v2 两腿/涨跌停线） |
 |---|---|---|---|
 | **生产者** | 仓库外 cron 管道（kline-fetcher 服务 → qlib bin），**项目只读** | 本项目（iFinD 客户端） | 本项目（本地计算） |
 | **获取路径** | 文件系统直读；数据经 `183.242.5.14:7778` kline-fetcher 落盘 | `universe.fetch_history_snapshots` 调 iFinD `p03473`（增量断点续拉、每 50 天落盘）→ `data/universe_snapshots.csv` → instruments 股池 | `materialize_minute.py` / `materialize.py`（`build_overlay` 内置）从 1min/日频 bin 算出，写 overlay 自有 bin |

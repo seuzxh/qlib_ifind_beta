@@ -37,7 +37,8 @@ nav_order: 2
 │  ┌──────────────── data/qlib_root（可写 overlay 叠加层）──────────────┐  │
 │  │ instruments/highbeta883926.txt  时变股池（T日在册集，5123 codes）    │  │
 │  │ features/<票>/  7 base bin(链接) + change/limit_up/limit_down      │  │
-│  │                 + 18因子 + price_941 + change_941 （真实 day.bin） │  │
+│  │                 + 18因子 + price_941/change_941                │  │
+│  │                 + close0941/close1500（label v2 两腿）（day.bin）│  │
 │  └────────────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────┬───────────────────────────────────────────┘
                                ▼  qrun/run.py（本次 13 秒）

@@ -138,7 +138,7 @@ def _read_1min_fields(code: str):
 
 
 def materialize_minute_instrument(code: str) -> bool:
-    """Read 1min + daily bins for `code`, write 20 day.bins: 14 baseline minute
+    """Read 1min + daily bins for `code`, write 22 day.bins: 14 baseline minute
     factors + 4 enhanced extras (vol_vs_yest_t2/t3/t5 + overnight_gap) +
     $price_941 + $change_941.
 
