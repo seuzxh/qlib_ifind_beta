@@ -78,6 +78,7 @@ Top20 候选池内部，不修改 alpha 分数：
 | Alpha158 网格 + 昨日因子（85 候选四层漏斗） | 网格 14 个 W1 赢家经 W2/PortAna/purged rolling 全部淘汰（vol3m_y 与基线打平、ALL4 稳定更差）；副产品：手动回测幸存者偏差修正 + 训练运行噪声实测（IC ±0.006） | [Alpha158 网格](backtest-log/2026-09-12-alpha158-grid-and-yesterday-factors.md) |
 | 跨日分钟对齐因子（20 候选，gap 替补第二轮） | 同时刻跨日量比/动量在 W1 接近 champion 但 W2/PortAna/purged 全褪色（最佳 xdvol10 段胜率 32%）；gap 不可替代性经两轮替补检验成立 | [分钟对齐因子](backtest-log/2026-09-12-minute-aligned-cross-day-factors.md) |
 | 09:41 第 11 根价量因子（8 候选 + 延迟执行对照） | 唯一双窗+PortAna 领先的 e94rng（振幅）在延迟执行下 W2 蒸发、purged 胜率 32% 淘汰；沉淀"延迟执行对照"方法论与 buy942o 研究资产 | [09:41 因子](backtest-log/2026-09-12-0941-bar-factors.md) |
+| label 改用 close1500（15:00 分钟收盘，两腿同源） | W1 改善为单窗运气，W2 崩塌 + purged 胜率 21%；混合基准"噪声"实为可学习且样本外持续的序列分歧结构，回测结算语义下现役 label 是忠实定义 | [close1500 label](backtest-log/2026-09-12-label-close1500.md) |
 
 ## 验证脚本索引
 
