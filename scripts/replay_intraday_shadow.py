@@ -97,6 +97,182 @@ def _metrics(nav: pd.Series) -> dict:
             "final_nav": float(nav.iloc[-1])}
 
 
+def run_paper_day(source, date: str, positions: pd.DataFrame, cash: float,
+                  output_root: Path, bundle, model_path: Path, qlib_version: str,
+                  snapshots: pd.DataFrame, stored: "pd.Series | None" = None,
+                  require_stored_parity: bool = True
+                  ) -> tuple[pd.DataFrame, float, dict]:
+    """跑一个完整影子日：结转→bars→特征→评分→计划→撮合→估值。
+
+    返回 (positions_after_close, cash_after_buy, day_result_row)。
+    """
+    paths = DayPaths.create(date, output_root)
+    active = make_active_manifest(
+        date=date, experiment=CHAMPION_EXPERIMENT, recorder_id=CHAMPION_RECORDER_ID,
+        model_path=model_path, qlib_version=qlib_version,
+        status="HISTORICAL_REPLAY_LOCKED",
+    )
+    preflight = {"date": date, "status": "PASS", "failures": [],
+                 "data_mode": "LOCAL_HISTORY_ONLY", "model_manifest_valid": True}
+    write_json(paths.file("active_model_manifest.json"), active)
+    write_json(paths.file("preflight.json"), preflight)
+    write_json(paths.file("run_manifest.json"), {**active, "preflight_status": "PASS"})
+    if not positions.empty:
+        positions["hold_days"] = positions["hold_days"].astype(int) + 1
+        positions["sellable_quantity"] = positions["quantity"].astype(int)
+    day_snapshot = snapshots.loc[snapshots["date"] == date].copy()
+    eligible = day_snapshot.loc[day_snapshot["eligible"]].copy()
+    codes = eligible["code"].tolist()
+    all_codes = sorted(set(codes) | set(positions["code"].astype(str)))
+    write_csv(paths.file("universe_raw.csv"), day_snapshot)
+    write_csv(paths.file("universe_eligible.csv"), eligible)
+    universe_quality = {"date": date, "raw_count": len(day_snapshot),
+                        "unique_count": day_snapshot["code"].nunique(),
+                        "eligible_count": len(eligible),
+                        "status": "PASS" if len(day_snapshot) == day_snapshot["code"].nunique() == 100 else "FAIL"}
+    write_json(paths.file("universe_quality.json"), universe_quality)
+    if universe_quality["status"] != "PASS":
+        raise RuntimeError(f"{date}: invalid universe snapshot")
+    write_csv(paths.file("positions_before.csv"), positions)
+
+    raw = source.bars(date, all_codes)
+    factor_bars = None
+    collection = []
+    idempotent = True
+    for minute in FACTOR_TIMES:
+        incoming = raw.loc[raw["bar_time"] == minute].copy()
+        factor_bars = upsert_bars(factor_bars, incoming, date=date)
+        repeated = upsert_bars(factor_bars, incoming, date=date)
+        idempotent &= factor_bars.equals(repeated)
+        collection.append({"date": date, "bar_time": minute, "requested": len(codes),
+                           "received": int(incoming["code"].isin(codes).sum()),
+                           "status": "PASS" if incoming["code"].isin(codes).sum() == len(codes) else "PARTIAL"})
+    write_parquet(paths.file("factor_bars.parquet"), factor_bars)
+    write_csv(paths.file("bar_collection_status.csv"), pd.DataFrame(collection))
+    complete, quality = validate_factor_bars(factor_bars, codes)
+    quality["idempotent_replay"] = bool(idempotent)
+    write_json(paths.file("bar_quality.json"), quality)
+    if quality["status"] != "PASS" or not idempotent:
+        raise RuntimeError(f"{date}: factor bar gate failed: {quality}")
+
+    daily_info = source.daily_info(date, all_codes)
+    fallback_count = sum(
+        info.get("historical_source") == "minute_fallback"
+        for info in daily_info.values()
+    )
+    write_json(paths.file("daily_source_quality.json"), {
+        "date": date,
+        "requested_codes": len(all_codes),
+        "available_codes": len(daily_info),
+        "minute_fallback_count": fallback_count,
+        "status": "PASS" if len(daily_info) >= 80 else "FAIL",
+    })
+    prev_volumes = source.previous_volumes(date, complete)
+    features = assemble_features(factor_bars, prev_volumes, daily_info, complete)
+    if len(features) < 80:
+        raise RuntimeError(f"{date}: only {len(features)} complete features")
+    write_parquet(paths.file("features.parquet"), features)
+    execution_raw = raw.loc[raw["bar_time"] == "09:41"].copy()
+    execution = build_execution_snapshot(execution_raw, daily_info)
+    write_parquet(paths.file("execution_bar_0941.parquet"), execution)
+    scores = _scores(date, features, execution, bundle)
+    write_csv(paths.file("scores.csv"), scores)
+
+    stored_dates = set(pd.to_datetime(stored.index.get_level_values("datetime"))) if stored is not None else set()
+    live_score = scores.set_index("code")["score"]
+    reference_available = pd.Timestamp(date) in stored_dates
+    if reference_available:
+        historical = stored.xs(pd.Timestamp(date), level="datetime")
+        common = historical.index.intersection(live_score.index)
+        max_abs = float((historical.loc[common] - live_score.loc[common]).abs().max())
+        stored_top = historical.sort_values(ascending=False).head(10).index.tolist()
+        replay_top = live_score.sort_values(ascending=False).head(10).index.tolist()
+        common_top = historical.loc[common].sort_values(ascending=False).head(10).index.tolist()
+        common_top_exact = common_top == replay_top
+        common_top_overlap = len(set(common_top) & set(replay_top))
+        parity = {
+            "reference_available": True,
+            "common_count": len(common),
+            "max_abs_score_diff": max_abs,
+            "score_correlation": float(
+                historical.loc[common].corr(live_score.loc[common])
+            ),
+            "stored_candidate_count": len(historical),
+            "replay_candidate_count": len(live_score),
+            "stored_global_top10_overlap": len(set(stored_top) & set(replay_top)),
+            "common_universe_top10_exact": common_top_exact,
+            "common_universe_top10_overlap": common_top_overlap,
+            "universe_drift_codes": sorted(
+                set(historical.index) ^ set(live_score.index)
+            ),
+            "status": "PASS" if max_abs <= 1e-12 else "FAIL",
+        }
+    else:
+        if require_stored_parity:
+            raise RuntimeError(f"{date}: no stored Champion prediction for parity")
+        max_abs = np.nan
+        common_top_exact = np.nan
+        common_top_overlap = np.nan
+        parity = {
+            "reference_available": False,
+            "common_count": 0,
+            "max_abs_score_diff": None,
+            "score_correlation": None,
+            "stored_candidate_count": 0,
+            "replay_candidate_count": len(live_score),
+            "stored_global_top10_overlap": None,
+            "common_universe_top10_exact": None,
+            "common_universe_top10_overlap": None,
+            "universe_drift_codes": [],
+            "status": "UNREFERENCED_FORWARD",
+        }
+    write_json(paths.file("signal_parity.json"), parity)
+    if parity["status"] == "FAIL":
+        raise RuntimeError(f"{date}: Champion parity failed: {parity}")
+
+    decision = plan_topk_dropout(scores, positions, topk=10, n_drop=8, hold_thresh=1)
+    write_json(paths.file("rebalance_decision.json"), decision)
+    sells = build_sell_orders(decision, positions, date)
+    write_csv(paths.file("sell_orders.csv"), sells)
+    sell_fills = _fills(sells, execution, "SELL")
+    write_csv(paths.file("sell_fills.csv"), sell_fills)
+    after_sell, sell_cash = apply_sell_fills(positions, cash, sells, sell_fills)
+    cash = float(sell_cash["cash_after_sell"])
+    write_csv(paths.file("positions_after_sell.csv"), after_sell)
+    write_json(paths.file("cash_after_sell.json"), sell_cash)
+
+    buys = build_buy_orders(decision, after_sell, cash, execution, scores, date)
+    write_csv(paths.file("buy_orders.csv"), buys)
+    buy_fills = _fills(buys, execution, "BUY")
+    write_csv(paths.file("buy_fills.csv"), buy_fills)
+    positions, buy_cash = apply_buy_fills(after_sell, cash, buys, buy_fills)
+    cash = float(buy_cash["cash_after_buy"])
+    write_csv(paths.file("positions_after_close.csv"), positions)
+    write_json(paths.file("cash_after_buy.json"), buy_cash)
+    reconciliation = reconcile_positions(positions, positions.copy(), cash, cash)
+    write_json(paths.file("daily_reconciliation.json"), reconciliation)
+
+    closes = source.valuation_close(date, positions["code"].tolist())
+    market_value = float(sum(int(row.quantity) * closes.get(row.code, 0.0)
+                             for row in positions.itertuples()))
+    nav = cash + market_value
+    row = {"date": date, "status": "PASS", "universe_count": len(codes),
+           "complete_bars": len(complete), "feature_count": len(features),
+           "daily_info_minute_fallback_count": fallback_count,
+           "score_count": len(scores),
+           "score_reference_available": reference_available,
+           "stored_global_top10_overlap": parity.get("stored_global_top10_overlap"),
+           "common_universe_top10_exact": common_top_exact,
+           "common_universe_top10_overlap": common_top_overlap,
+           "universe_drift_count": len(parity["universe_drift_codes"]),
+           "max_abs_score_diff": max_abs, "sell_orders": len(sells),
+           "buy_orders": len(buys), "position_count": len(positions),
+           "cash": cash, "market_value": market_value, "nav": nav,
+           "reconciliation": reconciliation["status"]}
+    write_json(paths.file("shadow_day_result.json"), row)
+    return positions, cash, row
+
+
 def run(start: str, end: str, output_root: Path, initial_cash: float = 1_000_000.0,
         require_stored_parity: bool = True) -> dict:
     import qlib
@@ -110,7 +286,6 @@ def run(start: str, end: str, output_root: Path, initial_cash: float = 1_000_000
     recorder = R.get_recorder(recorder_id=CHAMPION_RECORDER_ID,
                               experiment_name=CHAMPION_EXPERIMENT)
     stored = _series(recorder.load_object("pred.pkl"))
-    stored_dates = set(pd.to_datetime(stored.index.get_level_values("datetime")))
     bundle = load_model_bundle(dates[0], use_online=False)
     model_matches = list((PROJECT_ROOT / "mlruns").glob(
         f"*/{CHAMPION_RECORDER_ID}/artifacts/params.pkl"
@@ -122,177 +297,18 @@ def run(start: str, end: str, output_root: Path, initial_cash: float = 1_000_000
     daily_results = []
 
     for number, date in enumerate(dates, 1):
-        paths = DayPaths.create(date, output_root)
-        active = make_active_manifest(
-            date=date, experiment=CHAMPION_EXPERIMENT, recorder_id=CHAMPION_RECORDER_ID,
-            model_path=model_matches[0], qlib_version=qlib.__version__,
-            status="HISTORICAL_REPLAY_LOCKED",
-        )
-        preflight = {"date": date, "status": "PASS", "failures": [],
-                     "data_mode": "LOCAL_HISTORY_ONLY", "model_manifest_valid": True}
-        write_json(paths.file("active_model_manifest.json"), active)
-        write_json(paths.file("preflight.json"), preflight)
-        write_json(paths.file("run_manifest.json"), {**active, "preflight_status": "PASS"})
-        if not positions.empty:
-            positions["hold_days"] = positions["hold_days"].astype(int) + 1
-            positions["sellable_quantity"] = positions["quantity"].astype(int)
-        day_snapshot = snapshots.loc[snapshots["date"] == date].copy()
-        eligible = day_snapshot.loc[day_snapshot["eligible"]].copy()
-        codes = eligible["code"].tolist()
-        all_codes = sorted(set(codes) | set(positions["code"].astype(str)))
-        write_csv(paths.file("universe_raw.csv"), day_snapshot)
-        write_csv(paths.file("universe_eligible.csv"), eligible)
-        universe_quality = {"date": date, "raw_count": len(day_snapshot),
-                            "unique_count": day_snapshot["code"].nunique(),
-                            "eligible_count": len(eligible),
-                            "status": "PASS" if len(day_snapshot) == day_snapshot["code"].nunique() == 100 else "FAIL"}
-        write_json(paths.file("universe_quality.json"), universe_quality)
-        if universe_quality["status"] != "PASS":
-            raise RuntimeError(f"{date}: invalid universe snapshot")
-        write_csv(paths.file("positions_before.csv"), positions)
-
-        raw = source.bars(date, all_codes)
-        factor_bars = None
-        collection = []
-        idempotent = True
-        for minute in FACTOR_TIMES:
-            incoming = raw.loc[raw["bar_time"] == minute].copy()
-            factor_bars = upsert_bars(factor_bars, incoming, date=date)
-            repeated = upsert_bars(factor_bars, incoming, date=date)
-            idempotent &= factor_bars.equals(repeated)
-            collection.append({"date": date, "bar_time": minute, "requested": len(codes),
-                               "received": int(incoming["code"].isin(codes).sum()),
-                               "status": "PASS" if incoming["code"].isin(codes).sum() == len(codes) else "PARTIAL"})
-        write_parquet(paths.file("factor_bars.parquet"), factor_bars)
-        write_csv(paths.file("bar_collection_status.csv"), pd.DataFrame(collection))
-        complete, quality = validate_factor_bars(factor_bars, codes)
-        quality["idempotent_replay"] = bool(idempotent)
-        write_json(paths.file("bar_quality.json"), quality)
-        if quality["status"] != "PASS" or not idempotent:
-            raise RuntimeError(f"{date}: factor bar gate failed: {quality}")
-
-        daily_info = source.daily_info(date, all_codes)
-        fallback_count = sum(
-            info.get("historical_source") == "minute_fallback"
-            for info in daily_info.values()
-        )
-        write_json(paths.file("daily_source_quality.json"), {
-            "date": date,
-            "requested_codes": len(all_codes),
-            "available_codes": len(daily_info),
-            "minute_fallback_count": fallback_count,
-            "status": "PASS" if len(daily_info) >= 80 else "FAIL",
-        })
-        prev_volumes = source.previous_volumes(date, complete)
-        features = assemble_features(factor_bars, prev_volumes, daily_info, complete)
-        if len(features) < 80:
-            raise RuntimeError(f"{date}: only {len(features)} complete features")
-        write_parquet(paths.file("features.parquet"), features)
-        execution_raw = raw.loc[raw["bar_time"] == "09:41"].copy()
-        execution = build_execution_snapshot(execution_raw, daily_info)
-        write_parquet(paths.file("execution_bar_0941.parquet"), execution)
-        scores = _scores(date, features, execution, bundle)
-        write_csv(paths.file("scores.csv"), scores)
-
-        live_score = scores.set_index("code")["score"]
-        reference_available = pd.Timestamp(date) in stored_dates
-        if reference_available:
-            historical = stored.xs(pd.Timestamp(date), level="datetime")
-            common = historical.index.intersection(live_score.index)
-            max_abs = float((historical.loc[common] - live_score.loc[common]).abs().max())
-            stored_top = historical.sort_values(ascending=False).head(10).index.tolist()
-            replay_top = live_score.sort_values(ascending=False).head(10).index.tolist()
-            common_top = historical.loc[common].sort_values(ascending=False).head(10).index.tolist()
-            common_top_exact = common_top == replay_top
-            common_top_overlap = len(set(common_top) & set(replay_top))
-            parity = {
-                "reference_available": True,
-                "common_count": len(common),
-                "max_abs_score_diff": max_abs,
-                "score_correlation": float(
-                    historical.loc[common].corr(live_score.loc[common])
-                ),
-                "stored_candidate_count": len(historical),
-                "replay_candidate_count": len(live_score),
-                "stored_global_top10_overlap": len(set(stored_top) & set(replay_top)),
-                "common_universe_top10_exact": common_top_exact,
-                "common_universe_top10_overlap": common_top_overlap,
-                "universe_drift_codes": sorted(
-                    set(historical.index) ^ set(live_score.index)
-                ),
-                "status": "PASS" if max_abs <= 1e-12 else "FAIL",
-            }
-        else:
-            if require_stored_parity:
-                raise RuntimeError(f"{date}: no stored Champion prediction for parity")
-            max_abs = np.nan
-            common_top_exact = np.nan
-            common_top_overlap = np.nan
-            parity = {
-                "reference_available": False,
-                "common_count": 0,
-                "max_abs_score_diff": None,
-                "score_correlation": None,
-                "stored_candidate_count": 0,
-                "replay_candidate_count": len(live_score),
-                "stored_global_top10_overlap": None,
-                "common_universe_top10_exact": None,
-                "common_universe_top10_overlap": None,
-                "universe_drift_codes": [],
-                "status": "UNREFERENCED_FORWARD",
-            }
-        write_json(paths.file("signal_parity.json"), parity)
-        if parity["status"] == "FAIL":
-            raise RuntimeError(f"{date}: Champion parity failed: {parity}")
-
-        decision = plan_topk_dropout(scores, positions, topk=10, n_drop=8, hold_thresh=1)
-        write_json(paths.file("rebalance_decision.json"), decision)
-        sells = build_sell_orders(decision, positions, date)
-        write_csv(paths.file("sell_orders.csv"), sells)
-        sell_fills = _fills(sells, execution, "SELL")
-        write_csv(paths.file("sell_fills.csv"), sell_fills)
-        after_sell, sell_cash = apply_sell_fills(positions, cash, sells, sell_fills)
-        cash = float(sell_cash["cash_after_sell"])
-        write_csv(paths.file("positions_after_sell.csv"), after_sell)
-        write_json(paths.file("cash_after_sell.json"), sell_cash)
-
-        buys = build_buy_orders(decision, after_sell, cash, execution, scores, date)
-        write_csv(paths.file("buy_orders.csv"), buys)
-        buy_fills = _fills(buys, execution, "BUY")
-        write_csv(paths.file("buy_fills.csv"), buy_fills)
-        positions, buy_cash = apply_buy_fills(after_sell, cash, buys, buy_fills)
-        cash = float(buy_cash["cash_after_buy"])
-        write_csv(paths.file("positions_after_close.csv"), positions)
-        write_json(paths.file("cash_after_buy.json"), buy_cash)
-        reconciliation = reconcile_positions(positions, positions.copy(), cash, cash)
-        write_json(paths.file("daily_reconciliation.json"), reconciliation)
-
-        closes = source.valuation_close(date, positions["code"].tolist())
-        market_value = float(sum(int(row.quantity) * closes.get(row.code, 0.0)
-                                 for row in positions.itertuples()))
-        nav = cash + market_value
-        row = {"date": date, "status": "PASS", "universe_count": len(codes),
-               "complete_bars": len(complete), "feature_count": len(features),
-               "daily_info_minute_fallback_count": fallback_count,
-               "score_count": len(scores),
-               "score_reference_available": reference_available,
-               "stored_global_top10_overlap": parity.get("stored_global_top10_overlap"),
-               "common_universe_top10_exact": common_top_exact,
-               "common_universe_top10_overlap": common_top_overlap,
-               "universe_drift_count": len(parity["universe_drift_codes"]),
-               "max_abs_score_diff": max_abs, "sell_orders": len(sells),
-               "buy_orders": len(buys), "position_count": len(positions),
-               "cash": cash, "market_value": market_value, "nav": nav,
-               "reconciliation": reconciliation["status"]}
+        positions, cash, row = run_paper_day(
+            source, date, positions, cash, output_root, bundle, model_matches[0],
+            qlib.__version__, snapshots, stored=stored,
+            require_stored_parity=require_stored_parity)
         daily_results.append(row)
-        write_json(paths.file("shadow_day_result.json"), row)
         parity_text = (
-            f"{max_abs:.1e}/common_top10={common_top_overlap}"
-            if reference_available else "forward-unreferenced"
+            f"{row['max_abs_score_diff']:.1e}/common_top10={row['common_universe_top10_overlap']}"
+            if row["score_reference_available"] else "forward-unreferenced"
         )
-        print(f"[{number:02d}/{len(dates)}] {date} PASS features={len(features)} "
-              f"parity={parity_text} "
-              f"drift={len(parity['universe_drift_codes'])} nav={nav:,.2f}", flush=True)
+        print(f"[{number:02d}/{len(dates)}] {date} PASS features={row['feature_count']} "
+              f"parity={parity_text} drift={row['universe_drift_count']} "
+              f"nav={row['nav']:,.2f}", flush=True)
 
     daily = pd.DataFrame(daily_results)
     referenced = daily.loc[daily["score_reference_available"]]
