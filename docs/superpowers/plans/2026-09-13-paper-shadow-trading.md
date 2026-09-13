@@ -21,16 +21,14 @@
 
 ---
 
-### Task 1: 提取 `run_paper_day` + `age_positions`（纯重构）
+### Task 1: 提取 `run_paper_day`（纯重构）
 
 **Files:**
 - Modify: `scripts/replay_intraday_shadow.py`
-- Test: `tests/test_paper_shadow.py`（新建）
 
 **Interfaces:**
 - Produces（后续 Task 依赖的精确签名）:
   ```python
-  def age_positions(positions: pd.DataFrame) -> pd.DataFrame
   def run_paper_day(source, date: str, positions: pd.DataFrame, cash: float,
                     output_root: Path, bundle, model_path: Path, qlib_version: str,
                     snapshots: pd.DataFrame, stored: "pd.Series | None" = None,
@@ -39,47 +37,11 @@
   # 返回 (positions_after_close, cash_after_buy, day_result_row)
   ```
 
-- [ ] **Step 1: 写 age_positions 的失败测试**
+- [ ] **Step 1: 重构 `replay_intraday_shadow.py`**
 
-新建 `tests/test_paper_shadow.py`：
-
-```python
-import json
-
-import pandas as pd
-
-
-def test_age_positions_increments_and_releases():
-    from scripts.replay_intraday_shadow import age_positions
-
-    positions = pd.DataFrame([{"code": "SH600000", "quantity": 100,
-                               "sellable_quantity": 0, "hold_days": 0}])
-    aged = age_positions(positions)
-    assert aged.iloc[0]["hold_days"] == 1
-    assert aged.iloc[0]["sellable_quantity"] == 100
-    assert positions.iloc[0]["hold_days"] == 0  # 不原地改入参
-```
-
-- [ ] **Step 2: 运行确认失败**
-
-Run: `conda run -n qlib_ifind_beta python -m pytest tests/test_paper_shadow.py -q`
-Expected: FAIL（`ImportError: cannot import name 'age_positions'`）
-
-- [ ] **Step 3: 重构 `replay_intraday_shadow.py`**
-
-在 `_metrics` 函数之后、`run` 之前新增两个模块级函数：
+在 `_metrics` 函数之后、`run` 之前新增模块级函数：
 
 ```python
-def age_positions(positions: pd.DataFrame) -> pd.DataFrame:
-    """跨日结转：hold_days + 1；A 股 T+1，隔日全仓可卖。空表原样返回。"""
-    if positions.empty:
-        return positions
-    out = positions.copy()
-    out["hold_days"] = out["hold_days"].astype(int) + 1
-    out["sellable_quantity"] = out["quantity"].astype(int)
-    return out
-
-
 def run_paper_day(source, date: str, positions: pd.DataFrame, cash: float,
                   output_root: Path, bundle, model_path: Path, qlib_version: str,
                   snapshots: pd.DataFrame, stored: "pd.Series | None" = None,
@@ -91,20 +53,18 @@ def run_paper_day(source, date: str, positions: pd.DataFrame, cash: float,
     """
 ```
 
-`run_paper_day` 函数体 = 现 `run()` 循环体（`for number, date in enumerate(dates, 1):` 之内、`daily_results.append(row)` 之前的全部代码）逐行搬入，做且仅做以下替换：
+`run_paper_day` 函数体 = 现 `run()` 循环体（`for number, date in enumerate(dates, 1):` 之内、`daily_results.append(row)` 之前的全部代码）逐行搬入（开头三行持仓结转原样保留），做且仅做以下替换：
 
-1. 开头加 `positions = age_positions(positions)`，替换原三行
-   `if not positions.empty: positions["hold_days"] = ...; positions["sellable_quantity"] = ...`
-2. `paths = DayPaths.create(date, output_root)`（原样）
-3. universe 快照：函数体内改为
+1. `paths = DayPaths.create(date, output_root)`（原样）
+2. universe 快照：函数体内改为
    `day_snapshot = snapshots.loc[snapshots["date"] == date].copy()`
    （`snapshots` 由参数传入，含 `date/code/eligible` 列；`run()` 传全量段帧）
-4. parity 块：`stored_dates` 改为
+3. parity 块：`stored_dates` 改为
    `stored_dates = set(pd.to_datetime(stored.index.get_level_values("datetime"))) if stored is not None else set()`；
    `reference_available = pd.Timestamp(date) in stored_dates`
-5. `make_active_manifest(..., qlib_version=qlib_version)`（原用闭包 `qlib.__version__`）
-6. 函数返回 `return positions, cash, row`（`row` 即写进 `shadow_day_result.json` 的 dict）
-7. 循环内的 `print(...)` 移出——由调用方打印
+4. `make_active_manifest(..., qlib_version=qlib_version)`（原用闭包 `qlib.__version__`）
+5. 函数返回 `return positions, cash, row`（`row` 即写进 `shadow_day_result.json` 的 dict）
+6. 循环内的 `print(...)` 移出——由调用方打印
 
 `run()` 改为：初始化段（snapshots/source/recorder/stored/bundle/model_matches/positions/cash）不动，循环体替换为：
 
@@ -124,12 +84,7 @@ def run_paper_day(source, date: str, positions: pd.DataFrame, cash: float,
               f"nav={row['nav']:,.2f}", flush=True)
 ```
 
-- [ ] **Step 4: 单测通过**
-
-Run: `conda run -n qlib_ifind_beta python -m pytest tests/test_paper_shadow.py -q`
-Expected: PASS
-
-- [ ] **Step 5: 重构回归——2 日真实回放**
+- [ ] **Step 2: 重构回归——2 日真实回放（本 Task 的守卫）**
 
 Run:
 ```bash
@@ -140,12 +95,12 @@ conda run -n qlib_ifind_beta --no-capture-output python -W ignore \
 Expected: `trading_days: 2`、`status: PASS`、`all_reconciled: true`、
 `max_referenced_score_difference == 0.0`（与重构前行为一致）
 
-- [ ] **Step 6: 全量测试 + 提交**
+- [ ] **Step 3: 全量测试 + 提交**
 
 ```bash
 conda run -n qlib_ifind_beta python -m pytest -q
-git add scripts/replay_intraday_shadow.py tests/test_paper_shadow.py
-git commit -m "refactor(replay): 提取 run_paper_day/age_positions — 日循环体模块级复用"
+git add scripts/replay_intraday_shadow.py
+git commit -m "refactor(replay): 提取 run_paper_day — 日循环体模块级复用"
 ```
 
 ---
@@ -166,9 +121,14 @@ git commit -m "refactor(replay): 提取 run_paper_day/age_positions — 日循�
   def append_nav(nav_path: Path, row: dict) -> None
   ```
 
-- [ ] **Step 1: 写失败测试（追加到 tests/test_paper_shadow.py）**
+- [ ] **Step 1: 写失败测试（新建 tests/test_paper_shadow.py）**
 
 ```python
+import json
+
+import pandas as pd
+
+
 def _mk_day(root, date, cash, code="SH600000", qty=100):
     d = root / date
     d.mkdir(parents=True)
@@ -232,12 +192,10 @@ from qlib_ifind_beta.config import DAY_CAL, MIN_CAL, OVERLAY_ROOT, PROJECT_ROOT
 ROOT = PROJECT_ROOT / "data" / "paper_shadow"
 NAV = ROOT / "nav.csv"
 
-_DATE_DIR = "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
-
 
 def load_latest_state(root: Path, before: str) -> tuple[str, pd.DataFrame, float]:
     """最新 <before 日期目录 即账本；返回 (date, positions, cash)。"""
-    days = sorted(p.name for p in root.glob(_DATE_DIR) if p.name < before)
+    days = sorted(p.name for p in root.iterdir() if p.is_dir() and p.name < before)
     if not days:
         raise RuntimeError(f"no ledger day before {before} under {root}")
     last = root / days[-1]
@@ -282,7 +240,7 @@ git commit -m "feat(paper): 账本读取 load_latest_state + nav 追加（幂等
 
 **Interfaces:**
 - Consumes: Task 1 的 `run_paper_day`、Task 2 的 `load_latest_state`/`append_nav`/`ROOT`/`NAV`；
-  既有 `_eligible_snapshots`/`_series`/`_metrics`（`scripts.replay_intraday_shadow`）、
+  既有 `_eligible_snapshots`/`_metrics`（`scripts.replay_intraday_shadow`）、
   `HistoricalReplaySource`、`load_model_bundle`
 - Produces: CLI `paper_shadow.py day --date T` / `report`
 
@@ -323,9 +281,7 @@ from qlib_ifind_beta.config import CHAMPION_EXPERIMENT, CHAMPION_RECORDER_ID, FE
 
 def _snapshot_has(date: str) -> bool:
     cache = PROJECT_ROOT / "data" / "universe_snapshots.csv"
-    if not cache.exists():
-        return False
-    return date in set(pd.read_csv(cache, usecols=["date"])["date"].astype(str).str[:10])
+    return cache.exists() and f"{date}," in cache.read_text()
 
 
 def _bars_ready(date: str, probe: str | None = None) -> bool:
@@ -344,8 +300,8 @@ def _bars_ready(date: str, probe: str | None = None) -> bool:
     return 0 <= idx < vol.size and pd.notna(vol[idx])
 
 
-def day(date: str, root: Path = ROOT, timeout_minutes: int = 60) -> dict:
-    root.mkdir(parents=True, exist_ok=True)
+def day(date: str) -> dict:
+    ROOT.mkdir(parents=True, exist_ok=True)
     # 交易日门禁：幂等补拉当日快照（update_universe 内部对节假日静默跳过）
     subprocess.run([sys.executable, "-m", "scripts.update_universe", "--end", date],
                    cwd=PROJECT_ROOT, check=False)
@@ -353,31 +309,28 @@ def day(date: str, root: Path = ROOT, timeout_minutes: int = 60) -> dict:
         print(f"{date}: no constituent snapshot (holiday?) — skip")
         return {"date": date, "status": "SKIPPED_HOLIDAY"}
     # 数据门禁：轮询等 15:30 同步落 bin（超时=同步事故，exit 非 0）
-    deadline = time.time() + timeout_minutes * 60
+    deadline = time.time() + 60 * 60
     while not _bars_ready(date):
         if time.time() >= deadline:
             raise RuntimeError(f"sync gate timeout for {date}")
         time.sleep(60)
     import qlib
     qlib.init(provider_uri=str(OVERLAY_ROOT), region="cn")
-    from qlib.workflow import R
     from qlib_ifind_beta.live.historical_replay import HistoricalReplaySource
     from qlib_ifind_beta.model_ensemble import load_model_bundle
-    from scripts.replay_intraday_shadow import _eligible_snapshots, _series, run_paper_day
+    from scripts.replay_intraday_shadow import _eligible_snapshots, run_paper_day
 
-    last, positions, cash = load_latest_state(root, date)
+    _, positions, cash = load_latest_state(ROOT, date)
     snapshots, _ = _eligible_snapshots(date, date)
-    stored = _series(R.get_recorder(
-        recorder_id=CHAMPION_RECORDER_ID, experiment_name=CHAMPION_EXPERIMENT
-    ).load_object("pred.pkl"))
     bundle = load_model_bundle(date, use_online=False)
     matches = list((PROJECT_ROOT / "mlruns").glob(
         f"*/{CHAMPION_RECORDER_ID}/artifacts/params.pkl"))
     if len(matches) != 1:
         raise RuntimeError(f"expected one Champion model, found {len(matches)}")
+    # stored=None：forward 日期恒晚于 pred.pkl 末位（2026-07-02），UNREFERENCED_FORWARD 分支
     positions, cash, row = run_paper_day(
-        HistoricalReplaySource(), date, positions, cash, root, bundle, matches[0],
-        qlib.__version__, snapshots, stored=stored, require_stored_parity=False)
+        HistoricalReplaySource(), date, positions, cash, ROOT, bundle, matches[0],
+        qlib.__version__, snapshots, stored=None, require_stored_parity=False)
     append_nav(NAV, row)
     print(json.dumps(row, ensure_ascii=False, indent=2, default=str))
     return row
@@ -416,7 +369,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: 测试通过**
 
 Run: `conda run -n qlib_ifind_beta python -m pytest tests/test_paper_shadow.py -q`
-Expected: PASS（4 个用例）
+Expected: PASS（3 个用例）
 
 - [ ] **Step 5: CLI 冒烟**
 
@@ -618,8 +571,11 @@ Expected: nav.csv 多出 2026-09-14 一行；若缺，手动 `day --date 2026-09
 ## Self-Review 记录
 
 - Spec 覆盖：§3 回放命令=Task 5、§4 三项改动=Task 1/2+3/4、§5 门禁与数据流=Task 3、
-  §6 fail-closed=Task 3（SKIPPED_HOLIDAY/timeout/raise）+Task 5 补跑、§7 测试=Task 1/2/3 + Task 5 实跑
-- 占位符：无 TBD/示意代码（已修正 Task 1 一处示意签名为真实签名）
+  §6 fail-closed=Task 3（SKIPPED_HOLIDAY/timeout/raise）+Task 5 补跑、§7 测试=Task 2/3 + Task 1/5 实跑回归
+- 占位符：无 TBD/示意代码
 - 类型一致：`run_paper_day` 返回三元组在 Task 1 定义、Task 3 消费；`load_latest_state`
   返回 `(str, DataFrame, float)` 与 Task 2 测试、Task 3 用法一致；`_bars_ready(date, probe)`
   的 `probe` 参数仅测试注入用
+- ponytail-review 修订（2026-09-13，-22 行）：删 age_positions 独立函数+测试（守卫改为
+  Task 1 的 2 日回放回归）；day() 删 stored 加载（forward 恒晚于 pred.pkl 末位）与
+  root/timeout 参数；_DATE_DIR glob→iterdir；_snapshot_has→子串判定
