@@ -37,3 +37,6 @@ HFLGB Champion、Top10/n_drop=8；第一阶段只生成 CSV，由人工下单。
 2026-07-14 后无新信号记录、恢复待定。2026-08-15 合并 Codex 研究线（risk_overlay、
 purged rolling 验证脚本、joint TVT 档案——未通过准入，Champion 不变）。
 候选模型保持 `CANDIDATE/REVIEW`，禁止自动晋升。
+
+2026-09-13 上线全自动影子模拟盘：回放引擎日增量化（`paper_shadow.py` + 16:30 cron），
+先补齐 7/21→9/11 再前向；评分恒用冻结 Champion。
