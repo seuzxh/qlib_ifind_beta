@@ -16,6 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 
+from qlib_ifind_beta.binio import read_bin as _read_bin
+from qlib_ifind_beta.config import CHAMPION_EXPERIMENT, CHAMPION_RECORDER_ID, FEATURES_1MIN_SRC
 from qlib_ifind_beta.config import DAY_CAL, MIN_CAL, OVERLAY_ROOT, PROJECT_ROOT
 
 ROOT = PROJECT_ROOT / "data" / "paper_shadow"
@@ -42,9 +44,82 @@ def append_nav(nav_path: Path, row: dict) -> None:
     frame.to_csv(nav_path, index=False)
 
 
-def main() -> None:  # Task 3 填充子命令
+def _snapshot_has(date: str) -> bool:
+    cache = PROJECT_ROOT / "data" / "universe_snapshots.csv"
+    return cache.exists() and f"{date}," in cache.read_text()
+
+
+def _bars_ready(date: str, probe: str | None = None) -> bool:
+    """T 已进 day 日历，且样本股 1min bin 的 09:41 行有有限值（防 daily 先于 1min 完成）。"""
+    cal = {line.strip() for line in Path(DAY_CAL).read_text().splitlines() if line.strip()}
+    if date not in cal:
+        return False
+    lines = [line.strip() for line in Path(MIN_CAL).read_text().splitlines() if line.strip()]
+    wanted = f"{date} 09:41:00"
+    if wanted not in lines:
+        return False
+    path = Path(probe) if probe else (
+        FEATURES_1MIN_SRC / "sh600004" / "volume.1min.bin")
+    si, vol = _read_bin(path)
+    idx = lines.index(wanted) - si
+    return 0 <= idx < vol.size and pd.notna(vol[idx])
+
+
+def day(date: str) -> dict:
+    ROOT.mkdir(parents=True, exist_ok=True)
+    # 交易日门禁：幂等补拉当日快照（update_universe 内部对节假日静默跳过）
+    subprocess.run([sys.executable, "-m", "scripts.update_universe", "--end", date],
+                   cwd=PROJECT_ROOT, check=False)
+    if not _snapshot_has(date):
+        print(f"{date}: no constituent snapshot (holiday?) — skip")
+        return {"date": date, "status": "SKIPPED_HOLIDAY"}
+    # 数据门禁：轮询等 15:30 同步落 bin（超时=同步事故，exit 非 0）
+    deadline = time.time() + 60 * 60
+    while not _bars_ready(date):
+        if time.time() >= deadline:
+            raise RuntimeError(f"sync gate timeout for {date}")
+        time.sleep(60)
+    import qlib
+    qlib.init(provider_uri=str(OVERLAY_ROOT), region="cn")
+    from qlib_ifind_beta.live.historical_replay import HistoricalReplaySource
+    from qlib_ifind_beta.model_ensemble import load_model_bundle
+    from scripts.replay_intraday_shadow import _eligible_snapshots, run_paper_day
+
+    _, positions, cash = load_latest_state(ROOT, date)
+    snapshots, _ = _eligible_snapshots(date, date)
+    bundle = load_model_bundle(date, use_online=False)
+    matches = list((PROJECT_ROOT / "mlruns").glob(
+        f"*/{CHAMPION_RECORDER_ID}/artifacts/params.pkl"))
+    if len(matches) != 1:
+        raise RuntimeError(f"expected one Champion model, found {len(matches)}")
+    # stored=None：forward 日期恒晚于 pred.pkl 末位（2026-07-02），UNREFERENCED_FORWARD 分支
+    positions, cash, row = run_paper_day(
+        HistoricalReplaySource(), date, positions, cash, ROOT, bundle, matches[0],
+        qlib.__version__, snapshots, stored=None, require_stored_parity=False)
+    append_nav(NAV, row)
+    print(json.dumps(row, ensure_ascii=False, indent=2, default=str))
+    return row
+
+
+def report(root: Path = ROOT) -> dict:
+    from scripts.replay_intraday_shadow import _metrics
+
+    nav = pd.read_csv(root / "nav.csv")
+    result = {"days": len(nav), **_metrics(nav.set_index("date")["nav"])}
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return result
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    cmd = sub.add_parser("day"); cmd.add_argument("--date", required=True)
+    sub.add_parser("report")
     args = parser.parse_args()
+    if args.command == "day":
+        day(args.date)
+    else:
+        report()
 
 
 if __name__ == "__main__":

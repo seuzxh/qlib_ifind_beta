@@ -33,3 +33,21 @@ def test_append_nav_appends_and_is_idempotent_per_date(tmp_path):
     frame = pd.read_csv(nav)
     assert frame["date"].tolist() == ["2026-09-10", "2026-09-11"]
     assert frame["nav"].tolist() == [3.0, 5.0]
+
+
+def test_bars_ready_requires_calendar_and_bar(tmp_path, monkeypatch):
+    from scripts import paper_shadow
+
+    day_cal = tmp_path / "day.txt"
+    day_cal.write_text("2026-09-11\n")
+    min_cal = tmp_path / "1min.txt"
+    min_cal.write_text("2026-09-11 09:41:00\n")
+    monkeypatch.setattr(paper_shadow, "DAY_CAL", str(day_cal))
+    monkeypatch.setattr(paper_shadow, "MIN_CAL", str(min_cal))
+
+    def fake_read_bin(path):
+        return 0, pd.array([100.0], dtype="float32")  # si=0, 有限值
+
+    monkeypatch.setattr(paper_shadow, "_read_bin", fake_read_bin)
+    assert paper_shadow._bars_ready("2026-09-11", probe=str(tmp_path / "v.bin"))
+    assert not paper_shadow._bars_ready("2026-09-14", probe=str(tmp_path / "v.bin"))
