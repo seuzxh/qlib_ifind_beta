@@ -23,6 +23,20 @@ def test_load_latest_state_picks_latest_before(tmp_path):
     assert positions.iloc[0]["code"] == "SH600000"
 
 
+def test_load_latest_state_skips_partial_day_dirs(tmp_path):
+    from scripts.paper_shadow import load_latest_state
+
+    _mk_day(tmp_path, "2026-09-10", 100.0)
+    partial = tmp_path / "2026-09-11"
+    partial.mkdir()
+    pd.DataFrame([{"code": "SH600000", "quantity": 100,
+                   "sellable_quantity": 0, "hold_days": 0}]
+                 ).to_csv(partial / "positions_after_close.csv", index=False)
+    day, positions, cash = load_latest_state(tmp_path, "2026-09-14")
+    assert day == "2026-09-10"
+    assert cash == 100.0
+
+
 def test_append_nav_appends_and_is_idempotent_per_date(tmp_path):
     from scripts.paper_shadow import append_nav
 

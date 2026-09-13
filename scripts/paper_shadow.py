@@ -25,10 +25,19 @@ NAV = ROOT / "nav.csv"
 
 
 def load_latest_state(root: Path, before: str) -> tuple[str, pd.DataFrame, float]:
-    """最新 <before 日期目录 即账本；返回 (date, positions, cash)。"""
-    days = sorted(p.name for p in root.iterdir() if p.is_dir() and p.name < before)
+    """最新完整 <before 日期目录 即账本；返回 (date, positions, cash)。
+
+    完整日 = 同时含 positions_after_close.csv 与 cash_after_buy.json；
+    失败/残缺日（spec §6）不推进账本，自动跨过取更早的最新完整日。
+    """
+    days = sorted(
+        p.name for p in root.iterdir()
+        if p.is_dir() and p.name < before
+        and (p / "positions_after_close.csv").exists()
+        and (p / "cash_after_buy.json").exists()
+    )
     if not days:
-        raise RuntimeError(f"no ledger day before {before} under {root}")
+        raise RuntimeError(f"no complete ledger day before {before} under {root}")
     last = root / days[-1]
     positions = pd.read_csv(last / "positions_after_close.csv")
     cash = float(json.loads((last / "cash_after_buy.json").read_text())["cash_after_buy"])
@@ -68,8 +77,12 @@ def _bars_ready(date: str, probe: str | None = None) -> bool:
 def day(date: str) -> dict:
     ROOT.mkdir(parents=True, exist_ok=True)
     # 交易日门禁：幂等补拉当日快照（update_universe 内部对节假日静默跳过）
-    subprocess.run([sys.executable, "-m", "scripts.update_universe", "--end", date],
-                   cwd=PROJECT_ROOT, check=False)
+    proc = subprocess.run([sys.executable, "-m", "scripts.update_universe", "--end", date],
+                          cwd=PROJECT_ROOT, check=False)
+    if proc.returncode != 0 and not _snapshot_has(date):
+        # 工作日快照仍缺失但拉取已失败（网络/token 事故）——不是节假日，fail-closed
+        raise RuntimeError(
+            f"universe fetch failed for {date} (rc={proc.returncode}), snapshot missing")
     if not _snapshot_has(date):
         print(f"{date}: no constituent snapshot (holiday?) — skip")
         return {"date": date, "status": "SKIPPED_HOLIDAY"}

@@ -6,11 +6,10 @@ nav_order: 8.5
 
 # 模拟盘（纸面跟踪）流程
 
-第一阶段不接券商 API：**盘中**用六步子命令生成订单 CSV 由人工下单，
-**盘后**用 `live_forward.py` 以模拟撮合口径记录信号、隔日结算并累积净值。
-（注：`live_forward.py` 及 live 旧模块已于 2026-09-12 清理删除；纸面跟踪自 2026-07-14
-起暂停，恢复时从 git 历史取回或按 6 步生产链路重建。）
-两条线共用同一份合同（18 因子 + 冻结 Champion + Top10/n_drop=8），互为复算校验。
+旧 `live_forward.py` 纸面线已于 2026-09-12 删除。现役模拟盘为 2026-09-13 上线的
+全自动影子线：回放引擎日增量化（`paper_shadow.py day`），每交易日 16:30 由 cron
+驱动，自动结算并追加净值。盘中仍由六步子命令生成订单 CSV 人工下单，两条线共用
+同一份合同（18 因子 + 冻结 Champion + Top10/n_drop=8），细节见下方章节。
 
 ![模拟盘全流程](assets/paper-trading/flow.png)
 
@@ -62,6 +61,10 @@ conda run -n qlib_ifind_beta python scripts/paper_shadow.py report
 - 账本：`data/paper_shadow/<date>/`（可审计全套产物）+ `nav.csv`（累计净值）
 - 门禁：节假日跳过（无成分快照）；同步超时 60 分钟 exit 1；失败日不推进账本，可 `day --date` 补跑
 - 评分：冻结 Champion `93d435e0`；不验证盘中实时路径（六步链职责）
+- 已知分叉：rally 日（早盘封板股多）特征数可低于 80——模拟盘按机制下限（>=2×topk）
+  继续交易，而盘中六步生产链 `intraday_production.py` 仍按 >=80 门槛 fail-closed；
+  两线在这些日无交叉校验（2026-09-13 裁决，
+  见 `docs/superpowers/plans/2026-09-13-paper-shadow-trading.md`）
 
 | 文件 | 现状 |
 | --- | --- |
