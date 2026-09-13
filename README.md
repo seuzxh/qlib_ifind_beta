@@ -17,7 +17,9 @@
 - 回放模拟收益 +39.27%、最大回撤 -19.81%；该结果不包含真实延迟和券商滑点。
 - 2026-07-02 候选模型保持 `CANDIDATE/REVIEW`，未自动发布。
 - 真实交易日影子/纸面跟踪已运行：2026-07-03～07-14 共 7 个信号日、6 个结算日
-  （最新结算 2026-07-13，`data/live_nav.csv`）；2026-07-14 后无新信号记录，恢复时间待定。
+  （最新结算 2026-07-13，`data/live_nav.csv`，旧线已归档）。
+- 2026-09-13 上线全自动影子模拟盘（`paper_shadow.py` + 16:30 cron）：回放补齐
+  7/21→9/11 共 39 日（净 +12.17%，最大回撤 -11.11%，期末 1,121,694），前向自动续跑。
 - 2026-08-15 合并 Codex 研究线：`risk_overlay.py`、purged rolling 验证脚本、
   joint TVT 研究档案（`docs/backtest-log/2026-07-17-rebound-pullback-joint-tvt.md`，
   结论为未通过生产准入，Champion 不变）。
@@ -59,6 +61,10 @@ conda run -n qlib_ifind_beta python scripts/retrain.py --test-start YYYY-MM-DD
 
 # 历史影子回放
 conda run -n qlib_ifind_beta python scripts/replay_intraday_shadow.py
+
+# 影子模拟盘：手动补跑失败日 / 查看累计净值（cron 16:30 自动前向）
+conda run -n qlib_ifind_beta python scripts/paper_shadow.py day --date YYYY-MM-DD
+conda run -n qlib_ifind_beta python scripts/paper_shadow.py report
 ```
 
 ## 目录

@@ -209,14 +209,17 @@ conda run -n qlib_ifind_beta python scripts/replay_intraday_shadow.py \
 | `--allow-unreferenced-scores` | 关 | 允许超出 Champion pred.pkl 日期做前向影子评分；不开则无参照日直接报错（防"自说自话"） |
 
 每个交易日的循环（同一套生产函数 `qlib_ifind_beta/live/intraday.py`，行情来自
-1min bins 逐分钟重放）：
+1min bins 逐分钟重放；日循环体已提取为模块级 `run_paper_day()`，影子模拟盘
+`scripts/paper_shadow.py` 复用同一状态机逐日续跑）：
 
 ```text
 ① 冻结审计根   run/active_model_manifest.json + preflight.json
 ② 股池        universe_raw(100) → eligible(剔 ST) + positions_before（昨日持仓 hold_days+1）
 ③ K线重放     09:31–09:40 逐根幂等 upsert（校验 idempotent）→ factor_bars.parquet
 ④ 质量门禁    validate_factor_bars：恰好十根/覆盖率 → bar_quality.json（不足即 FAIL）
-⑤ 特征组装    18 因子（分钟量口径分母）→ features.parquet（<80 只即 FAIL）
+⑤ 特征组装    18 因子（分钟量口径分母）→ features.parquet（<2×topk=20 只即 FAIL；
+              数据完整性由 ④ bar gate 把守。涨停封板股 high==low → close_pos NaN
+              → 同训练口径剔除，rally 日特征数低于 80 属正常，见 2026-09-13 裁决）
 ⑥ 成交辅助    09:41 bar → price_941/change_941
 ⑦ 打分+零漂移  冻结模型矩阵推理 → scores.csv；与 Champion pred.pkl 比对
               signal_parity.json（max_abs_diff>1e-12 即 FAIL）

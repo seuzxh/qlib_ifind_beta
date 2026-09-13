@@ -59,7 +59,10 @@ conda run -n qlib_ifind_beta python scripts/paper_shadow.py report
 
 - 撮合：09:41 价模拟成交、涨停/无 bar 拦截、先卖后买两阶段现金、费率 0.05%/0.15%（min 5 元）
 - 账本：`data/paper_shadow/<date>/`（可审计全套产物）+ `nav.csv`（累计净值）
-- 门禁：节假日跳过（无成分快照）；同步超时 60 分钟 exit 1；失败日不推进账本，可 `day --date` 补跑
+- 门禁：无快照且拉取成功（rc=0）→ 视为节假日跳过；拉取失败（网络/token）或工作日
+  法定节假日（`update_universe` 对二者不区分，均 rc=1）→ exit 1 fail-closed（每年约
+  20 个节假日会产生非零退出日志，属已知噪音，2026-09-13 裁决保留）；同步超时
+  60 分钟 exit 1；失败日不推进账本（账本自动跳过残缺日目录），可 `day --date` 补跑
 - 评分：冻结 Champion `93d435e0`；不验证盘中实时路径（六步链职责）
 - 已知分叉：rally 日（早盘封板股多）特征数可低于 80——模拟盘按机制下限（>=2×topk）
   继续交易，而盘中六步生产链 `intraday_production.py` 仍按 >=80 门槛 fail-closed；
@@ -68,8 +71,8 @@ conda run -n qlib_ifind_beta python scripts/paper_shadow.py report
 
 | 文件 | 现状 |
 | --- | --- |
-| `data/paper_shadow/` | 2026-07-21 → 回放补齐起点 |
-| `data/paper_shadow/nav.csv` | 回放补齐后 seed，cron 每日追加 |
+| `data/paper_shadow/` | 回放补齐 7/21→9/11 共 39 日完成（净 +12.17%，最大回撤 -11.11%，期末 1,121,694），9/14 起 cron 前向 |
+| `data/paper_shadow/nav.csv` | 39 行 seed 完成，cron 每日追加 |
 | `data/live_*.csv` | 已归档，7/03→7/14 旧纸面线，净值 0.812 |
 
 ## 红线（沿自生产合同）

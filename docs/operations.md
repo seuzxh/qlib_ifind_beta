@@ -39,6 +39,20 @@ conda run -n qlib_ifind_beta python scripts/replay_intraday_shadow.py
 
 62 日回放已通过（零漂移、逐日对账 PASS），产物见[产物地图](artifacts.md)。
 
+## 影子模拟盘（2026-09-13 起，cron 前向）
+
+每交易日 16:30 由 `scripts/cron_paper_shadow.sh` 自动续跑（15:30 数据同步后），
+复用回放状态机 bin 同源撮合并追加净值：
+
+```bash
+conda run -n qlib_ifind_beta python scripts/paper_shadow.py report          # 查看累计净值
+conda run -n qlib_ifind_beta python scripts/paper_shadow.py day --date T    # 手动补跑失败日（幂等）
+tail -5 logs/paper_shadow.log                                               # cron 运行日志
+```
+
+回放补齐 7/21→9/11 共 39 日（+12.17%，回撤 -11.11%）。失败日不推进账本（残缺
+日目录自动跳过）；节假日与拉取失败详见[模拟盘流程](paper-trading.md)门禁说明。
+
 ## Champion 复现
 
 ```bash

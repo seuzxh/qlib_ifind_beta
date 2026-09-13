@@ -51,15 +51,23 @@ mlruns/<experiment>/<recorder>/
 
 老版回放：`data/historical_signals_20260601_20260720/`（61 日，已被新链路取代）。
 
-## 纸面跟踪（真实交易日）
+## 影子模拟盘（`data/paper_shadow/`，2026-09-13 起）
+
+每日目录 `<date>/` 与回放产物同构（上表全部字段），另有根级汇总：
 
 | 文件 | 内容 |
 | --- | --- |
-| `data/live_signals.csv` | 每日 Top10 信号（665 行，7 个信号日） |
-| `data/live_settle.csv` | 逐日结算记录 |
-| `data/live_nav.csv` | 组合净值（结算日口径） |
+| `nav.csv` | 累计净值（date/cash/market_value/nav，追加式、同日幂等覆盖） |
+| `daily_summary.csv` / `replay_report.json` | 仅批量回放段（7/21→9/11 补齐）产出 |
 
-最新状态：信号至 2026-07-14，结算至 2026-07-13，此后无新记录（恢复待定）。
+账本 = 最新**完整**日目录（`positions_after_close.csv` + `cash_after_buy.json` 齐全；
+残缺日自动跳过）。前向由 16:30 cron 续跑，`scripts/paper_shadow.py report` 查看指标。
+
+## 旧纸面跟踪（已归档）
+
+`data/live_signals.csv` / `live_settle.csv` / `live_nav.csv`（2026-07-03→07-14，
+7 信号日/6 结算日，净值 0.812）——生成模块已随 2026-09-12 清理删除，文件为历史
+归档，不再更新；由影子模拟盘线取代。
 
 ## 生产信号（`data/production_signals/<日期>/`）
 

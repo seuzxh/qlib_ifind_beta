@@ -34,7 +34,7 @@ nav_order: 1
 - [验证与研究](validation.md)：purged rolling 门控、风险叠加、已证伪方向存档。
 - [产物地图](artifacts.md)：训练/验证/回测/生产各环节产物位置与字段。
 - [运维手册](operations.md)：生产子命令、故障排查、红线。
-- [模拟盘流程](paper-trading.md)：盘中信号生产六步 + 盘后纸面跟踪五步的全流程图与隔日结算闭环。
+- [模拟盘流程](paper-trading.md)：盘中信号生产六步 + 全自动影子模拟盘（回放引擎日增量化，16:30 cron）的全流程与净值闭环。
 - [历史影子回放](backtest-log/2026-07-21-intraday-shadow-replay.md)：62 日回放验收与待办。
 
 ## 运行入口
@@ -44,6 +44,7 @@ conda run -n qlib_ifind_beta python -m pytest -q
 conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml
 conda run -n qlib_ifind_beta python scripts/intraday_production.py --help
 conda run -n qlib_ifind_beta python scripts/replay_intraday_shadow.py
+conda run -n qlib_ifind_beta python scripts/paper_shadow.py report   # 影子模拟盘净值
 ```
 
 ## 文档分层
