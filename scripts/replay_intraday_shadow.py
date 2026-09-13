@@ -16,7 +16,8 @@ import numpy as np
 import pandas as pd
 
 from qlib_ifind_beta.config import (
-    CHAMPION_EXPERIMENT, CHAMPION_RECORDER_ID, OVERLAY_ROOT, PROJECT_ROOT,
+    CHAMPION_EXPERIMENT, CHAMPION_RECORDER_ID, CHAMPION_TOPK, OVERLAY_ROOT,
+    PROJECT_ROOT,
 )
 from qlib_ifind_beta.live.historical_replay import HistoricalReplaySource
 from qlib_ifind_beta.live.intraday import (
@@ -169,7 +170,11 @@ def run_paper_day(source, date: str, positions: pd.DataFrame, cash: float,
     })
     prev_volumes = source.previous_volumes(date, complete)
     features = assemble_features(factor_bars, prev_volumes, daily_info, complete)
-    if len(features) < 80:
+    # 数据完整性由上方 bar gate（complete >= MIN_CANDIDATES=80）把守；特征门槛只保
+    # topk+n_drop 机制下限。涨停封板股 high==low → close_pos 0/0=NaN → 被 dropna 剔除
+    # （与训练 DropnaProcessor 同分布，且本就被涨停拦截排除在买入外），rally 日特征数
+    # 因此低于 80 属正常市场状态，不应整日跳过。
+    if len(features) < 2 * CHAMPION_TOPK:
         raise RuntimeError(f"{date}: only {len(features)} complete features")
     write_parquet(paths.file("features.parquet"), features)
     execution_raw = raw.loc[raw["bar_time"] == "09:41"].copy()
