@@ -1,0 +1,88 @@
+{
+  "generated": "2026-09-24",
+  "purpose": "graveyard 结构化清单：本项目已证伪的因子族。筛选阶段任何候选若与下列族语义同源（表达式级或语义级比对），必须标记 grave_dup 并降权/剔除。",
+  "sources": [
+    "docs/backtest-log/2026-09-12-alpha158-grid-and-yesterday-factors.md",
+    "docs/backtest-log/2026-09-12-minute-aligned-cross-day-factors.md",
+    "docs/backtest-log/2026-09-12-0941-bar-factors.md",
+    "docs/research/2026-09-12-high-beta-index-enhancement-improvement-research.md §1.2"
+  ],
+  "families": [
+    {
+      "family": "alpha158_y",
+      "size": 71,
+      "definition": "71 个 Alpha158 表达式 Ref(·,1) 锚定 T-1",
+      "outcome": "四层漏斗全灭（W1 14 过 → 双窗 4 → PortAna 1(vol3m_y) → purged 0）",
+      "semantics": ["Alpha158 日频统计特征@T-1"]
+    },
+    {
+      "family": "champion_fields_y",
+      "size": 14,
+      "definition": "14 个 Champion 开盘分钟字段施于 T-1 开盘窗（Ref(·,1)）",
+      "outcome": "同上漏斗全灭",
+      "semantics": ["开盘窗口动量/加速度/收盘位置/量比@T-1"]
+    },
+    {
+      "family": "cross_period_daily",
+      "size": 25,
+      "definition": "MOM/STD/VSTD/HDIST/CNT @ 1/3/5/10/20 日，Ref(·,1)",
+      "outcome": "无一补回 overnight_gap 价值；最佳 STD3 仅恢复一半；MOM1/VSTD10 单窗假赢；MOM10/20 为负",
+      "semantics": ["多日动量@T-1", "多日波动@T-1", "量波动@T-1", "距高点@T-1", "上涨天数@T-1"]
+    },
+    {
+      "family": "xd_minute_aligned",
+      "size": 20,
+      "definition": "xdmom{k}_s0/s9 / xdwin{k} / xdvol{k} / xdvol{k}_s0，k∈{1,3,5,10}：今日开盘窗 vs T-k 日同时刻",
+      "outcome": "xdvol1 单窗假赢；仅 xdvol10 双窗但 purged 段胜率 32%、均值差 -3.18%/段，淘汰",
+      "semantics": ["分钟对齐跨日动量/量比"]
+    },
+    {
+      "family": "xdg",
+      "size": 3,
+      "definition": "纯 1min 口径 gap：xdg0 / xdg1_0931 / xdg1_0940（今日 vs 昨 15:00 收盘）",
+      "outcome": "全淘汰",
+      "semantics": ["1min 口径隔夜跳空"]
+    },
+    {
+      "family": "xddm",
+      "size": 6,
+      "definition": "同期涨速对比 xddm3_k / xddm10_k",
+      "outcome": "全淘汰",
+      "semantics": ["跨日开盘涨速差"]
+    },
+    {
+      "family": "e94",
+      "size": 8,
+      "definition": "第 11 根（09:41）bar 价量因子 e94ret1/e94gapo/e94pos/e94rng/e94volr/e94volr9/e94ext/e94pos11",
+      "outcome": "7/8 稀释；e94rng 双窗+PortAna 领先但延迟执行后 W2 蒸发、purged 32% 胜率淘汰（史上最接近挑战者）",
+      "semantics": ["09:41 bar 形态"]
+    },
+    {
+      "family": "sentiment_index_resonance",
+      "size": null,
+      "definition": "日频情绪与指数共振因子",
+      "outcome": "第一窗口 IC 提升、第二窗口方向反转",
+      "semantics": ["日频情绪/指数共振"]
+    },
+    {
+      "family": "uniform_chase_penalty",
+      "size": null,
+      "definition": "均匀追高惩罚 / 简单反转（无条件负动量）",
+      "outcome": "方向错误：原始 1/3/5/10/20 日动量 IC 均为正；应改条件尾部概率（本研究 b' 判据）",
+      "semantics": ["无条件负动量惩罚"]
+    },
+    {
+      "family": "sizing_variants",
+      "size": null,
+      "definition": "波动率目标仓位 / 基准趋势减仓 / rank weight",
+      "outcome": "修泄漏或换窗后不稳定优于满仓等权",
+      "semantics": ["仓位管理"]
+    }
+  ],
+  "methodological_rules": [
+    "同批重跑基线：同配置跨进程 champion IC 波动 0.049~0.055（PortAna 超额 ±10pp 级），单次运行差异不可作判据",
+    "手动筛选口径只用于排序，不作判据（虚高模式三轮复现）",
+    "特征与 label 锚定价同源（含 c[10]）须做延迟执行对照，甄别机械 1/x 耦合",
+    "purged rolling 19 段（train90/valid20/embargo1/test20）是终审门槛"
+  ]
+}
