@@ -121,11 +121,38 @@ max_gain/vol_ratio_d1 的横截面 rank 均值），n=650 日：
 
 ## 4. 分钟域 B1/B2（Phase 1B/1D）
 
-（执行中，结果待补——本节由 minute metrics 完成后填写）
+收敛集（B1 全部 202 个 + B2 仅未测三库 alpha101/tdxgs/jq110 共 231 个；
+alpha360/158 的 B2 与 graveyard/路线 A 语义重复、成本超 timebox 搁置）。
 
-## 5. 冻结协议 augment（Phase 2-alpha，timebox）
+计算在全连续分钟序列上进行（GTJA/TDX 慢算子是成本大头，全量收敛集约
+3–4 小时）。**收尾已自动化**：后台 finisher 等 `minute.py feat` 结束后自动
+运行 `scripts/validate_factor_zoo_minute_metrics.py` 并把双门槛摘要写入
+`reports/factor_zoo/minute_digest.txt`（同目录另有 minute_b1_metrics.csv /
+minute_b2_t1_metrics.csv 全量指标）。本节结论以 digest 为准补写；判据同
+§1（alpha 轨全门槛 + 残差保持≥50%），风险轨参照 §2 已整体拒绝。
 
-（执行中，结果待补——18+2 = ALPHA006 + VOL_005，同批基线在跑）
+## 5. 冻结协议 augment（Phase 2-alpha，timebox）：拒绝
+
+选因子：路线 A 去重后两独立族代表 `alpha101__ALPHA006`（价量相关结构）
+与 `jq110__JQ110_VOL_005`（5 日均量水平），物化为 `fz_*.day.bin` 研究 bin
+（additive），18+2 冻结协议（同 HFLGB 超参/切分/label）：
+
+| | IC | Rank IC | 手工重放 62 测日（top10 等权-成本） |
+| --- | --- | --- | --- |
+| 同批基线（18 因子重训） | 0.0603 | 0.0718 | 累计 +62.6%，Calmar 36.9 |
+| augment（18+2） | **0.0496** | **0.0553** | 累计 +48.5%，Calmar 28.4 |
+
+IC 劣化 0.0107，**超出 ±0.006 运行噪声带**；重放前半 Δ日均 -0.34%（显著
+差）、后半 +0.04%（打平）。**判据 (e) 不通过——拒绝**。单因子层的残差增量
+（§1）在模型层被稀释，复现 graveyard 的"单窗/单层亮眼、组合层蒸发"模式。
+
+执行备注（本机环境坑，已修入脚本）：①task_train 按 `scripts.*` 路径二次
+导入脚本模块，与 `__main__` 全局不共享（首跑 augment 与基线逐位相同即此
+因）；②qlib 表达式引擎按**小写**定位 bin 文件且双下划线字段名解析失败
+（逐段 bisect 实测），研究 bin 字段名须全小写+单下划线；③task_train 的
+PortAnaRecord 回测段在本机两次死锁（0% CPU futex 等待），timebox 内改用
+SignalRecord + 自带重放口径（只排序不终判），全漏斗（PortAna + purged
+19 段）留待后续环境排查后执行。
 
 ## 6. 初步结论与边界
 

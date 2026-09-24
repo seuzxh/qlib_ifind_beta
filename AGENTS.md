@@ -48,5 +48,11 @@ purged rolling 验证脚本、joint TVT 档案——未通过准入，Champion �
 09:41 分钟策略的匹配度，核心路线是表达式移植到分钟域（当日盘初 10 根 +
 多日 T-1/2/3/5 全天 240 根；多日族用于识别"已经加速"状态并做尾部风险
 控制）。方案见
-`docs/research/2026-09-24-factor-zoo-minute-research-plan.md`；筛选前必须
-过 graveyard 排雷，幸存者走冻结协议验证，不自动晋升。
+`docs/research/2026-09-24-factor-zoo-minute-research-plan.md`。
+
+执行结论（详见 `docs/backtest-log/2026-09-24-factor-zoo-screen.md`）：
+999/1007 表达式在 pyqlib 0.9.7 可求值（vendored+shim）；路线 A 筛出 15 个
+未测幸存者（去重后 2 族）但 18+2 冻结协议 augment IC 0.0496 vs 同批基线
+0.0603（劣化超噪声带）→ 拒绝；多日分钟加速状态尾部无区分度且 Champion
+Top10 与已加速股零交集，软惩罚 overlay 测试半窗全面劣化 → 拒绝。
+Champion 不变；无候选晋升。工作区 data/mlruns 为软链主仓运行资产。
