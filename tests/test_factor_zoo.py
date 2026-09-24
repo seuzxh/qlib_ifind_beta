@@ -67,7 +67,7 @@ class TestScreenLib:
         idx = pd.MultiIndex.from_product([days, insts], names=["datetime", "instrument"])
         label = pd.Series(rng.normal(0, 0.02, len(idx)), index=idx)
         # 因子 = label + 噪声 → IC 显著为正
-        factor = label + rng.normal(0, 0.05, len(idx))
+        factor = label + rng.normal(0, 0.01, len(idx))
         factor.name, label.name = "F", "LABEL"
         return pd.Series(factor), label
 
