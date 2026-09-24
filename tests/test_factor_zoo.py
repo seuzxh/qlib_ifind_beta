@@ -63,7 +63,7 @@ class TestScreenLib:
     def panel(self):
         rng = np.random.default_rng(7)
         days = pd.date_range("2024-01-01", periods=60)
-        insts = [f"S{i:03d}" for i in range(40)]
+        insts = [f"S{i:03d}" for i in range(60)]
         idx = pd.MultiIndex.from_product([days, insts], names=["datetime", "instrument"])
         label = pd.Series(rng.normal(0, 0.02, len(idx)), index=idx)
         # 因子 = label + 噪声 → IC 显著为正
