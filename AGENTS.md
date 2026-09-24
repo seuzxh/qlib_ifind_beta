@@ -46,6 +46,7 @@ purged rolling 验证脚本、joint TVT 档案——未通过准入，Champion �
 2026-09-24 开出因子研究分支 `research/factor-zoo-20260924`（worktree
 `.worktrees/factor-zoo-research`）：探索 qlib-factor-zoo 六库 ~1013 因子与
 09:41 分钟策略的匹配度，核心路线是表达式移植到分钟域（当日盘初 10 根 +
-隔日 T-1 全天 240 根）。方案见
+多日 T-1/2/3/5 全天 240 根；多日族用于识别"已经加速"状态并做尾部风险
+控制）。方案见
 `docs/research/2026-09-24-factor-zoo-minute-research-plan.md`；筛选前必须
 过 graveyard 排雷，幸存者走冻结协议验证，不自动晋升。
