@@ -93,9 +93,16 @@ def run(mode: str) -> None:
     from qlib.data import D
 
     parse_rows = json.loads((OUTDIR / "factor_zoo_parse.json").read_text())
-    cands = [r for r in parse_rows if r["class"] in ("b1", "b2_only")]
+    if mode == "feat":
+        # 收敛集（timebox）：B1 全部 + B2 仅未测三库；alpha360/158 的 B2 与
+        # graveyard/路线A 语义重复，成本超 timebox，记入报告搁置。
+        cands = [r for r in parse_rows
+                 if r["class"] == "b1"
+                 or (r["class"] == "b2_only" and r["lib"] in ("alpha101", "tdxgs", "jq110"))]
+    else:
+        cands = [r for r in parse_rows if r["class"] in ("b1", "b2_only")]
     rows = [(r["lib"], r["name"], r["expr"]) for r in cands]
-    print(f"分钟域候选 {len(rows)}（b1={sum(1 for r in parse_rows if r['class']=='b1')}）")
+    print(f"分钟域候选 {len(rows)}（b1={sum(1 for r in parse_rows if r['class']=='b1')}）", flush=True)
 
     stocks = sorted({s for s, _, _ in load_universe_rows()})
     if mode == "bench":

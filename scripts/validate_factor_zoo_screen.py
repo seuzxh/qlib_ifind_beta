@@ -105,21 +105,29 @@ def _daily_ic(factor: pd.Series, label: pd.Series) -> pd.Series:
     return daily_rank_ic(factor, label)
 
 
+def _chunk_metrics(cf: Path, label: pd.Series, champs: pd.DataFrame) -> list[dict]:
+    df: pd.DataFrame = pd.read_pickle(cf)
+    out = []
+    for col in df.columns:
+        m = summarize(df[col], label, champs)
+        # 库名前缀去掉后再匹配（alpha158__MIN5 → MIN5）
+        bare = col.split("__")[-1]
+        grave = next((g for g, pat in _GRAVE_PATTERNS if pat.search(bare)), "")
+        out.append({"name": col, "grave_tag": grave, **m})
+    return out
+
+
 def stage_metrics() -> None:
     meta: pd.DataFrame = pd.read_pickle(OUTDIR / "dayf_meta.pkl")
     label = meta["LABEL"]
     champs = meta.drop(columns=["LABEL"])
-    names = json.loads((OUTDIR / "dayf_names.json").read_text())
     chunk_files = sorted(OUTDIR.glob("dayf_chunk_*.pkl"))
 
-    recs = []
-    for cf in chunk_files:
-        df: pd.DataFrame = pd.read_pickle(cf)
-        for col in df.columns:
-            m = summarize(df[col], label, champs)
-            grave = next((g for g, pat in _GRAVE_PATTERNS if pat.search(col)), "")
-            recs.append({"name": col, "grave_tag": grave, **m})
-        print(f"  {cf.name}: 累计 {len(recs)} 因子")
+    from joblib import Parallel, delayed
+    results = Parallel(n_jobs=min(20, len(chunk_files)))(
+        delayed(_chunk_metrics)(cf, label, champs) for cf in chunk_files)
+    recs = [r for part in results for r in part]
+    print(f"  {len(recs)} 因子指标完成")
     res = pd.DataFrame(recs)
     res.to_csv(OUTDIR / "day_screen.csv", index=False)
     ok = res[res["n_days"] >= 100].copy()

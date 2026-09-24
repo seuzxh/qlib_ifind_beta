@@ -9,7 +9,8 @@ nav_exclude: true
 - 研究分支：`research/factor-zoo-20260924`（worktree `.worktrees/factor-zoo-research`，基线 `2a54281`）
 - 上游因子库：<https://github.com/JustinF8/qlib-factor-zoo.git>（MIT，Qlib fork；本地克隆 `/tmp/factor-zoo`，2026-09-24 调研）
 - 立项日期：2026-09-24
-- 状态：方案已定稿（v1.1），Phase 0 未启动
+- 状态：v1.1 定稿后同日进入执行；Phase 0 全部完成，Phase 1/2 执行中
+  （过程与结论见 `docs/backtest-log/2026-09-24-factor-zoo-screen.md`）
 - 修订：v1.1（2026-09-24）用户澄清——原表述"隔日"实为**多日**（T-1/2/3/5），
   且多日族首要用途是判断个股**是否已经加速**、已加速时控制尾部风险；
   §0/§1.2/§1.3/§三/§四/§五/§六/§八 已同步修订

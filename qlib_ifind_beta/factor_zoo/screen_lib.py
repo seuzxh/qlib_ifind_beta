@@ -35,7 +35,7 @@ def residual_ic(factor: pd.Series, label: pd.Series, champs: pd.DataFrame,
     for d, g in factor.groupby(level="datetime"):
         if d not in lab_days or d not in champ_days:
             continue
-        g = g.dropna()
+        g = g.droplevel("datetime").dropna()
         if len(g) < min_ns:
             continue
         X = champs.xs(d, level="datetime").reindex(g.index)
