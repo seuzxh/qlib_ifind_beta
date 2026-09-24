@@ -94,11 +94,10 @@ def run(mode: str) -> None:
 
     parse_rows = json.loads((OUTDIR / "factor_zoo_parse.json").read_text())
     if mode == "feat":
-        # 收敛集（timebox）：B1 全部 + B2 仅未测三库；alpha360/158 的 B2 与
-        # graveyard/路线A 语义重复，成本超 timebox，记入报告搁置。
-        cands = [r for r in parse_rows
-                 if r["class"] == "b1"
-                 or (r["class"] == "b2_only" and r["lib"] in ("alpha101", "tdxgs", "jq110"))]
+        # B1-only（当日盘初族，用户核心关注；202 个）。B2 三库 231 个因
+        # 引擎在全连续分钟序列上求值成本过高（>6h 且已两次超时/组装事故），
+        # 本轮搁置——多日族结论已由 1C 状态变量 + 路线A 覆盖，详见筛选报告 §4。
+        cands = [r for r in parse_rows if r["class"] == "b1"]
     else:
         cands = [r for r in parse_rows if r["class"] in ("b1", "b2_only")]
     rows = [(r["lib"], r["name"], r["expr"]) for r in cands]
@@ -109,12 +108,17 @@ def run(mode: str) -> None:
         stocks = stocks[:30]
         rows = rows[: FIELD_CHUNK * 2]
     OUTDIR.mkdir(parents=True, exist_ok=True)
-    b1_parts, eod_parts = [], []
     t0 = time.time()
     n_schunk = int(np.ceil(len(stocks) / STOCK_CHUNK))
     n_fchunk = int(np.ceil(len(rows) / FIELD_CHUNK))
     for fi in range(n_fchunk):
+        part_b1 = OUTDIR / f"minute_part_b1_{fi:02d}.pkl"
+        part_eod = OUTDIR / f"minute_part_eod_{fi:02d}.pkl"
+        if part_b1.exists() and part_eod.exists():  # 断点续跑
+            print(f"  fi={fi:02d} 已有部件，跳过", flush=True)
+            continue
         frows = rows[fi * FIELD_CHUNK: (fi + 1) * FIELD_CHUNK]
+        fi_b1, fi_eod = [], []
         for si in range(n_schunk):
             sgrp = stocks[si * STOCK_CHUNK: (si + 1) * STOCK_CHUNK]
             try:
@@ -130,9 +134,14 @@ def run(mode: str) -> None:
                     except Exception as e2:  # noqa: BLE001
                         print(f"    弃用 {row[0]}__{row[1]}: {type(e2).__name__}")
             if b1f is not None and b1f.shape[1]:
-                b1_parts.append(b1f)
+                fi_b1.append(b1f)
             if eodf is not None and eodf.shape[1]:
-                eod_parts.append(eodf)
+                fi_eod.append(eodf)
+        # 同一 fi 内各 si 股票集不相交 → 行向 concat 安全；跨 fi 各自成部件文件
+        if fi_b1:
+            pd.concat(fi_b1).sort_index().to_pickle(part_b1)
+        if fi_eod:
+            pd.concat(fi_eod).sort_index().to_pickle(part_eod)
         el = time.time() - t0
         done = (fi + 1) * FIELD_CHUNK
         print(f"  表达式 {min(done,len(rows))}/{len(rows)}，累计 {el:.0f}s"
@@ -140,16 +149,25 @@ def run(mode: str) -> None:
         if mode == "bench":
             break
 
-    b1_all = pd.concat(b1_parts).sort_index() if b1_parts else pd.DataFrame()
-    eod_all = pd.concat(eod_parts).sort_index() if eod_parts else pd.DataFrame()
+    # 最终组装：跨 fi 按列合并（索引唯一），再过滤到成员对
+    import functools
+    def _merge(kind: str) -> pd.DataFrame:
+        parts = [pd.read_pickle(p) for p in sorted(OUTDIR.glob(f"minute_part_{kind}_*.pkl"))]
+        if not parts:
+            return pd.DataFrame()
+        return functools.reduce(lambda a, b: a.join(b, how="outer"), parts).sort_index()
+
+    b1_all, eod_all = _merge("b1"), _merge("eod")
     members = member_pairs()
-    b1_all = b1_all.reindex(members.intersection(b1_all.index))
-    eod_all = eod_all.reindex(members.intersection(eod_all.index))
+    if b1_all.shape[1]:
+        b1_all = b1_all.loc[b1_all.index.isin(members)]
+    if eod_all.shape[1]:
+        eod_all = eod_all.loc[eod_all.index.isin(members)]
     suffix = "_bench" if mode == "bench" else ""
     b1_all.to_pickle(OUTDIR / f"minute_b1{suffix}.pkl")
     eod_all.to_pickle(OUTDIR / f"minute_eod{suffix}.pkl")
     print(f"B1 {b1_all.shape} / EOD {eod_all.shape} → minute_*{suffix}.pkl"
-          f"；总用时 {(time.time()-t0)/60:.1f} min")
+          f"；总用时 {(time.time()-t0)/60:.1f} min", flush=True)
 
 
 if __name__ == "__main__":
