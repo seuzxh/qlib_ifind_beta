@@ -38,13 +38,17 @@ from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
 
 OUTDIR = ROOT / "reports" / "factor_zoo"
 EXPERIMENT = "factor_zoo_augment"
+OPEN_COST, CLOSE_COST = 0.0005, 0.0015   # 与 champion yaml exchange_kwargs 一致
 
 #: 由 --features 填充；handler 类在 task_train 进程内实例化，全局即可。
 FZ_FIELDS: list[str] = []
 
 
 def safe_name(name: str) -> str:
-    return "fz_" + re.sub(r"[^A-Za-z0-9_]", "_", name)
+    """全小写 + 单下划线：engine 按小写找 bin 文件、双下划线被表达式解析吞掉
+    （两者均实测：大写/双下划线名读到 EMPTY）。"""
+    s = re.sub(r"[^A-Za-z0-9_]", "_", name).lower()
+    return "fz_" + re.sub(r"_+", "_", s)
 
 
 def load_feature(spec: str) -> pd.Series:
@@ -90,7 +94,9 @@ def materialize(spec: str) -> str:
             i = cal_pos.get(d)
             if i is not None and pd.notna(v):
                 vals[i] = np.float32(v)
-        out = OVERLAY_ROOT / "features" / s / f"{fname}.day.bin"
+        out = OVERLAY_ROOT / "features" / s.lower() / f"{fname}.day.bin"  # 目录用小写（仓库约定）
+        if out.exists():
+            continue  # 幂等：已物化（重复实验提速）
         out.parent.mkdir(parents=True, exist_ok=True)
         start_idx = int(np.argmax(~np.isnan(vals))) if (~np.isnan(vals)).any() else 0
         binio.write_bin(out, start_idx, vals[start_idx:])
@@ -119,13 +125,18 @@ def port_metrics(recorder) -> dict:
             "Calmar": f"{ann/abs(dd):.2f}" if dd else "inf"}
 
 
-def run_task(handler_class: str, module_path: str = "scripts.validate_factor_zoo_augment") -> object:
+def run_task(handler_class: str, module_path: str = "scripts.validate_factor_zoo_augment",
+             portana: bool = True) -> object:
+    """portana=False 时剥掉 PortAnaRecord（本机 task_train 回测段死锁，
+    timebox 内改用自带重放口径对比；全漏斗留待后续）。"""
     from qlib.model.trainer import task_train
     cfg = YAML(typ="safe").load(open(ROOT / "qrun" / "workflow_minute_enhanced_tk10_nd8.yaml"))
     task = cfg["task"]
     h = task["dataset"]["kwargs"]["handler"]
     h["class"] = handler_class
     h["module_path"] = module_path
+    if not portana:
+        task["record"] = [r for r in task["record"] if r.get("class") != "PortAnaRecord"]
     for rec in task.get("record", []):
         if rec.get("class") == "PortAnaRecord":
             exk = ((rec.get("kwargs", {}).get("config") or {}).get("backtest") or {}).get("exchange_kwargs") or {}
@@ -134,36 +145,76 @@ def run_task(handler_class: str, module_path: str = "scripts.validate_factor_zoo
     return task_train(task, experiment_name=EXPERIMENT)
 
 
+def replay_topn(pred: pd.Series, label: pd.Series, topn: int = 10) -> pd.Series:
+    """手工重放：逐日 topn 等权，label v2 毛收益 - 双边成本（只排序不终判）。"""
+    daily = {}
+    for d, g in pred.groupby(level="datetime"):
+        sel = g.sort_values(ascending=False).head(topn)
+        y = label.xs(d, level="datetime").reindex(sel.index.get_level_values("instrument"))
+        daily[d] = float(y.mean()) - OPEN_COST - CLOSE_COST
+    return pd.Series(daily).sort_index()
+
+
+def replay_stats(r: pd.Series) -> str:
+    cum = (1 + r).prod() - 1
+    ann = (1 + cum) ** (252 / max(len(r), 1)) - 1
+    dd = ((1 + r).cumprod() / (1 + r).cumprod().cummax() - 1).min()
+    return (f"累计 {cum:+.1%} 年化 {ann:+.1%} 回撤 {dd:.1%} "
+            f"Calmar {ann/abs(dd):.2f}" if dd else f"累计 {cum:+.1%}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--features", required=True, help="逗号分隔的筛选特征名")
-    ap.add_argument("--baseline", action="store_true", help="附带同批未改动 handler 基线")
     a = ap.parse_args()
     specs = a.features.split(",")
 
     qlib.init(provider_uri=str(OVERLAY_ROOT), region="cn")
-    from qlib.workflow import R
 
-    print("▶ ① 物化研究 bin")
+    print("▶ ① 物化研究 bin", flush=True)
+    # 关键：task_train 按 "scripts.validate_factor_zoo_augment" 路径导入本模块，
+    # 与 __main__ 是两个模块对象 —— 必须写进可导入的那份，否则 handler 加 0 字段。
+    import scripts.validate_factor_zoo_augment as _importable
+    _importable.FZ_FIELDS.clear()
     FZ_FIELDS.clear()
-    FZ_FIELDS.extend(materialize(sp) for sp in specs)
-    print(f"   handler = 18 + {len(FZ_FIELDS)}: {FZ_FIELDS}")
+    filled = [materialize(sp) for sp in specs]
+    _importable.FZ_FIELDS.extend(filled)
+    FZ_FIELDS.extend(filled)
+    print(f"   handler = 18 + {len(filled)}: {filled}", flush=True)
 
-    print("▶ ② 同批基线（未改动 18 因子，同配置重训）" if a.baseline else "▶ ② 跳过同批基线")
-    if a.baseline:
-        base_rec = run_task("MinuteEnhancedHandler",
-                            "qlib_ifind_beta.minute_enhanced_handler")
-        print("  baseline:", port_metrics(base_rec))
+    meta = pd.read_pickle(OUTDIR / "dayf_meta.pkl")
+    meta = meta.reorder_levels(["datetime", "instrument"]).sort_index()
+    label = meta["LABEL"]
 
-    print("▶ ③ augment 训练")
-    rec = run_task("MinuteEnhancedFZHandler")
-    rid = getattr(rec, "recorder_id", None) or rec.id
-    print("  augment:", port_metrics(rec))
+    def _pred(rec) -> pd.Series:
+        p = rec.load_object("pred.pkl")
+        p = p.iloc[:, 0] if isinstance(p, pd.DataFrame) else p
+        return p.reorder_levels(["datetime", "instrument"]).sort_index()
+
+    print("▶ ② 同批基线（18 因子，同配置重训，SignalRecord）", flush=True)
+    base_rec = run_task("MinuteEnhancedHandler",
+                        "qlib_ifind_beta.minute_enhanced_handler", portana=False)
+    bm = base_rec.list_metrics()
+    base_pred = _pred(base_rec)
+    print(f"  baseline IC={bm.get('IC'):.4f} RankIC={bm.get('Rank IC'):.4f}", flush=True)
+
+    print("▶ ③ augment 训练（SignalRecord）", flush=True)
+    rec = run_task("MinuteEnhancedFZHandler", portana=False)
     m = rec.list_metrics()
-    print(f"  IC={m.get('IC'):.4f} RankIC={m.get('Rank IC'):.4f} recorder={rid}")
+    aug_pred = _pred(rec)
+    rid = getattr(rec, "recorder_id", None) or rec.id
+    print(f"  augment IC={m.get('IC'):.4f} RankIC={m.get('Rank IC'):.4f} recorder={rid}", flush=True)
 
-    champ = R.get_recorder(recorder_id=CHAMPION_RECORDER_ID, experiment_name="minute_enhanced_tk10_nd8")
-    print("▶ ④ 冻结 Champion 同窗:", port_metrics(champ))
+    print("▶ ④ 手工重放对照（top10 等权，双边成本 0.0005/0.0015；只排序不终判）", flush=True)
+    rb = replay_topn(base_pred, label)
+    ra = replay_topn(aug_pred, label)
+    print(f"  baseline: {replay_stats(rb)}（{len(rb)} 日）", flush=True)
+    print(f"  augment : {replay_stats(ra)}（{len(ra)} 日）", flush=True)
+    both = pd.DataFrame({"base": rb, "aug": ra}).dropna()
+    if len(both):
+        half = len(both) // 2
+        for name, seg in (("前半", both.iloc[:half]), ("后半", both.iloc[half:])):
+            print(f"  {name}: Δ日均(aug-base) {seg['aug'].sub(seg['base']).mean():+.4%}", flush=True)
 
 
 if __name__ == "__main__":
