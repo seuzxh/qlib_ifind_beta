@@ -42,3 +42,10 @@ purged rolling 验证脚本、joint TVT 档案——未通过准入，Champion �
 评分恒用冻结 Champion。回放补齐 7/21→9/11 共 39 日完成（净 +12.17%，最大回撤 -11.11%，
 期末 1,121,694）；其中 8/27、9/11 为 rally 日封板股致特征 <80，门槛已改为机制下限
 （数据完整性仍由 bar gate 把守）。9/14 起 cron 前向，`report` 查看净值。
+
+2026-09-24 开出因子研究分支 `research/factor-zoo-20260924`（worktree
+`.worktrees/factor-zoo-research`）：探索 qlib-factor-zoo 六库 ~1013 因子与
+09:41 分钟策略的匹配度，核心路线是表达式移植到分钟域（当日盘初 10 根 +
+隔日 T-1 全天 240 根）。方案见
+`docs/research/2026-09-24-factor-zoo-minute-research-plan.md`；筛选前必须
+过 graveyard 排雷，幸存者走冻结协议验证，不自动晋升。
