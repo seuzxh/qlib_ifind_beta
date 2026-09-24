@@ -28,7 +28,7 @@ import qlib
 from qlib_ifind_beta.config import OVERLAY_ROOT
 from qlib_ifind_beta.factor_zoo import register_zoo_ops, iter_all_factors
 
-OUT = ROOT / "reports" / "factor_zoo_smoke.json"
+OUT = ROOT / "reports" / "factor_zoo" / "factor_zoo_smoke.json"
 
 
 def _pick_universe_stocks(k: int) -> list[str]:
