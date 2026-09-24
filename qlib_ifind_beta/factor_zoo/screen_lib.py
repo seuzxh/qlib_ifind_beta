@@ -52,10 +52,11 @@ def residual_ic(factor: pd.Series, label: pd.Series, champs: pd.DataFrame,
     return float(np.mean(ics)) if ics else float("nan")
 
 
-def summarize(factor: pd.Series, label: pd.Series, champs: pd.DataFrame) -> dict:
+def summarize(factor: pd.Series, label: pd.Series, champs: pd.DataFrame,
+              min_days: int = 100) -> dict:
     """单因子指标汇总：IC/IR/t/覆盖率/双半窗/残差 IC。"""
     ics = daily_rank_ic(factor, label)
-    if len(ics) < 100:
+    if len(ics) < min_days:
         return {"n_days": len(ics)}
     half = len(ics) // 2
     ic1, ic2 = ics.iloc[:half], ics.iloc[half:]
