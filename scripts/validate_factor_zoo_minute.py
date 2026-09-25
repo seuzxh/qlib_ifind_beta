@@ -94,10 +94,12 @@ def run(mode: str) -> None:
 
     parse_rows = json.loads((OUTDIR / "factor_zoo_parse.json").read_text())
     if mode == "feat":
-        # B1-only（当日盘初族，用户核心关注；202 个）。B2 三库 231 个因
-        # 引擎在全连续分钟序列上求值成本过高（>6h 且已两次超时/组装事故），
-        # 本轮搁置——多日族结论已由 1C 状态变量 + 路线A 覆盖，详见筛选报告 §4。
         cands = [r for r in parse_rows if r["class"] == "b1"]
+    elif mode == "b2":
+        # 多日族 alpha-only 全量（用户 2026-09-25 调整）：b2_only 780 个 =
+        # 窗口 9–120 bar 的表达式在全天分钟序列上的实例化（15:00 采样 +
+        # shift）。部件用独立前缀 minute_part2_*，与 b1 的断点续跑互不干扰。
+        cands = [r for r in parse_rows if r["class"] == "b2_only"]
     else:
         cands = [r for r in parse_rows if r["class"] in ("b1", "b2_only")]
     rows = [(r["lib"], r["name"], r["expr"]) for r in cands]
@@ -108,12 +110,14 @@ def run(mode: str) -> None:
         stocks = stocks[:30]
         rows = rows[: FIELD_CHUNK * 2]
     OUTDIR.mkdir(parents=True, exist_ok=True)
+    tag = "minute_part2" if mode == "b2" else "minute_part"
+    final = "minute_b2only" if mode == "b2" else "minute"
     t0 = time.time()
     n_schunk = int(np.ceil(len(stocks) / STOCK_CHUNK))
     n_fchunk = int(np.ceil(len(rows) / FIELD_CHUNK))
     for fi in range(n_fchunk):
-        part_b1 = OUTDIR / f"minute_part_b1_{fi:02d}.pkl"
-        part_eod = OUTDIR / f"minute_part_eod_{fi:02d}.pkl"
+        part_b1 = OUTDIR / f"{tag}_b1_{fi:02d}.pkl"
+        part_eod = OUTDIR / f"{tag}_eod_{fi:02d}.pkl"
         if part_b1.exists() and part_eod.exists():  # 断点续跑
             print(f"  fi={fi:02d} 已有部件，跳过", flush=True)
             continue
@@ -152,7 +156,7 @@ def run(mode: str) -> None:
     # 最终组装：跨 fi 按列合并（索引唯一），再过滤到成员对
     import functools
     def _merge(kind: str) -> pd.DataFrame:
-        parts = [pd.read_pickle(p) for p in sorted(OUTDIR.glob(f"minute_part_{kind}_*.pkl"))]
+        parts = [pd.read_pickle(p) for p in sorted(OUTDIR.glob(f"{tag}_{kind}_*.pkl"))]
         if not parts:
             return pd.DataFrame()
         return functools.reduce(lambda a, b: a.join(b, how="outer"), parts).sort_index()
@@ -165,9 +169,9 @@ def run(mode: str) -> None:
     # （相邻日成分重合仅 ~15.9%，先过滤会让 t1 每天只剩 ~16 只 → IC 天数塌缩）；
     # 成员过滤发生在 metrics 侧 reindex(label.index)。
     suffix = "_bench" if mode == "bench" else ""
-    b1_all.to_pickle(OUTDIR / f"minute_b1{suffix}.pkl")
-    eod_all.to_pickle(OUTDIR / f"minute_eod{suffix}.pkl")
-    print(f"B1 {b1_all.shape} / EOD {eod_all.shape} → minute_*{suffix}.pkl"
+    b1_all.to_pickle(OUTDIR / f"{final}_b1{suffix}.pkl")
+    eod_all.to_pickle(OUTDIR / f"{final}_eod{suffix}.pkl")
+    print(f"B1 {b1_all.shape} / EOD {eod_all.shape} → {final}_*.pkl"
           f"；总用时 {(time.time()-t0)/60:.1f} min", flush=True)
 
 
