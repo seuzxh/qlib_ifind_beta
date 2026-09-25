@@ -51,12 +51,12 @@ purged rolling 验证脚本、joint TVT 档案——未通过准入，Champion �
 `docs/research/2026-09-24-factor-zoo-minute-research-plan.md`。
 
 执行结论（详见 `docs/backtest-log/2026-09-24-factor-zoo-screen.md`）：
-999/1007 表达式在 pyqlib 0.9.7 可求值（vendored+shim）；路线 A 筛出 15 个
-未测幸存者（去重后 2 族）但 18+2 冻结协议 augment IC 0.0496 vs 同批基线
-0.0603（劣化超噪声带）→ 拒绝；多日分钟加速状态尾部无区分度且 Champion
-Top10 与已加速股零交集，软惩罚 overlay 测试半窗全面劣化 → 拒绝。头号
-发现：B1 当日盘初价格位置族（alpha158/360 的 MAX5/MIN5/HIGH0/QTLD5，
-IC 0.05–0.083 双半窗稳定、残差保持 67–93%），但其 18+2 augment 亦拒绝
-（IC 0.0462，双半窗皆负）——后续若重启应改替换/正交化而非叠加；同表达式
-T-1 15:00 采样 0 过门槛（分钟 alpha 时点性极强）。四轨道全部闭环，
-Champion 不变；无候选晋升。工作区 data/mlruns 为软链主仓运行资产。
+999/1007 表达式在 pyqlib 0.9.7 可求值（vendored+shim）；多日分钟加速状态
+尾部无区分度且 Champion Top10 与已加速股零交集，软惩罚 overlay 拒绝。
+叠加式 augment 两轮拒绝后，2026-09-25 按用户指令升级为**替代挑战战役**：
+**C1（close_pos 1/3/5m → b1 域 alpha158 MAX5/MIN5/QTLD5）以 W1 IC
+0.0951 vs 基线 0.0603、独立 W2 IC 0.1563 vs 0.0810、purged 16 段胜率
+92%/段均值 IC 0.0656 vs 0.0335、拼接回撤 -12.4% vs -22.4% 通过终审**，
+为项目史上首个穿过 purged 分段滚动的挑战者，状态 `CHALLENGER/REVIEW`
+（不自动晋升；待 PortAna TD0 完整回测 + 人工审批 + 影子双轨）。C5 次优；
+替换动量/量能族（C2/C3）证伪。工作区 data/mlruns 为软链主仓运行资产。
