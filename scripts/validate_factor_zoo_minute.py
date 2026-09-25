@@ -161,8 +161,9 @@ def run(mode: str) -> None:
     members = member_pairs()
     if b1_all.shape[1]:
         b1_all = b1_all.loc[b1_all.index.isin(members)]
-    if eod_all.shape[1]:
-        eod_all = eod_all.loc[eod_all.index.isin(members)]
+    # eod 不做成员过滤：B2_t{k} 需要"T-k 日采样值"，该股 T-k 是否成分无关
+    # （相邻日成分重合仅 ~15.9%，先过滤会让 t1 每天只剩 ~16 只 → IC 天数塌缩）；
+    # 成员过滤发生在 metrics 侧 reindex(label.index)。
     suffix = "_bench" if mode == "bench" else ""
     b1_all.to_pickle(OUTDIR / f"minute_b1{suffix}.pkl")
     eod_all.to_pickle(OUTDIR / f"minute_eod{suffix}.pkl")

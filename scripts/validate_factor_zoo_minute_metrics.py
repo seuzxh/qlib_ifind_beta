@@ -32,11 +32,14 @@ LAG_N = {"t1": 1, "t2": 2, "t3": 3, "t5": 5}
 
 
 def shift_by_day(df: pd.DataFrame, k: int, day_cal: list[str]) -> pd.DataFrame:
-    """每股按交易日历 shift k（T 日特征 = T-k 日采样值）。"""
-    parts = []
+    """每股按交易日历 shift k（T 日特征 = T-k 日采样值）。
+
+    注意用 dict concat：键成为外层索引（与 accel 同款）；list concat 会丢失
+    股票层导致 rename_axis 报 "Length of new names must be 1"。
+    """
+    parts = {}
     for s, g in df.groupby(level="instrument"):
-        gg = g.droplevel("instrument").reindex(day_cal)
-        parts.append(gg.shift(k))
+        parts[s] = g.droplevel("instrument").reindex(day_cal).shift(k)
     out = pd.concat(parts).rename_axis(["instrument", "datetime"]).swaplevel()
     return out[~out.index.duplicated(keep="last")]
 

@@ -54,5 +54,8 @@ purged rolling 验证脚本、joint TVT 档案——未通过准入，Champion �
 999/1007 表达式在 pyqlib 0.9.7 可求值（vendored+shim）；路线 A 筛出 15 个
 未测幸存者（去重后 2 族）但 18+2 冻结协议 augment IC 0.0496 vs 同批基线
 0.0603（劣化超噪声带）→ 拒绝；多日分钟加速状态尾部无区分度且 Champion
-Top10 与已加速股零交集，软惩罚 overlay 测试半窗全面劣化 → 拒绝。
+Top10 与已加速股零交集，软惩罚 overlay 测试半窗全面劣化 → 拒绝。**头号
+发现：B1 当日盘初价格位置族（alpha158/360 的 MAX5/MIN5/HIGH0/QTLD5，
+IC 0.05–0.083 双半窗稳定、残差保持 67–93%）——唯一进入下轮 augment 终审
+的候选档案**；同表达式 T-1 15:00 采样 0 过门槛（分钟 alpha 时点性极强）。
 Champion 不变；无候选晋升。工作区 data/mlruns 为软链主仓运行资产。
