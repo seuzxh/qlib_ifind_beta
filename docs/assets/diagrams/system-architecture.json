@@ -1,0 +1,365 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "qlib_ifind_beta 系统架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1340,
+      680
+    ],
+    "output": "docs/assets/diagrams/system-architecture.html",
+    "repository": {
+      "url": "https://github.com/seuzxh/qlib_ifind_beta",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "4e1128c9ea1f00e51e4506b206df360a89d47c29"
+    },
+    "views": [
+      {
+        "id": "signal-chain",
+        "label": "信号主链",
+        "focus": [
+          "factors",
+          "champion",
+          "decision",
+          "paper",
+          "ledger"
+        ],
+        "note": "18 维因子到影子净值的每日主路径。"
+      },
+      {
+        "id": "data-supply",
+        "label": "数据供给",
+        "focus": [
+          "ifind",
+          "readonly",
+          "snapshot",
+          "overlay",
+          "factors"
+        ],
+        "note": "外部行情与只读历史如何落成本地可写资产。"
+      },
+      {
+        "id": "execution",
+        "label": "执行出口",
+        "focus": [
+          "decision",
+          "prod",
+          "operator",
+          "paper"
+        ],
+        "note": "同一决策合同驱动两条执行线：人工下单与自动撮合。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "ifind",
+      "type": "external",
+      "label": "iFinD 行情接口",
+      "sublabel": "快照 · 分钟K线 · 09:41 价",
+      "pos": [
+        70,
+        70
+      ],
+      "size": [
+        180,
+        74
+      ]
+    },
+    {
+      "id": "snapshot",
+      "type": "database",
+      "label": "成分快照存档",
+      "sublabel": "universe_snapshots.csv",
+      "pos": [
+        350,
+        180
+      ],
+      "size": [
+        190,
+        72
+      ]
+    },
+    {
+      "id": "readonly",
+      "type": "database",
+      "label": "只读行情源",
+      "sublabel": "日线 + 1分钟 bin",
+      "pos": [
+        70,
+        330
+      ],
+      "size": [
+        180,
+        74
+      ]
+    },
+    {
+      "id": "overlay",
+      "type": "database",
+      "label": "qlib_root overlay",
+      "sublabel": "派生字段 bin · 前向增量",
+      "pos": [
+        350,
+        330
+      ],
+      "size": [
+        190,
+        72
+      ]
+    },
+    {
+      "id": "factors",
+      "type": "backend",
+      "label": "因子引擎",
+      "sublabel": "18 维分钟特征",
+      "pos": [
+        560,
+        90
+      ],
+      "size": [
+        165,
+        72
+      ],
+      "sources": [
+        {
+          "path": "qlib_ifind_beta/minute_factors.py",
+          "label": "因子实现"
+        }
+      ]
+    },
+    {
+      "id": "champion",
+      "type": "backend",
+      "label": "冻结 Champion",
+      "sublabel": "HFLGB · 人工晋升切换",
+      "pos": [
+        560,
+        235
+      ],
+      "size": [
+        165,
+        72
+      ],
+      "sources": [
+        {
+          "path": "qrun/workflow_minute_enhanced_tk10_nd8.yaml",
+          "label": "Champion 配置"
+        }
+      ]
+    },
+    {
+      "id": "decision",
+      "type": "backend",
+      "label": "组合决策",
+      "sublabel": "Top10 / n_drop=8",
+      "pos": [
+        560,
+        380
+      ],
+      "size": [
+        165,
+        72
+      ],
+      "sources": [
+        {
+          "path": "qlib_ifind_beta/live/intraday.py",
+          "label": "plan_topk_dropout"
+        }
+      ]
+    },
+    {
+      "id": "paper",
+      "type": "backend",
+      "label": "影子模拟盘",
+      "sublabel": "cron 16:30 · 收盘估值",
+      "pos": [
+        830,
+        380
+      ],
+      "size": [
+        170,
+        72
+      ],
+      "sources": [
+        {
+          "path": "scripts/paper_shadow.py",
+          "label": "影子盘入口"
+        }
+      ]
+    },
+    {
+      "id": "prod",
+      "type": "backend",
+      "label": "盘中生产",
+      "sublabel": "六步 · 直连 iFinD",
+      "pos": [
+        830,
+        540
+      ],
+      "size": [
+        170,
+        72
+      ],
+      "sources": [
+        {
+          "path": "scripts/intraday_production.py",
+          "label": "生产入口"
+        }
+      ]
+    },
+    {
+      "id": "ledger",
+      "type": "database",
+      "label": "影子账本",
+      "sublabel": "nav.csv · 逐日净值",
+      "pos": [
+        1150,
+        380
+      ],
+      "size": [
+        150,
+        72
+      ]
+    },
+    {
+      "id": "operator",
+      "type": "external",
+      "label": "人工下单",
+      "sublabel": "先卖后买 · 方案B",
+      "tag": "不自动提交订单",
+      "pos": [
+        1150,
+        540
+      ],
+      "size": [
+        150,
+        72
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "数据运行资产（data/，不入 Git）",
+      "wraps": [
+        "snapshot",
+        "overlay"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "ifind-snapshot",
+      "from": "ifind",
+      "to": "snapshot",
+      "label": "每日成分快照"
+    },
+    {
+      "id": "readonly-overlay",
+      "from": "readonly",
+      "to": "overlay",
+      "label": "基底 bin"
+    },
+    {
+      "id": "overlay-factors",
+      "from": "overlay",
+      "to": "factors",
+      "label": "多日量能分母",
+      "labelAt": [
+        566,
+        320
+      ]
+    },
+    {
+      "id": "snapshot-factors",
+      "from": "snapshot",
+      "to": "factors",
+      "label": "当日观察池",
+      "labelAt": [
+        604,
+        200
+      ]
+    },
+    {
+      "id": "factors-champion",
+      "from": "factors",
+      "to": "champion",
+      "label": "特征矩阵",
+      "variant": "emphasis",
+      "labelAt": [
+        683,
+        176
+      ]
+    },
+    {
+      "id": "champion-decision",
+      "from": "champion",
+      "to": "decision",
+      "label": "截面分数",
+      "variant": "emphasis",
+      "labelAt": [
+        683,
+        321
+      ]
+    },
+    {
+      "id": "decision-paper",
+      "from": "decision",
+      "to": "paper",
+      "label": "同一决策合同",
+      "variant": "emphasis",
+      "labelDy": -18
+    },
+    {
+      "id": "decision-prod",
+      "from": "decision",
+      "to": "prod",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "调仓计划"
+    },
+    {
+      "id": "paper-ledger",
+      "from": "paper",
+      "to": "ledger",
+      "label": "日结算追加",
+      "variant": "emphasis"
+    },
+    {
+      "id": "prod-operator",
+      "from": "prod",
+      "to": "operator",
+      "label": "订单 CSV"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "数据供给",
+      "items": [
+        "iFinD 提供当日成分快照与实时分钟K线，只读源提供历史日线与 1 分钟 bin",
+        "qlib_root overlay 在只读基底上派生多日字段，随交易日前向增量"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "信号主链",
+      "items": [
+        "18 维分钟因子 → 冻结 Champion 打分 → Top10 / n_drop=8 组合决策",
+        "同一决策合同同时驱动影子模拟盘（自动撮合）与盘中生产（订单 CSV）"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "治理红线（fail-closed）",
+      "items": [
+        "订单 CSV 由人工提交，系统从不自动下单",
+        "候选模型仅产出 CANDIDATE 状态，人工审批后才能晋升切换 Champion"
+      ]
+    }
+  ]
+}

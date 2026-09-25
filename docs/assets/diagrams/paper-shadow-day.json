@@ -1,0 +1,311 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "影子模拟盘每日流程",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1148,
+      668
+    ],
+    "output": "docs/assets/diagrams/paper-shadow-day.html",
+    "views": [
+      {
+        "id": "daily-loop",
+        "label": "每日主循环",
+        "focus": [
+          "cron",
+          "gate",
+          "sync",
+          "universe",
+          "bars",
+          "score",
+          "plan",
+          "fills",
+          "value"
+        ],
+        "note": "16:30 触发到净值追加的一条主路径。"
+      },
+      {
+        "id": "gates",
+        "label": "门禁与补跑",
+        "focus": [
+          "cron",
+          "gate",
+          "skip"
+        ],
+        "note": "非交易日或账本残缺时 fail-closed 跳过，等待手动补跑。"
+      },
+      {
+        "id": "settle",
+        "label": "撮合与落账",
+        "focus": [
+          "plan",
+          "fills",
+          "value"
+        ],
+        "note": "冻结模型决策经 09:41 价撮合后估值对账并追加净值。"
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "ops",
+      "label": "调度与门禁"
+    },
+    {
+      "id": "data",
+      "label": "数据与评分"
+    },
+    {
+      "id": "trade",
+      "label": "撮合"
+    },
+    {
+      "id": "book",
+      "label": "账本"
+    }
+  ],
+  "phases": [
+    {
+      "id": "trigger",
+      "label": "触发与门禁",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "prepare",
+      "label": "数据与特征",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "dashed"
+    },
+    {
+      "id": "model",
+      "label": "评分与决策",
+      "fromCol": 4,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "settle",
+      "label": "撮合与落账",
+      "fromCol": 5,
+      "toCol": 5
+    }
+  ],
+  "groups": [
+    {
+      "id": "fail_closed",
+      "label": "fail-closed 分支",
+      "lane": "ops",
+      "fromCol": 2,
+      "toCol": 2,
+      "variant": "security"
+    }
+  ],
+  "mainPath": [
+    "cron",
+    "gate",
+    "sync",
+    "universe",
+    "bars",
+    "score",
+    "plan",
+    "fills",
+    "value"
+  ],
+  "nodes": [
+    {
+      "id": "cron",
+      "lane": "ops",
+      "col": 0,
+      "type": "messagebus",
+      "label": "16:30 定时触发",
+      "width": 122
+    },
+    {
+      "id": "gate",
+      "lane": "ops",
+      "col": 1,
+      "type": "security",
+      "label": "运行门禁",
+      "sublabel": "节假日 · 残缺账本检测",
+      "tag": "fail-closed",
+      "width": 122
+    },
+    {
+      "id": "skip",
+      "lane": "ops",
+      "col": 2,
+      "type": "security",
+      "label": "跳过待补跑",
+      "sublabel": "day --date 手动补跑",
+      "width": 122
+    },
+    {
+      "id": "sync",
+      "lane": "data",
+      "col": 1,
+      "type": "database",
+      "label": "分钟数据同步",
+      "sublabel": "iFinD → bin 前向增量",
+      "width": 122
+    },
+    {
+      "id": "universe",
+      "lane": "data",
+      "col": 2,
+      "type": "database",
+      "label": "当日成分快照",
+      "sublabel": "100 只观察池",
+      "width": 122
+    },
+    {
+      "id": "bars",
+      "lane": "data",
+      "col": 3,
+      "type": "database",
+      "label": "特征组装",
+      "sublabel": "18 因子 · 质量门槛",
+      "width": 122
+    },
+    {
+      "id": "score",
+      "lane": "data",
+      "col": 4,
+      "type": "backend",
+      "label": "Champion 打分",
+      "sublabel": "冻结 recorder",
+      "width": 122
+    },
+    {
+      "id": "plan",
+      "lane": "trade",
+      "col": 4,
+      "type": "backend",
+      "label": "组合决策",
+      "sublabel": "Top10 / n_drop=8",
+      "width": 122
+    },
+    {
+      "id": "fills",
+      "lane": "trade",
+      "col": 5,
+      "type": "backend",
+      "label": "09:41 撮合",
+      "sublabel": "涨跌停拦截",
+      "width": 122
+    },
+    {
+      "id": "value",
+      "lane": "book",
+      "col": 5,
+      "type": "database",
+      "label": "估值对账",
+      "sublabel": "追加 nav.csv",
+      "width": 122
+    }
+  ],
+  "edges": [
+    {
+      "id": "cron-gate",
+      "from": "cron",
+      "to": "gate",
+      "role": "main"
+    },
+    {
+      "id": "gate-skip",
+      "from": "gate",
+      "to": "skip",
+      "label": "非交易日 · 账本残缺",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "gate-sync",
+      "from": "gate",
+      "to": "sync",
+      "label": "交易日",
+      "role": "main"
+    },
+    {
+      "id": "sync-universe",
+      "from": "sync",
+      "to": "universe",
+      "role": "main"
+    },
+    {
+      "id": "universe-bars",
+      "from": "universe",
+      "to": "bars",
+      "label": "观察池",
+      "role": "main"
+    },
+    {
+      "id": "bars-score",
+      "from": "bars",
+      "to": "score",
+      "label": "18 因子",
+      "role": "main"
+    },
+    {
+      "id": "score-plan",
+      "from": "score",
+      "to": "plan",
+      "label": "截面分数",
+      "role": "main"
+    },
+    {
+      "id": "plan-fills",
+      "from": "plan",
+      "to": "fills",
+      "label": "卖/买清单",
+      "role": "main"
+    },
+    {
+      "id": "fills-value",
+      "from": "fills",
+      "to": "value",
+      "label": "成交回单",
+      "role": "main"
+    },
+    {
+      "id": "value-cron",
+      "from": "value",
+      "to": "cron",
+      "label": "次日 16:30",
+      "variant": "dashed",
+      "role": "return",
+      "route": "return-left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "门禁纪律",
+      "items": [
+        "定时入口为 scripts/cron_paper_shadow.sh（crontab 16:30）",
+        "节假日或前日账本残缺时直接跳过，不误标为节假日",
+        "失败日由 paper_shadow.py day --date 手动补跑，账本幂等续跑"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "冻结评分",
+      "items": [
+        "评分恒用冻结 Champion recorder，不随候选训练漂移",
+        "特征只用 09:41 前已闭合的分钟K线，禁止未来数据"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "结算口径",
+      "items": [
+        "成交按 09:41 参考价撮合，涨跌停封板拦截",
+        "收盘估值经对账（PASS）后追加 nav.csv，逐日闭环"
+      ]
+    }
+  ]
+}

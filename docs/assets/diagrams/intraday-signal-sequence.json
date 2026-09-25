@@ -1,0 +1,297 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "盘中信号生产时序（T 日）",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1060,
+      960
+    ],
+    "column_fit": "spread",
+    "output": "docs/assets/diagrams/intraday-signal-sequence.html",
+    "views": [
+      {
+        "id": "premarket",
+        "label": "盘前准备",
+        "focus": [
+          "prod",
+          "ifind",
+          "pool"
+        ],
+        "note": "日历校验与当日成分快照。"
+      },
+      {
+        "id": "signal",
+        "label": "盘中信号 09:31–09:41",
+        "focus": [
+          "prod",
+          "ifind",
+          "model",
+          "pool"
+        ],
+        "note": "十根闭合分钟K线到分数与订单的全链。"
+      },
+      {
+        "id": "manual-settle",
+        "label": "人工下单与盘后",
+        "focus": [
+          "pool",
+          "trader",
+          "shadow",
+          "ifind"
+        ],
+        "note": "CSV 交给人工执行；16:30 影子盘独立结算落账。"
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "ifind",
+      "type": "external",
+      "label": "iFinD 行情",
+      "sublabel": "快照 · 分钟K线"
+    },
+    {
+      "id": "prod",
+      "type": "backend",
+      "label": "盘中生产",
+      "sublabel": "六步子命令"
+    },
+    {
+      "id": "model",
+      "type": "backend",
+      "label": "冻结 Champion",
+      "sublabel": "HFLGB"
+    },
+    {
+      "id": "pool",
+      "type": "database",
+      "label": "生产产物目录",
+      "sublabel": "data/production_signals"
+    },
+    {
+      "id": "trader",
+      "type": "external",
+      "label": "操作员",
+      "sublabel": "人工下单"
+    },
+    {
+      "id": "shadow",
+      "type": "backend",
+      "label": "影子模拟盘",
+      "sublabel": "16:30 cron"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 296,
+      "label": "盘前"
+    },
+    {
+      "from": 312,
+      "to": 640,
+      "label": "盘中信号（09:31–09:41）"
+    },
+    {
+      "from": 656,
+      "to": 900,
+      "label": "下单 · 盘后 · 影子结算"
+    }
+  ],
+  "messages": [
+    {
+      "id": "m1",
+      "from": "prod",
+      "to": "ifind",
+      "y": 172,
+      "label": "① preflight 日历 + 模型 manifest 校验"
+    },
+    {
+      "id": "m2",
+      "from": "prod",
+      "to": "ifind",
+      "y": 218,
+      "label": "② universe 拉当日成分快照"
+    },
+    {
+      "id": "m3",
+      "from": "ifind",
+      "to": "prod",
+      "y": 262,
+      "label": "100 只成分（剔 ST/退市）",
+      "variant": "return"
+    },
+    {
+      "id": "m4",
+      "from": "prod",
+      "to": "pool",
+      "y": 330,
+      "label": "③ collect-factor-bars ×10（09:31–09:40 闭合bar）",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m5",
+      "from": "ifind",
+      "to": "prod",
+      "y": 376,
+      "label": "每分钟回传刚闭合的 K 线",
+      "variant": "return"
+    },
+    {
+      "id": "m6",
+      "from": "prod",
+      "to": "model",
+      "y": 430,
+      "label": "④ 特征矩阵（18 维）送打分",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m7",
+      "from": "model",
+      "to": "prod",
+      "y": 474,
+      "label": "截面分数",
+      "variant": "return"
+    },
+    {
+      "id": "m8",
+      "from": "prod",
+      "to": "pool",
+      "y": 520,
+      "label": "scores / 卖出计划（Top10·n_drop=8）"
+    },
+    {
+      "id": "m9",
+      "from": "prod",
+      "to": "ifind",
+      "y": 566,
+      "label": "⑤ 采 09:41 bar（price_941 / change_941）"
+    },
+    {
+      "id": "m10",
+      "from": "ifind",
+      "to": "prod",
+      "y": 606,
+      "label": "参考价与涨跌幅",
+      "variant": "return"
+    },
+    {
+      "id": "m11",
+      "from": "prod",
+      "to": "pool",
+      "y": 648,
+      "label": "buy_orders.csv（涨停拦截 · 100股取整）"
+    },
+    {
+      "id": "m12",
+      "from": "pool",
+      "to": "trader",
+      "y": 694,
+      "label": "订单 CSV 交给人工（先卖后买）"
+    },
+    {
+      "id": "m13",
+      "from": "trader",
+      "to": "pool",
+      "y": 738,
+      "label": "⑥ 成交回填 · reconcile 对账",
+      "variant": "dashed"
+    },
+    {
+      "id": "m14",
+      "from": "shadow",
+      "to": "pool",
+      "y": 790,
+      "label": "16:30 读取当日信号与回单",
+      "variant": "dashed"
+    },
+    {
+      "id": "m15",
+      "from": "shadow",
+      "to": "ifind",
+      "y": 834,
+      "label": "收盘估值价"
+    },
+    {
+      "id": "m16",
+      "from": "shadow",
+      "to": "pool",
+      "y": 872,
+      "label": "追加 nav.csv（对账 PASS）",
+      "variant": "emphasis"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "prod",
+      "from": 166,
+      "to": 300,
+      "type": "backend"
+    },
+    {
+      "participant": "ifind",
+      "from": 212,
+      "to": 270,
+      "type": "external"
+    },
+    {
+      "participant": "ifind",
+      "from": 370,
+      "to": 612,
+      "type": "external"
+    },
+    {
+      "participant": "prod",
+      "from": 324,
+      "to": 654,
+      "type": "backend"
+    },
+    {
+      "participant": "model",
+      "from": 424,
+      "to": 480,
+      "type": "backend"
+    },
+    {
+      "participant": "pool",
+      "from": 688,
+      "to": 744,
+      "type": "database"
+    },
+    {
+      "participant": "shadow",
+      "from": 784,
+      "to": 878,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "时间合同",
+      "items": [
+        "特征只用 09:41 前已闭合的分钟K线，禁止未来数据",
+        "09:41 参考价缺失时不回退收盘价，该股票日退出候选"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "两线一合同",
+      "items": [
+        "盘中线产出订单 CSV，由人工先卖后买提交",
+        "影子线 16:30 独立撮合结算，与盘中线共用同一决策合同"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "红线",
+      "items": [
+        "broker_orders_submitted 恒为 false，系统不碰真实订单",
+        "对账 cash_difference 必须为 0 才落账"
+      ]
+    }
+  ]
+}
