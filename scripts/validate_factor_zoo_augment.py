@@ -42,6 +42,7 @@ OPEN_COST, CLOSE_COST = 0.0005, 0.0015   # 与 champion yaml exchange_kwargs 一
 
 #: 由 --features 填充；handler 类在 task_train 进程内实例化，全局即可。
 FZ_FIELDS: list[str] = []
+DROP_FIELDS: list[str] = []   # 替换式挑战：从 18 因子中剔除的列名
 
 
 def safe_name(name: str) -> str:
@@ -105,11 +106,13 @@ def materialize(spec: str) -> str:
 
 
 class MinuteEnhancedFZHandler(MinuteEnhancedHandler):
-    """Champion handler + fz 研究字段（FZ_FIELDS 注入）。"""
+    """Champion handler + fz 研究字段（FZ_FIELDS/DROP_FIELDS 注入，支持替换式挑战）。"""
 
     def get_feature_config(self):
         fields, names = super().get_feature_config()
-        return fields + [f"${n}" for n in FZ_FIELDS], names + list(FZ_FIELDS)
+        keep = [(f, n) for f, n in zip(fields, names) if n not in DROP_FIELDS]
+        return ([f for f, _ in keep] + [f"${n}" for n in FZ_FIELDS],
+                [n for _, n in keep] + list(FZ_FIELDS))
 
 
 def port_metrics(recorder) -> dict:
