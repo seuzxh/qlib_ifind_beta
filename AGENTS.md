@@ -51,12 +51,12 @@ purged rolling 验证脚本、joint TVT 档案——未通过准入，Champion �
 `docs/research/2026-09-24-factor-zoo-minute-research-plan.md`。
 
 执行结论（详见 `docs/backtest-log/2026-09-24-factor-zoo-screen.md`）：
-999/1007 表达式在 pyqlib 0.9.7 可求值（vendored+shim）；多日分钟加速状态
-尾部无区分度且 Champion Top10 与已加速股零交集，软惩罚 overlay 拒绝。
-叠加式 augment 两轮拒绝后，2026-09-25 按用户指令升级为**替代挑战战役**：
-**C1（close_pos 1/3/5m → b1 域 alpha158 MAX5/MIN5/QTLD5）以 W1 IC
-0.0951 vs 基线 0.0603、独立 W2 IC 0.1563 vs 0.0810、purged 16 段胜率
-92%/段均值 IC 0.0656 vs 0.0335、拼接回撤 -12.4% vs -22.4% 通过终审**，
-为项目史上首个穿过 purged 分段滚动的挑战者，状态 `CHALLENGER/REVIEW`
-（不自动晋升；待 PortAna TD0 完整回测 + 人工审批 + 影子双轨）。C5 次优；
-替换动量/量能族（C2/C3）证伪。工作区 data/mlruns 为软链主仓运行资产。
+999/1007 表达式在 pyqlib 0.9.7 可求值（vendored+shim）。2026-09-25 替代
+挑战战役：**C1（close_pos×3 → b1 域 MAX5/MIN5/QTLD5）以 purged 16 段胜率
+92%、双窗 IC 翻倍成为史上最强挑战者，但 TD0 官方协议两窗合计净输
+（W1 +16.7% vs +12.2% 胜、W2 +9.9% vs +21.1% 败）——机制：C1 Top10 中
+49% 在 09:41 已涨停（禁买）vs Champion 仅 0.4%，排序 alpha 集中在生产
+合同买不到的名单上。无可替代方案成立，Champion 18 因子不变。**
+PortAna 死锁已三层修复（threading 后端/dayok universe/显式 codes），
+TD0 回测通道恢复可用。盘初极值类因子今后应先过"Top10 撞涨停率"闸门。
+工作区 data/mlruns 为软链主仓运行资产。
