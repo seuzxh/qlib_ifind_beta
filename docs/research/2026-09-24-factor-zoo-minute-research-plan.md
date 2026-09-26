@@ -251,7 +251,7 @@ Phase 0 需向 `update_universe` 的时间戳正式核实并写入审计记录�
 ## 六、分支与目录布局
 
 ```
-research/factor-zoo-20260924            # 基线 2a54281（= feat/paper-shadow tip，同 optimization-research 惯例）
+factor-zoo｜分钟因子匹配与替代挑战  # 原名 research/factor-zoo-20260924；基线 2a54281（= feat/paper-shadow tip，同 optimization-research 惯例）
 ├── qlib_ifind_beta/factor_zoo/         # vendored 表达式/算子 + excluded.json + 解析器
 ├── scripts/validate_factor_zoo_screen.py    # Phase 1（含加速状态变量构造）
 ├── scripts/validate_factor_zoo_augment.py   # Phase 2 alpha 轨

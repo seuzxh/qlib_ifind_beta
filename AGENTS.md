@@ -22,6 +22,8 @@ HFLGB Champion、Top10/n_drop=8；第一阶段只生成 CSV，由人工下单。
 
 ## 目录与约定
 
+- 研究分支命名（2026-09-26 用户约定）：**「模块名｜持续目标」**，如
+  `factor-zoo｜分钟因子匹配与替代挑战`；worktree 目录用模块名短路径。
 - `qlib_ifind_beta/`：可复用领域代码；`live/` 是生产与历史回放核心。
 - `scripts/`：CLI 编排；现役生产入口只有 `intraday_production.py`。
 - `qrun/`：Qlib 训练/回测配置；Champion 配置为 `workflow_minute_enhanced_tk10_nd8.yaml`。
@@ -43,7 +45,8 @@ purged rolling 验证脚本、joint TVT 档案——未通过准入，Champion �
 期末 1,121,694）；其中 8/27、9/11 为 rally 日封板股致特征 <80，门槛已改为机制下限
 （数据完整性仍由 bar gate 把守）。9/14 起 cron 前向，`report` 查看净值。
 
-2026-09-24 开出因子研究分支 `research/factor-zoo-20260924`（worktree
+2026-09-24 开出因子研究分支 `factor-zoo｜分钟因子匹配与替代挑战`（原名 research/factor-zoo-20260924，
+2026-09-26 按用户新约定「模块名｜持续目标」重命名；worktree
 `.worktrees/factor-zoo-research`）：探索 qlib-factor-zoo 六库 ~1013 因子与
 09:41 分钟策略的匹配度，核心路线是表达式移植到分钟域（当日盘初 10 根 +
 多日 T-1/2/3/5 全天 240 根；多日族用于识别"已经加速"状态并做尾部风险

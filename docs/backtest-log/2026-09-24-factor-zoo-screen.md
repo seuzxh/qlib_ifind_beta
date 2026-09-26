@@ -7,7 +7,7 @@ nav_order: 9
 
 # qlib-factor-zoo 六库广谱筛选与分钟域移植（Phase 0–2 执行记录）
 
-> 日期：2026-09-24（分支 `research/factor-zoo-20260924`，方案 v1.1）
+> 日期：2026-09-24（分支 `factor-zoo｜分钟因子匹配与替代挑战`，原名 research/factor-zoo-20260924；方案 v1.1）
 > 状态：**执行记录（筛选层 + 冻结协议 timebox）**；Champion 18 因子不变，
 > 无任何因子晋升——按方案 Phase 3 规则，晋升须 purged 19 段终审 + 人工审批
 > 产物：`reports/factor_zoo/`（本地产物，不入 Git）：`factor_zoo_smoke.json`、
