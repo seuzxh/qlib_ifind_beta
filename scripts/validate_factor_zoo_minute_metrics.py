@@ -21,6 +21,8 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import time
+
 import numpy as np
 import pandas as pd
 
@@ -60,20 +62,30 @@ def main(lags: list[str], names: list[str] | None, src: str = "minute") -> None:
                 print(f"  b1 {len(recs)}/{b1.shape[1]}", flush=True)
         pd.DataFrame(recs).to_csv(OUTDIR / "minute_b1_metrics.csv", index=False)
 
-    eod: pd.DataFrame = pd.read_pickle(OUTDIR / f"{src}_eod.pkl")
+    eod: pd.DataFrame = pd.read_pickle(
+        OUTDIR / ("minute_b2only_eod.pkl" if src == "b2only" else f"{src}_eod.pkl"))
+    from joblib import Parallel, delayed
+
+    def _block_metrics(blk: pd.DataFrame, tag_lag: str) -> list[dict]:
+        out = []
+        for c in blk.columns:
+            out.append({"name": f"b2_{tag_lag}__{c}", **summarize(blk[c], label, champs)})
+        return out
+
     for lag in lags:
         k = LAG_N[lag]
         cols = eod.columns if names is None else [c for c in eod.columns if c in names]
+        t0 = time.time()
         df = shift_by_day(eod[cols], k, day_cal).reindex(label.index)
-        recs = []
-        for col in df.columns:
-            recs.append({"name": f"b2_{lag}__{col}", **summarize(df[col], label, champs)})
-            if len(recs) % 100 == 0:
-                print(f"  {lag} {len(recs)}/{len(cols)}", flush=True)
+        print(f"  {lag} shift 完成 {(time.time()-t0)/60:.1f} min，指标计算中", flush=True)
+        blocks = [df.iloc[:, i:i + 40] for i in range(0, df.shape[1], 40)]
+        results = Parallel(n_jobs=16)(
+            delayed(_block_metrics)(b, lag) for b in blocks)
+        recs = [r for blk in results for r in blk]
         prefix = "b2only" if src == "b2only" else "minute_b2"
         out = OUTDIR / (f"{prefix}_{lag}_metrics.csv")
         pd.DataFrame(recs).to_csv(out, index=False)
-        print(f"saved {out}", flush=True)
+        print(f"saved {out}（{(time.time()-t0)/60:.1f} min）", flush=True)
 
 
 if __name__ == "__main__":
