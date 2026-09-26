@@ -223,7 +223,7 @@ class TopkDropoutStrategyTD0(TopkDropoutStrategy):
         # ... 其余原样 ...
 ```
 
-YAML 里 `strategy.class: TopkDropoutStrategyTD0`（+ `module_path: qlib_ifind_beta.td0_strategy`）。
+YAML 里 `strategy.class: TopkDropoutStrategyTD0`（+ `module_path: qlib_ifind_beta.trading.td0_strategy`）。
 
 ---
 
@@ -273,10 +273,10 @@ limit_threshold: ["$change_941 >= $limit_up", "$change <= $limit_down"]
 | 段 | 改动 |
 |---|---|
 | `qlib_init` | 不变（`provider_uri: data/qlib_root`）|
-| `handler.class` | `Alpha158` → `HighBetaAlpha158`（+ `module_path: qlib_ifind_beta.highbeta_handler`）|
+| `handler.class` | `Alpha158` → `HighBetaAlpha158`（+ `module_path: qlib_ifind_beta.factor.highbeta_handler`）|
 | `handler.kwargs.label` | `Ref($close,-2)/Ref($open,-1)-1` → `Ref($close,-1)/$price_941-1` |
 | `exchange.deal_price` | `["$open","$close"]` → `["$price_941","$close"]` |
-| **`strategy.class`**（v2）| `TopkDropoutStrategy` → `TopkDropoutStrategyTD0`（+ `module_path: qlib_ifind_beta.td0_strategy`）|
+| **`strategy.class`**（v2）| `TopkDropoutStrategy` → `TopkDropoutStrategyTD0`（+ `module_path: qlib_ifind_beta.trading.td0_strategy`）|
 | **`exchange.limit_threshold`**（v2）| `["$change >= $limit_up", "$change <= $limit_down"]` → `["$change_941 >= $limit_up", "$change <= $limit_down"]` |
 | 其余（model/executor/record/segments）| 不变 |
 

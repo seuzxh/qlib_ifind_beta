@@ -10,7 +10,7 @@
 后复权序列才是内部自洽口径（一字板日 gap 精确为 0 可证）。
 
 其余全部冻结：17 因子、label、HFLGB 超参、切分、TD0 策略、Exchange 成本，
-与 qrun/workflow_minute_enhanced_tk10_nd8.yaml 逐字段相同。结论仅供研究，
+与 examples/champion/workflow_minute_enhanced_tk10_nd8.yaml 逐字段相同。结论仅供研究，
 不晋升、不改动 Champion。
 
 Run:
@@ -32,7 +32,7 @@ import qlib
 from ruamel.yaml import YAML
 
 from qlib_ifind_beta.config import CHAMPION_RECORDER_ID, OVERLAY_ROOT
-from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
+from qlib_ifind_beta.factor.minute_enhanced_handler import MinuteEnhancedHandler
 
 ADJ_EXPR = "($open / Ref($close, 1)) - 1"
 EXPERIMENT = "gap_adjusted_variant"
@@ -90,11 +90,11 @@ def main() -> None:
 
     # ② 全流程 A/B：变体 handler 完整训练 + 回测
     print("\n▶ ② 全流程变体训练（唯一变量 overnight_gap 口径）")
-    cfg = YAML(typ="safe").load(open(ROOT / "qrun" / "workflow_minute_enhanced_tk10_nd8.yaml"))
+    cfg = YAML(typ="safe").load(open(ROOT / "examples" / "champion" / "workflow_minute_enhanced_tk10_nd8.yaml"))
     task = cfg["task"]
     handler = task["dataset"]["kwargs"]["handler"]
     handler["class"] = "MinuteEnhancedAdjGapHandler"
-    handler["module_path"] = "scripts.validate_gap_adjusted"
+    handler["module_path"] = "examples.research.validate_gap_adjusted"
     _coerce_limit_threshold(task)
     rec = task_train(task, experiment_name=EXPERIMENT)
     rid = getattr(rec, "recorder_id", None) or rec.id

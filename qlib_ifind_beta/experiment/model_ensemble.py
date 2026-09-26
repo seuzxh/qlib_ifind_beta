@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .config import (
+from ..config import (
     CHAMPION_EXPERIMENT,
     CHAMPION_RECORDER_ID,
     ROLLING_EMBARGO_DAYS,

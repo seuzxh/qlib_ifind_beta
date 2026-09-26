@@ -58,7 +58,7 @@ tail -5 logs/paper_shadow.log                                               # cr
 ```bash
 conda run -n qlib_ifind_beta python -m scripts.build_overlay   # ① overlay（一次性）
 conda run -n qlib_ifind_beta python scripts/materialize_minute.py  # ② 分钟因子物化
-conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml  # ③ 训练回测
+conda run -n qlib_ifind_beta python qrun/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml  # ③ 训练回测
 conda run -n qlib_ifind_beta python -m pytest -q               # ④ 全量测试
 ```
 

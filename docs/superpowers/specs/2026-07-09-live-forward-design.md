@@ -78,7 +78,7 @@ pred = model.predict(dataset, segment="inference")      # pandas.Series, index=(
 
 ```python
 from qlib.data.dataset import DatasetH
-from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
+from qlib_ifind_beta.factor.minute_enhanced_handler import MinuteEnhancedHandler
 
 handler = MinuteEnhancedHandler(
     instruments="highbeta883926",

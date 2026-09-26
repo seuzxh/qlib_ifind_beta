@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 class TestBarsToArrays:
     def test_basic_conversion(self):
-        from qlib_ifind_beta.realtime.signal import _bars_to_arrays
+        from qlib_ifind_beta.live.realtime.signal import _bars_to_arrays
 
         # Create 11 mock bars (09:31-09:41)
         bars = []
@@ -49,14 +49,14 @@ class TestBarsToArrays:
         assert result["vol"][10] == 2000
 
     def test_insufficient_bars(self):
-        from qlib_ifind_beta.realtime.signal import _bars_to_arrays
+        from qlib_ifind_beta.live.realtime.signal import _bars_to_arrays
 
         bars = [{"close": 10.0, "open": 10.0, "high": 10.0, "low": 10.0,
                  "volume": 1000, "amount": 10000}] * 5
         assert _bars_to_arrays(bars) is None
 
     def test_vwap_from_amount_volume(self):
-        from qlib_ifind_beta.realtime.signal import _bars_to_arrays
+        from qlib_ifind_beta.live.realtime.signal import _bars_to_arrays
 
         bars = []
         for i in range(11):
@@ -69,7 +69,7 @@ class TestBarsToArrays:
         assert result["vwap"][0] == 10.5
 
     def test_vwap_fallback_when_volume_zero(self):
-        from qlib_ifind_beta.realtime.signal import _bars_to_arrays
+        from qlib_ifind_beta.live.realtime.signal import _bars_to_arrays
 
         bars = []
         for i in range(11):
@@ -99,7 +99,7 @@ class TestComputeAllFactors:
                 "vwap": vwap, "amount": amount}
 
     def test_basic_factors(self):
-        from qlib_ifind_beta.realtime.signal import _compute_all_factors
+        from qlib_ifind_beta.live.realtime.signal import _compute_all_factors
 
         arrs = self._make_mock_arrays()
         prev_vols = [240000.0, 230000.0, 220000.0, 200000.0]
@@ -124,7 +124,7 @@ class TestComputeAllFactors:
         assert factors["price_941"] == arrs["c"][10]
 
     def test_nan_prev_vols(self):
-        from qlib_ifind_beta.realtime.signal import _compute_all_factors
+        from qlib_ifind_beta.live.realtime.signal import _compute_all_factors
 
         arrs = self._make_mock_arrays()
         prev_vols = [0.0, 0.0, 0.0, 0.0]  # all zero
@@ -136,7 +136,7 @@ class TestComputeAllFactors:
         assert np.isnan(factors["overnight_gap"])
 
     def test_vol_vs_yest_t5_correct(self):
-        from qlib_ifind_beta.realtime.signal import _compute_all_factors
+        from qlib_ifind_beta.live.realtime.signal import _compute_all_factors
         from qlib_ifind_beta.config import REAL_BARS_PER_DAY
 
         arrs = self._make_mock_arrays()
@@ -150,7 +150,7 @@ class TestComputeAllFactors:
         assert abs(factors["vol_vs_yest_t5"] - expected) < 1e-6
 
     def test_change_941_unadjusted(self):
-        from qlib_ifind_beta.realtime.signal import _compute_all_factors
+        from qlib_ifind_beta.live.realtime.signal import _compute_all_factors
 
         arrs = self._make_mock_arrays()
         daily_info = {"prev_close": 9.8, "prev_factor": 2.0,
@@ -171,8 +171,8 @@ class TestPredictInMemory:
         from types import SimpleNamespace
         import qlib
         from qlib.data import D
-        from qlib_ifind_beta import materialize
-        from qlib_ifind_beta.realtime import signal
+        from qlib_ifind_beta.data import materialize
+        from qlib_ifind_beta.live.realtime import signal
 
         monkeypatch.setattr(qlib, "init", lambda **kwargs: None)
         monkeypatch.setattr(D, "instruments", lambda **kwargs: ["A", "B"], raising=False)
@@ -209,7 +209,7 @@ class TestPredictInMemory:
 
 class TestDataFetchUniverse:
     def test_load_universe_returns_codes(self):
-        from qlib_ifind_beta.realtime.data_fetch import load_universe
+        from qlib_ifind_beta.live.realtime.data_fetch import load_universe
 
         # Use a known date that should have universe data
         codes = load_universe("2026-07-10")
@@ -217,7 +217,7 @@ class TestDataFetchUniverse:
         assert all(c.startswith(("SH", "SZ", "BJ")) for c in codes[:10])
 
     def test_load_universe_empty_future_date(self):
-        from qlib_ifind_beta.realtime.data_fetch import load_universe
+        from qlib_ifind_beta.live.realtime.data_fetch import load_universe
 
         # A date far in the future should return empty
         codes = load_universe("2099-01-01")
@@ -227,7 +227,7 @@ class TestDataFetchUniverse:
 class TestPrevDayVolumes:
     def test_prev_day_volumes_multi(self):
         """Test that we can read prev-day volumes from cn_data_1min."""
-        from qlib_ifind_beta.realtime.data_fetch import (
+        from qlib_ifind_beta.live.realtime.data_fetch import (
             get_prev_day_volumes_multi, load_universe,
         )
 

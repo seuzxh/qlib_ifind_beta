@@ -31,10 +31,10 @@ import numpy as np
 import pandas as pd
 import qlib
 
-import scripts.validate_factor_zoo_augment as A
-from qlib_ifind_beta import binio
+import examples.factor_zoo.validate_factor_zoo_augment as A
+from qlib_ifind_beta.data import binio
 from qlib_ifind_beta.config import OVERLAY_ROOT
-from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
+from qlib_ifind_beta.factor.minute_enhanced_handler import MinuteEnhancedHandler
 
 OUTDIR = ROOT / "reports" / "factor_zoo"
 B1 = "b1__alpha158__"
@@ -146,7 +146,7 @@ def main() -> None:
     # 同批基线
     A.FZ_FIELDS.clear(), A.DROP_FIELDS.clear()
     base_rec = A.run_task("MinuteEnhancedHandler",
-                          "qlib_ifind_beta.minute_enhanced_handler", portana=False)
+                          "qlib_ifind_beta.factor.minute_enhanced_handler", portana=False)
     bm = base_rec.list_metrics()
     bp = base_rec.load_object("pred.pkl")
     bp = (bp.iloc[:, 0] if isinstance(bp, pd.DataFrame) else bp)

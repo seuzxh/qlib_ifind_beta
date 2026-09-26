@@ -35,8 +35,8 @@ from qlib_ifind_beta.config import (
     REAL_BARS_PER_DAY, SLOTS_PER_DAY, OVERLAY_ROOT,
     CHAMPION_TOPK, UNIVERSE_MARKET,
 )
-from qlib_ifind_beta.minute_factors import compute_champion_factors
-from qlib_ifind_beta.model_ensemble import load_model_bundle, predict_bundle_matrix
+from qlib_ifind_beta.factor.minute_factors import compute_champion_factors
+from qlib_ifind_beta.experiment.model_ensemble import load_model_bundle, predict_bundle_matrix
 
 from .data_fetch import (
     fetch_bars_parallel, get_prev_day_volumes_multi,
@@ -234,7 +234,7 @@ def _predict_in_memory(target_date: str, factor_rows: dict[str, dict],
 
     # 6. Get limit_up/limit_down for buy interception.
     # Primary: read from overlay bins. Fallback: board_limit() per-code constant.
-    from qlib_ifind_beta.materialize import board_limit as _board_limit
+    from qlib_ifind_beta.data.materialize import board_limit as _board_limit
     aux_day = {}
     try:
         aux = D.features(D.instruments(market=UNIVERSE_MARKET),

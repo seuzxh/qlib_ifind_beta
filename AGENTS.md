@@ -9,7 +9,7 @@ HFLGB Champion、Top10/n_drop=8；第一阶段只生成 CSV，由人工下单。
 
 - 只使用 conda 环境 `qlib_ifind_beta`，不要调用系统 Python。
 - 测试：`conda run -n qlib_ifind_beta python -m pytest -q`
-- Champion 复现：`conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml`
+- Champion 复现：`conda run -n qlib_ifind_beta python qrun/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml`
 - 盘中生产入口：`conda run -n qlib_ifind_beta python scripts/intraday_production.py --help`
 - 历史影子回放：`conda run -n qlib_ifind_beta python scripts/replay_intraday_shadow.py`
 

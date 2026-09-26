@@ -151,7 +151,7 @@ def _to_ts(ser: pd.Series) -> pd.Series:
 
 
 def diag(wide: pd.DataFrame) -> None:
-    from qlib_ifind_beta.factor_zoo.screen_lib import daily_rank_ic
+    from qlib_ifind_beta.experiment.screen_lib import daily_rank_ic
     meta: pd.DataFrame = pd.read_pickle(OUTDIR / "dayf_meta.pkl")
     meta = meta.reorder_levels(["datetime", "instrument"]).sort_index()
     label = meta["LABEL"]

@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 from qlib_ifind_beta.config import OVERLAY_ROOT
-from qlib_ifind_beta.factor_zoo.screen_lib import summarize
+from qlib_ifind_beta.experiment.screen_lib import summarize
 
 OUTDIR = ROOT / "reports" / "factor_zoo"
 LAG_N = {"t1": 1, "t2": 2, "t3": 3, "t5": 5}

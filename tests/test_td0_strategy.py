@@ -4,7 +4,7 @@ import inspect
 import pytest
 
 from qlib.contrib.strategy.signal_strategy import TopkDropoutStrategy
-from qlib_ifind_beta.td0_strategy import TopkDropoutStrategyTD0
+from qlib_ifind_beta.trading.td0_strategy import TopkDropoutStrategyTD0
 
 
 def test_td0_is_subclass_of_topkdropout():

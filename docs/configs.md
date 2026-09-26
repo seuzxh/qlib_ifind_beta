@@ -102,7 +102,7 @@ mlruns`。实测全流程（含 PortAna 回测）约 **13 秒**（2026-09-06 重
 ## yml 与生产链路的关系（关键）
 
 ```text
-qrun/workflow_minute_enhanced_tk10_nd8.yaml          scripts/retrain.py（不读 yml）
+examples/champion/workflow_minute_enhanced_tk10_nd8.yaml          scripts/retrain.py（不读 yml）
         │ qrun/run.py 训练                               │ 程序化模板：超参与 Champion 相同，
         ▼                                                │ 窗口按 90/20/embargo1/test≤20 滚动
 mlruns/1568…/93d435e0…/  ←—— 冻结 Champion ———          ▼

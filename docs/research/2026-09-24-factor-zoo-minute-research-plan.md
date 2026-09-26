@@ -233,7 +233,7 @@ Phase 0 需向 `update_universe` 的时间戳正式核实并写入审计记录�
 ### Phase 2 — 冻结协议增量验证（仅 shortlist）
 
 1. 18+k（k≤5）augment：除新增特征外，与
-   `qrun/workflow_minute_enhanced_tk10_nd8.yaml` **逐字段一致**
+   `examples/champion/workflow_minute_enhanced_tk10_nd8.yaml` **逐字段一致**
    （handler 类、HFLGB 超参、切分、Top10/nd8、成本、涨跌停约束）。
 2. 验证：复用 `rolling_validate.py` 的 purged 19 折门槛 + 第二窗口；
    报告 IC / 超额 / 最大回撤 / Calmar / 换手。

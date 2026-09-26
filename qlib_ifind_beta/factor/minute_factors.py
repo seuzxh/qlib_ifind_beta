@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .config import REAL_BARS_PER_DAY
+from ..config import REAL_BARS_PER_DAY
 
 
 def compute_day_factors(c, o, h, l, vol, prev_day_minute_vol=None) -> dict:

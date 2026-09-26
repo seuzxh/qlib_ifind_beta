@@ -10,7 +10,7 @@ nav_order: 1
 09:31–09:40 的十根分钟 K 线生成信号，09:41 生成买入价格与 CSV，最终由人工下单。
 
 > 本站面向项目交接、研究复核和生产操作。模型、因子和运行状态以仓库当前代码与
-> `qrun/workflow_minute_enhanced_tk10_nd8.yaml` 为准；日期标记为 2026-08-17。
+> `examples/champion/workflow_minute_enhanced_tk10_nd8.yaml` 为准；日期标记为 2026-08-17。
 
 ## 现役结论
 
@@ -41,7 +41,7 @@ nav_order: 1
 
 ```bash
 conda run -n qlib_ifind_beta python -m pytest -q
-conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml
+conda run -n qlib_ifind_beta python qrun/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml
 conda run -n qlib_ifind_beta python scripts/intraday_production.py --help
 conda run -n qlib_ifind_beta python scripts/replay_intraday_shadow.py
 conda run -n qlib_ifind_beta python scripts/paper_shadow.py report   # 影子模拟盘净值

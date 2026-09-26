@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 
-from qlib_ifind_beta.binio import read_bin as _read_bin
+from qlib_ifind_beta.data.binio import read_bin as _read_bin
 from qlib_ifind_beta.config import CHAMPION_EXPERIMENT, CHAMPION_RECORDER_ID, FEATURES_1MIN_SRC
 from qlib_ifind_beta.config import DAY_CAL, MIN_CAL, OVERLAY_ROOT, PROJECT_ROOT
 
@@ -95,7 +95,7 @@ def day(date: str) -> dict:
     import qlib
     qlib.init(provider_uri=str(OVERLAY_ROOT), region="cn")
     from qlib_ifind_beta.live.historical_replay import HistoricalReplaySource
-    from qlib_ifind_beta.model_ensemble import load_model_bundle
+    from qlib_ifind_beta.experiment.model_ensemble import load_model_bundle
     from scripts.replay_intraday_shadow import _eligible_snapshots, run_paper_day
 
     _, positions, cash = load_latest_state(ROOT, date)

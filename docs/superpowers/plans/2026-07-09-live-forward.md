@@ -204,7 +204,7 @@ def predict_day(date: str,
     from qlib.workflow import R
     from qlib.data import D
     from qlib.data.dataset import DatasetH
-    from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
+    from qlib_ifind_beta.factor.minute_enhanced_handler import MinuteEnhancedHandler
 
     # 1. load 冻结 model（params.pkl = LGBModel 实例，spike 验证）
     rec = R.get_recorder(recorder_id=recorder_id, experiment_name=experiment_name)

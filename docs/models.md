@@ -9,7 +9,7 @@ nav_order: 5
 ## 生产 Champion
 
 当前生产模型是 Qlib `HFLGBModel`，配置位于
-`qrun/workflow_minute_enhanced_tk10_nd8.yaml`。
+`examples/champion/workflow_minute_enhanced_tk10_nd8.yaml`。
 
 | 项目 | 现役配置 |
 | --- | --- |

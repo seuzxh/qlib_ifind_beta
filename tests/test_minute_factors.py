@@ -8,7 +8,7 @@ See spec §因子集 for formula derivation.
 import numpy as np
 import pytest
 
-from qlib_ifind_beta.minute_factors import compute_day_factors
+from qlib_ifind_beta.factor.minute_factors import compute_day_factors
 
 
 def _synthetic():

@@ -32,9 +32,9 @@ import pandas as pd
 import qlib
 from ruamel.yaml import YAML
 
-from qlib_ifind_beta import binio
+from qlib_ifind_beta.data import binio
 from qlib_ifind_beta.config import CHAMPION_RECORDER_ID, OVERLAY_ROOT
-from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
+from qlib_ifind_beta.factor.minute_enhanced_handler import MinuteEnhancedHandler
 
 OUTDIR = ROOT / "reports" / "factor_zoo"
 EXPERIMENT = "factor_zoo_augment"
@@ -128,12 +128,12 @@ def port_metrics(recorder) -> dict:
             "Calmar": f"{ann/abs(dd):.2f}" if dd else "inf"}
 
 
-def run_task(handler_class: str, module_path: str = "scripts.validate_factor_zoo_augment",
+def run_task(handler_class: str, module_path: str = "examples.factor_zoo.validate_factor_zoo_augment",
              portana: bool = True) -> object:
     """portana=False 时剥掉 PortAnaRecord（本机 task_train 回测段死锁，
     timebox 内改用自带重放口径对比；全漏斗留待后续）。"""
     from qlib.model.trainer import task_train
-    cfg = YAML(typ="safe").load(open(ROOT / "qrun" / "workflow_minute_enhanced_tk10_nd8.yaml"))
+    cfg = YAML(typ="safe").load(open(ROOT / "examples" / "champion" / "workflow_minute_enhanced_tk10_nd8.yaml"))
     task = cfg["task"]
     h = task["dataset"]["kwargs"]["handler"]
     h["class"] = handler_class
@@ -175,9 +175,9 @@ def main() -> None:
     qlib.init(provider_uri=str(OVERLAY_ROOT), region="cn")
 
     print("▶ ① 物化研究 bin", flush=True)
-    # 关键：task_train 按 "scripts.validate_factor_zoo_augment" 路径导入本模块，
+    # 关键：task_train 按 "examples.factor_zoo.validate_factor_zoo_augment" 路径导入本模块，
     # 与 __main__ 是两个模块对象 —— 必须写进可导入的那份，否则 handler 加 0 字段。
-    import scripts.validate_factor_zoo_augment as _importable
+    import examples.factor_zoo.validate_factor_zoo_augment as _importable
     _importable.FZ_FIELDS.clear()
     FZ_FIELDS.clear()
     filled = [materialize(sp) for sp in specs]
@@ -196,7 +196,7 @@ def main() -> None:
 
     print("▶ ② 同批基线（18 因子，同配置重训，SignalRecord）", flush=True)
     base_rec = run_task("MinuteEnhancedHandler",
-                        "qlib_ifind_beta.minute_enhanced_handler", portana=False)
+                        "qlib_ifind_beta.factor.minute_enhanced_handler", portana=False)
     bm = base_rec.list_metrics()
     base_pred = _pred(base_rec)
     print(f"  baseline IC={bm.get('IC'):.4f} RankIC={bm.get('Rank IC'):.4f}", flush=True)

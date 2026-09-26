@@ -20,10 +20,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from qlib_ifind_beta.config import OVERLAY_ROOT, ROLLING_ENSEMBLE_WEIGHT
-from qlib_ifind_beta.model_ensemble import (
+from qlib_ifind_beta.experiment.model_ensemble import (
     blend_scores, correlation_metrics, gate_passes, predict_feature_matrix,
 )
-from scripts.validate_factor_challengers import _backtest, _task
+from examples.research.validate_factor_challengers import _backtest, _task
 
 HF_EXPERIMENT = "rolling_90d_purged_hflgb"
 XGB_EXPERIMENT = "rolling_90d_purged_xgb"
@@ -57,7 +57,7 @@ def purged_segments(calendar: list[pd.Timestamp],
 def build_task(segments: dict[str, list[str]], variant: str) -> dict:
     model_segments = {key: segments[key] for key in ("train", "valid", "test")}
     return _task(
-        "MinuteEnhancedHandler", "qlib_ifind_beta.minute_enhanced_handler",
+        "MinuteEnhancedHandler", "qlib_ifind_beta.factor.minute_enhanced_handler",
         model_segments, variant,
     )
 

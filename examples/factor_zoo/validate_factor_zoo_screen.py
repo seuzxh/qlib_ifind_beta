@@ -34,8 +34,8 @@ import pandas as pd
 import qlib
 
 from qlib_ifind_beta.config import CHAMPION_LABEL_EXPR, OVERLAY_ROOT, UNIVERSE_MARKET
-from qlib_ifind_beta.factor_zoo import iter_all_factors, register_zoo_ops
-from qlib_ifind_beta.factor_zoo.screen_lib import residual_ic, summarize
+from qlib_ifind_beta.factor.factor_zoo import iter_all_factors, register_zoo_ops
+from qlib_ifind_beta.experiment.screen_lib import residual_ic, summarize
 
 OUTDIR = ROOT / "reports" / "factor_zoo"
 CHUNK = 50
@@ -91,7 +91,7 @@ def stage_feat() -> None:
 
     # meta：label + 18 champion 因子（不经 handler 实例化——其默认 instruments
     # 是 csi500，overlay 里不存在；直接用类属性拼表达式）
-    from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
+    from qlib_ifind_beta.factor.minute_enhanced_handler import MinuteEnhancedHandler
     names = list(MinuteEnhancedHandler.ENHANCED_FIELDS)
     fields = [f"${n}" for n in names]
     meta = _universe_features([CHAMPION_LABEL_EXPR] + fields, ["LABEL"] + names)
@@ -101,7 +101,7 @@ def stage_feat() -> None:
 
 def _daily_ic(factor: pd.Series, label: pd.Series) -> pd.Series:
     """兼容别名 → screen_lib.daily_rank_ic。"""
-    from qlib_ifind_beta.factor_zoo.screen_lib import daily_rank_ic
+    from qlib_ifind_beta.experiment.screen_lib import daily_rank_ic
     return daily_rank_ic(factor, label)
 
 

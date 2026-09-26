@@ -66,7 +66,7 @@ def _build_task(model_cfg, t):
         "dataset": {"class": "DatasetH", "module_path": "qlib.data.dataset",
                     "kwargs": {"handler": {
                         "class": "MinuteEnhancedHandler",
-                        "module_path": "qlib_ifind_beta.minute_enhanced_handler",
+                        "module_path": "qlib_ifind_beta.factor.minute_enhanced_handler",
                         "kwargs": {"instruments": UNIVERSE_MARKET,
                                    "start_time": t["train"][0].strftime("%Y-%m-%d"),
                                    "end_time": t["test"][1].strftime("%Y-%m-%d"),

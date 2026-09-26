@@ -39,7 +39,7 @@ scripts/ 与 qrun/ 下每个入口的用途、命令行参数与内部执行链�
 ## 主干链 A：qrun 训练回测（13 秒全流程）
 
 ```bash
-conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml
+conda run -n qlib_ifind_beta python qrun/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml
 ```
 
 内部执行链（`run.py` 加载 yml → 修正 limit_threshold list→tuple → qlib.init →

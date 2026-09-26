@@ -53,7 +53,7 @@ def _build_task_template() -> dict:
             "kwargs": {
                 "handler": {
                     "class": "MinuteEnhancedHandler",
-                    "module_path": "qlib_ifind_beta.minute_enhanced_handler",
+                    "module_path": "qlib_ifind_beta.factor.minute_enhanced_handler",
                     "kwargs": {
                         "instruments": UNIVERSE_MARKET,
                         "start_time": ROLL_START,   # 会被逐任务覆盖

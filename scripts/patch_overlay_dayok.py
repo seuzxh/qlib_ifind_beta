@@ -10,8 +10,8 @@ import sys
 sys.path.insert(0, ".")
 import numpy as np
 from qlib_ifind_beta.config import OVERLAY_ROOT
-from qlib_ifind_beta.materialize import board_limit
-from qlib_ifind_beta import binio
+from qlib_ifind_beta.data.materialize import board_limit
+from qlib_ifind_beta.data import binio
 
 feat = OVERLAY_ROOT / "features"
 fixed = 0

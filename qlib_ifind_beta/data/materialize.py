@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from .binio import read_bin, write_bin
-from .config import FEATURES_SRC, FEATURES_DST, FREQ
+from ..config import FEATURES_SRC, FEATURES_DST, FREQ
 
 # --- A-share board limit tiers ------------------------------------------------
 # qlib convention: "just below" the nominal limit (0.095 not 0.10) so the float

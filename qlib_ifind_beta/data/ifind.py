@@ -23,7 +23,7 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-from .config import IFIND_TOKEN_FILE
+from ..config import IFIND_TOKEN_FILE
 
 # quant gateway
 IFIND_TOKEN_URL = "https://quantapi.51ifind.com/api/v1/get_access_token"

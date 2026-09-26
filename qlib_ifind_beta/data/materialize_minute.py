@@ -40,7 +40,7 @@ from pathlib import Path
 import numpy as np
 
 from .binio import read_bin, write_bin
-from .config import (
+from ..config import (
     BUY_SLOT, DAY_CAL, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FREQ,
     FIRST_FEATURE_SLOT, MIN_CAL,
     MINUTE_CHANGE_941_FIELD, MINUTE_DEAL_PRICE_FIELD,

@@ -22,7 +22,7 @@ import pandas as pd
 import qlib
 from ruamel.yaml import YAML
 
-import scripts.validate_factor_zoo_augment as A
+import examples.factor_zoo.validate_factor_zoo_augment as A
 
 OUTDIR = ROOT / "reports" / "factor_zoo"
 B1 = "b1__alpha158__"
@@ -37,7 +37,7 @@ W2_SEG = {"train": ["2024-01-01", "2025-06-30"],
 
 def run_task_seg(handler_class: str, module_path: str, seg: dict | None):
     from qlib.model.trainer import task_train
-    cfg = YAML(typ="safe").load(open(ROOT / "qrun" / "workflow_minute_enhanced_tk10_nd8.yaml"))
+    cfg = YAML(typ="safe").load(open(ROOT / "examples" / "champion" / "workflow_minute_enhanced_tk10_nd8.yaml"))
     task = cfg["task"]
     h = task["dataset"]["kwargs"]["handler"]
     h["class"] = handler_class
@@ -75,15 +75,15 @@ def main() -> None:
 
     print("▶ ① 确定性重跑（窗口1，应复现 IC=0.0951/0.0943）", flush=True)
     run_and_report("C1@W1-dup", "MinuteEnhancedFZHandler",
-                   "scripts.validate_factor_zoo_augment", None, label, C1_DROP, fz["c1"])
+                   "examples.factor_zoo.validate_factor_zoo_augment", None, label, C1_DROP, fz["c1"])
 
     print("▶ ② 第二窗口 A/B（test 2025-09→12，三方同切分）", flush=True)
     rb = run_and_report("BASE@W2", "MinuteEnhancedHandler",
-                        "qlib_ifind_beta.minute_enhanced_handler", W2_SEG, label, [], [])
+                        "qlib_ifind_beta.factor.minute_enhanced_handler", W2_SEG, label, [], [])
     r1 = run_and_report("C1@W2", "MinuteEnhancedFZHandler",
-                        "scripts.validate_factor_zoo_augment", W2_SEG, label, C1_DROP, fz["c1"])
+                        "examples.factor_zoo.validate_factor_zoo_augment", W2_SEG, label, C1_DROP, fz["c1"])
     r5 = run_and_report("C5@W2", "MinuteEnhancedFZHandler",
-                        "scripts.validate_factor_zoo_augment", W2_SEG, label, C5_DROP, fz["c5"])
+                        "examples.factor_zoo.validate_factor_zoo_augment", W2_SEG, label, C5_DROP, fz["c5"])
     for name, r in (("C1", r1), ("C5", r5)):
         both = pd.DataFrame({"b": rb, "c": r}).dropna()
         h = len(both) // 2

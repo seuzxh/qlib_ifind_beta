@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from qlib_ifind_beta.factor_zoo.parse import classify, iter_calls, max_window, ops_used
+from qlib_ifind_beta.factor.factor_zoo.parse import classify, iter_calls, max_window, ops_used
 
 
 class TestParse:
@@ -43,7 +43,7 @@ class TestParse:
 class TestOpsCompat:
     def test_shims_built_and_picklable(self):
         import pickle
-        from qlib_ifind_beta.factor_zoo.ops_compat import SHIMS
+        from qlib_ifind_beta.factor.factor_zoo.ops_compat import SHIMS
         assert len(SHIMS) >= 60
         # pickle 按模块+名反查（joblib 并行需要）
         blob = pickle.dumps(SHIMS["SMA"])
@@ -51,7 +51,7 @@ class TestOpsCompat:
         assert restored is SHIMS["SMA"]
 
     def test_shim_window_union(self):
-        from qlib_ifind_beta.factor_zoo.ops_compat import SHIMS
+        from qlib_ifind_beta.factor.factor_zoo.ops_compat import SHIMS
         from qlib.data.ops import Feature
         op = SHIMS["ATR"](Feature("close"), Feature("high"), Feature("low"), 14)
         left, right = op.get_extended_window_size()
@@ -72,21 +72,21 @@ class TestScreenLib:
         return pd.Series(factor), label
 
     def test_daily_rank_ic_positive(self, panel):
-        from qlib_ifind_beta.factor_zoo.screen_lib import daily_rank_ic
+        from qlib_ifind_beta.experiment.screen_lib import daily_rank_ic
         factor, label = panel
         ics = daily_rank_ic(factor, label, min_ns=30)
         assert len(ics) == 60
         assert ics.mean() > 0.3  # 构造强信号
 
     def test_daily_rank_ic_date_intersection(self, panel):
-        from qlib_ifind_beta.factor_zoo.screen_lib import daily_rank_ic
+        from qlib_ifind_beta.experiment.screen_lib import daily_rank_ic
         factor, label = panel
         label2 = label.iloc[: len(label) // 2]  # 只有一半日期
         ics = daily_rank_ic(factor, label2, min_ns=30)
         assert len(ics) == 30  # 只算交集，不 KeyError
 
     def test_summarize_fields(self, panel):
-        from qlib_ifind_beta.factor_zoo.screen_lib import summarize
+        from qlib_ifind_beta.experiment.screen_lib import summarize
         factor, label = panel
         champs = pd.DataFrame({"c1": np.random.default_rng(1).normal(size=len(factor))},
                               index=factor.index)

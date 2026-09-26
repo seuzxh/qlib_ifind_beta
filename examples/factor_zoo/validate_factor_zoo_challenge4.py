@@ -27,7 +27,7 @@ import pandas as pd
 import qlib
 from ruamel.yaml import YAML
 
-import scripts.validate_factor_zoo_augment as A
+import examples.factor_zoo.validate_factor_zoo_augment as A
 from qlib_ifind_beta.config import OVERLAY_ROOT
 
 B1 = "b1__alpha158__"
@@ -43,7 +43,7 @@ def run_portana(handler: str, module: str, drop: list[str], add: list[str],
     A.FZ_FIELDS.clear(), A.DROP_FIELDS.clear()
     A.DROP_FIELDS.extend(drop)
     A.FZ_FIELDS.extend(add)
-    cfg = YAML(typ="safe").load(open(ROOT / "qrun" / "workflow_minute_enhanced_tk10_nd8.yaml"))
+    cfg = YAML(typ="safe").load(open(ROOT / "examples" / "champion" / "workflow_minute_enhanced_tk10_nd8.yaml"))
     task = cfg["task"]
     h = task["dataset"]["kwargs"]["handler"]
     h["class"], h["module_path"] = handler, module
@@ -87,9 +87,9 @@ def main() -> None:
     fz_c1 = [A.materialize(s) for s in C1_ADD]
     fz_c5 = [A.materialize(s) for s in C5_ADD]
     sides = [
-        ("BASE", "MinuteEnhancedHandler", "qlib_ifind_beta.minute_enhanced_handler", [], []),
-        ("C1", "MinuteEnhancedFZHandler", "scripts.validate_factor_zoo_augment", C1_DROP, fz_c1),
-        ("C5", "MinuteEnhancedFZHandler", "scripts.validate_factor_zoo_augment", C5_DROP, fz_c5),
+        ("BASE", "MinuteEnhancedHandler", "qlib_ifind_beta.factor.minute_enhanced_handler", [], []),
+        ("C1", "MinuteEnhancedFZHandler", "examples.factor_zoo.validate_factor_zoo_augment", C1_DROP, fz_c1),
+        ("C5", "MinuteEnhancedFZHandler", "examples.factor_zoo.validate_factor_zoo_augment", C5_DROP, fz_c5),
     ]
     win = "W2 test 2025-09→12" if w2 else "W1 test 2026-04→07"
     print(f"▶ TD0 完整 PortAna（{win}，过滤 universe 三方一致）", flush=True)

@@ -7,7 +7,7 @@ HighBetaAlpha158，以复用 shared DropnaProcessor(feature) 前视护栏和 Qli
 """
 from __future__ import annotations
 
-from .config import MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS
+from ..config import MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS
 from .highbeta_handler import HighBetaAlpha158
 
 

@@ -26,7 +26,7 @@ import pandas as pd
 import qlib
 
 from qlib_ifind_beta.config import OVERLAY_ROOT
-from qlib_ifind_beta.factor_zoo import register_zoo_ops, iter_all_factors
+from qlib_ifind_beta.factor.factor_zoo import register_zoo_ops, iter_all_factors
 
 OUT = ROOT / "reports" / "factor_zoo" / "factor_zoo_smoke.json"
 

@@ -15,7 +15,7 @@ import pandas as pd
 from qlib.data.dataset import processor as qlib_processor
 
 from qlib_ifind_beta.config import MINUTE_FACTOR_FIELDS
-from qlib_ifind_beta.highbeta_handler import HighBetaAlpha158
+from qlib_ifind_beta.factor.highbeta_handler import HighBetaAlpha158
 
 
 def test_feature_count_is_71_daily_plus_14_minute():

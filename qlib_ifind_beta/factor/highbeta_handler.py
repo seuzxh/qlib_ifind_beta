@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from qlib.contrib.data.handler import Alpha158
 
-from .config import MINUTE_FACTOR_FIELDS
+from ..config import MINUTE_FACTOR_FIELDS
 
 
 class HighBetaAlpha158(Alpha158):

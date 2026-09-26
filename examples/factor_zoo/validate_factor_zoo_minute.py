@@ -31,7 +31,7 @@ import pandas as pd
 import qlib
 
 from qlib_ifind_beta.config import CN_DATA_1MIN, OVERLAY_ROOT
-from qlib_ifind_beta.factor_zoo import register_zoo_ops
+from qlib_ifind_beta.factor.factor_zoo import register_zoo_ops
 
 OUTDIR = ROOT / "reports" / "factor_zoo"
 START, END = "2024-01-02", "2026-09-24"

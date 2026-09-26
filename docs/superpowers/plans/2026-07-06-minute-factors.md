@@ -144,7 +144,7 @@ See spec §因子集 for formula derivation.
 import numpy as np
 import pytest
 
-from qlib_ifind_beta.minute_factors import compute_day_factors
+from qlib_ifind_beta.factor.minute_factors import compute_day_factors
 
 
 def _synthetic():
@@ -215,7 +215,7 @@ def test_price_941():
 - [ ] **Step 3: 跑测试确认失败**
 
 Run: `conda run -n qlib_ifind_beta python -m pytest tests/test_minute_factors.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'qlib_ifind_beta.minute_factors'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'qlib_ifind_beta.factor.minute_factors'`
 
 - [ ] **Step 4: 实现 minute_factors.py**
 
@@ -329,7 +329,7 @@ Guards two assumptions the materialize layer depends on:
 from datetime import datetime, time
 from pathlib import Path
 
-from qlib_ifind_beta.binio import read_bin
+from qlib_ifind_beta.data.binio import read_bin
 from qlib_ifind_beta.config import FEATURES_1MIN_SRC, MIN_CAL, SLOTS_PER_DAY
 
 
@@ -440,7 +440,7 @@ from pathlib import Path
 import numpy as np
 
 from qlib_ifind_beta import materialize_minute as mm
-from qlib_ifind_beta.binio import read_bin
+from qlib_ifind_beta.data.binio import read_bin
 from qlib_ifind_beta.config import FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC
 
 
@@ -561,7 +561,7 @@ def test_no_lookahead_price941_is_slot11_only():
 - [ ] **Step 2: 跑测试确认失败**
 
 Run: `conda run -n qlib_ifind_beta python -m pytest tests/test_materialize_minute.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'qlib_ifind_beta.materialize_minute'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'qlib_ifind_beta.data.materialize_minute'`
 
 - [ ] **Step 3: 实现 materialize_minute.py**
 
@@ -923,7 +923,7 @@ Run:
 ```bash
 conda run -n qlib_ifind_beta python -c "
 from pathlib import Path
-from qlib_ifind_beta.binio import read_bin
+from qlib_ifind_beta.data.binio import read_bin
 from qlib_ifind_beta.config import FEATURES_SRC, FEATURES_DST, MINUTE_FACTOR_FIELDS
 for code in ['sh600519','sz300750','sh688981']:
     si_dc, _ = read_bin(Path(FEATURES_SRC)/code/'close.day.bin')
@@ -1047,7 +1047,7 @@ Run:
 ```bash
 conda run -n qlib_ifind_beta python -c "
 from pathlib import Path
-from qlib_ifind_beta.binio import read_bin
+from qlib_ifind_beta.data.binio import read_bin
 from qlib_ifind_beta.config import FEATURES_SRC, FEATURES_DST, FREQ
 import numpy as np
 code='sh600519'
@@ -1097,7 +1097,7 @@ can test it via __new__ without qlib.init / data fetch. The full fetch shape (17
 columns in the real df) is verified by the smoke run (Task 8).
 """
 from qlib_ifind_beta.config import MINUTE_FACTOR_FIELDS
-from qlib_ifind_beta.highbeta_handler import HighBetaAlpha158
+from qlib_ifind_beta.factor.highbeta_handler import HighBetaAlpha158
 
 
 def test_feature_count_is_158_plus_14():
@@ -1199,7 +1199,7 @@ import inspect
 import pytest
 
 from qlib.contrib.strategy.signal_strategy import TopkDropoutStrategy
-from qlib_ifind_beta.td0_strategy import TopkDropoutStrategyTD0
+from qlib_ifind_beta.trading.td0_strategy import TopkDropoutStrategyTD0
 
 
 def test_td0_is_subclass_of_topkdropout():
@@ -1233,7 +1233,7 @@ def test_td0_only_diff_is_shift_zero():
 - [ ] **Step 2: 跑测试确认失败**
 
 Run: `conda run -n qlib_ifind_beta python -m pytest tests/test_td0_strategy.py -v`
-Expected: FAIL — `ModuleNotFoundError: qlib_ifind_beta.td0_strategy`。
+Expected: FAIL — `ModuleNotFoundError: qlib_ifind_beta.trading.td0_strategy`。
 
 - [ ] **Step 3: 创建 td0_strategy.py（逐字复制 + shift=0）**
 
@@ -1441,7 +1441,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ## Task 7: run.py sys.path 修复 + YAML 五处改动
 
-`python qrun/run.py` 把 `qrun/`（脚本目录）放 sys.path[0]，项目根不在路径上 → handler 的 `module_path: qlib_ifind_beta.highbeta_handler` import 失败。run.py 需显式插入项目根。YAML 改 **五处**：① handler class、② strategy class（→ `TopkDropoutStrategyTD0`，T 日成交）、③ label（9:41 买/T+1 卖）、④ limit_threshold（buy 表达式换 `$change_941`）、⑤ deal_price（→ `$price_941`）。workflow.yaml + workflow_smoke.yaml 各一份。
+`python qrun/run.py` 把 `qrun/`（脚本目录）放 sys.path[0]，项目根不在路径上 → handler 的 `module_path: qlib_ifind_beta.factor.highbeta_handler` import 失败。run.py 需显式插入项目根。YAML 改 **五处**：① handler class、② strategy class（→ `TopkDropoutStrategyTD0`，T 日成交）、③ label（9:41 买/T+1 卖）、④ limit_threshold（buy 表达式换 `$change_941`）、⑤ deal_price（→ `$price_941`）。workflow.yaml + workflow_smoke.yaml 各一份。
 
 **Files:**
 - Modify: `qrun/run.py:18-22`（imports 前插 sys.path）
@@ -1453,7 +1453,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 在 `qrun/run.py` 的 `import sys` / `from pathlib import Path` 之后、`from ruamel.yaml import YAML` 之前插入：
 
 ```python
-# 让 handler 的 module_path: qlib_ifind_beta.highbeta_handler 可 import。
+# 让 handler 的 module_path: qlib_ifind_beta.factor.highbeta_handler 可 import。
 # `python qrun/run.py` 把 qrun/（脚本目录）放 sys.path[0]，项目根不在路径上。
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 ```
@@ -1478,7 +1478,7 @@ from pathlib import Path
 # 必须在 import qlib / mlflow 前设置
 os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
 
-# 让 handler 的 module_path: qlib_ifind_beta.highbeta_handler 可 import。
+# 让 handler 的 module_path: qlib_ifind_beta.factor.highbeta_handler 可 import。
 # `python qrun/run.py` 把 qrun/（脚本目录）放 sys.path[0]，项目根不在路径上。
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -1495,7 +1495,7 @@ from ruamel.yaml import YAML
 改为
 ```yaml
                 class: HighBetaAlpha158    # Alpha158 + 14 分钟因子（qlib_ifind_beta/highbeta_handler.py）
-                module_path: qlib_ifind_beta.highbeta_handler
+                module_path: qlib_ifind_beta.factor.highbeta_handler
 ```
 
 - [ ] **Step 3: workflow.yaml 改 strategy class（→ TopkDropoutStrategyTD0）**
@@ -1510,7 +1510,7 @@ from ruamel.yaml import YAML
 ```yaml
     strategy:
         class: TopkDropoutStrategyTD0   # 命门：override shift=1→0，T 日 9:41 成交（见 td0_strategy.py）
-        module_path: qlib_ifind_beta.td0_strategy
+        module_path: qlib_ifind_beta.trading.td0_strategy
 ```
 
 - [ ] **Step 4: workflow.yaml 改 limit_threshold（buy 表达式换 $change_941）**
@@ -1574,7 +1574,7 @@ from ruamel.yaml import YAML
 改为
 ```yaml
                 class: HighBetaAlpha158
-                module_path: qlib_ifind_beta.highbeta_handler
+                module_path: qlib_ifind_beta.factor.highbeta_handler
 ```
 
 (7b) strategy class：把
@@ -1585,7 +1585,7 @@ from ruamel.yaml import YAML
 改为
 ```yaml
         class: TopkDropoutStrategyTD0   # 命门：shift=0，T 日 9:41 成交（见 workflow.yaml）
-        module_path: qlib_ifind_beta.td0_strategy
+        module_path: qlib_ifind_beta.trading.td0_strategy
 ```
 
 (7c) label：把
@@ -1644,8 +1644,8 @@ print('deal_price:', ek['deal_price'])
 ```
 Expected（v2 五处全绿）：
 ```
-handler: HighBetaAlpha158 qlib_ifind_beta.highbeta_handler
-strategy: TopkDropoutStrategyTD0 qlib_ifind_beta.td0_strategy
+handler: HighBetaAlpha158 qlib_ifind_beta.factor.highbeta_handler
+strategy: TopkDropoutStrategyTD0 qlib_ifind_beta.trading.td0_strategy
 label: ['Ref($close, -1) / $price_941 - 1']
 limit_threshold: ['$change_941 >= $limit_up', '$change <= $limit_down']
 deal_price: ['$price_941', '$close']
@@ -1689,7 +1689,7 @@ conda run -n qlib_ifind_beta python -c "
 import qlib
 from qlib.utils import init_instance_by_config
 qlib.init(provider_uri='data/qlib_root', region='cn')
-cfg = {'class':'HighBetaAlpha158','module_path':'qlib_ifind_beta.highbeta_handler',
+cfg = {'class':'HighBetaAlpha158','module_path':'qlib_ifind_beta.factor.highbeta_handler',
        'kwargs':{'start_time':'2025-11-01','end_time':'2025-11-10','fit_start_time':'2025-01-01',
                  'fit_end_time':'2025-09-30','instruments':'highbeta883926',
                  'label':['Ref(\$close, -1) / \$price_941 - 1']}}

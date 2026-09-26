@@ -13,7 +13,7 @@
 
 用法：
     conda run -n qlib_ifind_beta python qrun/run.py \
-        qrun/workflow_minute_enhanced_tk10_nd8.yaml
+        examples/champion/workflow_minute_enhanced_tk10_nd8.yaml
 """
 from __future__ import annotations
 

@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from qlib_ifind_beta.binio import DTYPE
+from qlib_ifind_beta.data.binio import DTYPE
 from qlib_ifind_beta.config import DAY_CAL, FEATURES_1MIN_SRC, FEATURES_SRC, MIN_CAL
 from qlib_ifind_beta.live.intraday import EXECUTION_TIME, FACTOR_TIMES
 

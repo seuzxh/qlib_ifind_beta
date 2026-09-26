@@ -23,13 +23,13 @@ from qlib_ifind_beta.config import CHAMPION_LABEL_EXPR, OVERLAY_ROOT, UNIVERSE_M
 
 
 HANDLERS = {
-    "champion18": ("MinuteEnhancedHandler", "qlib_ifind_beta.minute_enhanced_handler"),
+    "champion18": ("MinuteEnhancedHandler", "qlib_ifind_beta.factor.minute_enhanced_handler"),
     "pruned15": ("MinutePrunedHandler", "qlib_ifind_beta.minute_pruned_handler"),
     "turnover19": ("MinuteTurnoverHandler", "qlib_ifind_beta.minute_turnover_handler"),
-    "tailrank18": ("MinuteEnhancedHandler", "qlib_ifind_beta.minute_enhanced_handler"),
-    "tailbinary18": ("MinuteEnhancedHandler", "qlib_ifind_beta.minute_enhanced_handler"),
-    "regression18": ("MinuteEnhancedHandler", "qlib_ifind_beta.minute_enhanced_handler"),
-    "xgb18": ("MinuteEnhancedHandler", "qlib_ifind_beta.minute_enhanced_handler"),
+    "tailrank18": ("MinuteEnhancedHandler", "qlib_ifind_beta.factor.minute_enhanced_handler"),
+    "tailbinary18": ("MinuteEnhancedHandler", "qlib_ifind_beta.factor.minute_enhanced_handler"),
+    "regression18": ("MinuteEnhancedHandler", "qlib_ifind_beta.factor.minute_enhanced_handler"),
+    "xgb18": ("MinuteEnhancedHandler", "qlib_ifind_beta.factor.minute_enhanced_handler"),
     "path21": ("MinutePathHandler", "qlib_ifind_beta.minute_path_handler"),
 }
 
@@ -174,7 +174,7 @@ def _backtest(pred, start: str, end: str,
     extra_quote["limit_sell"] = (raw_quote["$change"] <= raw_quote["$limit_down"]) | suspended
     strategy = {
         "class": "TopkDropoutStrategyTD0",
-        "module_path": "qlib_ifind_beta.td0_strategy",
+        "module_path": "qlib_ifind_beta.trading.td0_strategy",
         "kwargs": {
             "signal": pred, "topk": 10, "n_drop": 8, "hold_thresh": 1,
             "forbid_all_trade_at_limit": True,

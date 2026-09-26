@@ -19,7 +19,7 @@ import functools
 from datetime import datetime, time
 from pathlib import Path
 
-from qlib_ifind_beta.binio import read_bin
+from qlib_ifind_beta.data.binio import read_bin
 from qlib_ifind_beta.config import FEATURES_1MIN_SRC, MIN_CAL, SLOTS_PER_DAY
 
 

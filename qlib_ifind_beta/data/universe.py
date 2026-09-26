@@ -31,7 +31,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .config import DAY_CAL, INDEX_CODE_IFIND, PROJECT_ROOT, QLIB_DATA, UNIVERSE_MARKET
+from ..config import DAY_CAL, INDEX_CODE_IFIND, PROJECT_ROOT, QLIB_DATA, UNIVERSE_MARKET
 from . import ifind
 
 P03473_FIELDS = ["p03473_f001", "p03473_f002", "p03473_f003"]

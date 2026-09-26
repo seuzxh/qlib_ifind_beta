@@ -35,7 +35,7 @@ def test_bar_upsert_is_idempotent_and_quality_requires_exact_window():
 
 
 def test_assemble_features_has_frozen_order_and_never_needs_0941():
-    from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
+    from qlib_ifind_beta.factor.minute_enhanced_handler import MinuteEnhancedHandler
     bars = _bars()
     daily = {"A": {"prev_close": 9.9, "prev_factor": 1.0,
                     "factor": 1.0, "factor_confirmed": True}}

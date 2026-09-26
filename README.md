@@ -51,7 +51,7 @@ conda run -n qlib_ifind_beta python -m scripts.build_overlay
 
 # 冻结 Champion 训练/回测复现
 conda run -n qlib_ifind_beta python scripts/materialize_minute.py
-conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml
+conda run -n qlib_ifind_beta python qrun/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml
 
 # 每日盘中 CSV 工作流（查看分阶段命令）
 conda run -n qlib_ifind_beta python scripts/intraday_production.py --help

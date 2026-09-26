@@ -54,7 +54,7 @@ def backtest_td0(
     ) | suspended
     strategy = {
         "class": "TopkDropoutStrategyTD0",
-        "module_path": "qlib_ifind_beta.td0_strategy",
+        "module_path": "qlib_ifind_beta.trading.td0_strategy",
         "kwargs": {
             "signal": pred,
             "topk": 10,

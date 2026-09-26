@@ -138,7 +138,7 @@ def get_prev_day_volumes(codes: list[str], target_date: str) -> dict[str, float]
 
     Returns dict code → total minute volume (sum of 240 bars) for T-1.
     """
-    from qlib_ifind_beta.binio import read_bin
+    from qlib_ifind_beta.data.binio import read_bin
 
     prev_date = _prev_trading_day(target_date)
     if prev_date is None:
@@ -189,7 +189,7 @@ def get_prev_day_volumes_multi(codes: list[str], target_date: str,
 
     Returns dict code → [vol_T-1, vol_T-2, vol_T-3, vol_T-5] (0 if missing).
     """
-    from qlib_ifind_beta.binio import read_bin
+    from qlib_ifind_beta.data.binio import read_bin
 
     cal = _load_day_calendar()
     target = pd.Timestamp(target_date)
@@ -395,7 +395,7 @@ def get_daily_close_factor(codes: list[str], target_date: str) -> dict[str, dict
     Reads from qlib_data (read-only daily bins).
     """
     from qlib_ifind_beta.config import FEATURES_SRC, FREQ
-    from qlib_ifind_beta.binio import read_bin
+    from qlib_ifind_beta.data.binio import read_bin
 
     prev_date = _prev_trading_day(target_date)
     if prev_date is None:
