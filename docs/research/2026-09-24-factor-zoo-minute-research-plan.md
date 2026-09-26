@@ -13,7 +13,7 @@ nav_exclude: true
   purged 后被 TD0 涨停墙否决）——无可替代方案成立，Champion 不变。
   全部结论见 `docs/backtest-log/2026-09-24-factor-zoo-screen.md` §0–§7；
   运行资产已清理（fz 研究 bin/中间部件 pkl/worktree 本地 mlruns 实验），
-  保留 dayok universe 与复现脚本，challenge 脚本可确定性重跑再生一切。
+
 - 修订：v1.1（2026-09-24）用户澄清——原表述"隔日"实为**多日**（T-1/2/3/5），
   且多日族首要用途是判断个股**是否已经加速**、已加速时控制尾部风险；
   §0/§1.2/§1.3/§三/§四/§五/§六/§八 已同步修订
