@@ -12,7 +12,7 @@
 其余逻辑等同 `qlib.cli.run.workflow`（qlib_init → task_train）。
 
 用法：
-    conda run -n qlib_ifind_beta python qrun/run.py \
+    conda run -n qlib_ifind_beta python examples/champion/run.py \
         examples/champion/workflow_minute_enhanced_tk10_nd8.yaml
 """
 from __future__ import annotations
@@ -25,8 +25,10 @@ from pathlib import Path
 os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
 
 # 让 handler 的 module_path: qlib_ifind_beta.* 可 import。
-# `python qrun/run.py` 把 qrun/（脚本目录）放 sys.path[0]，项目根不在路径上。
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# `python examples/champion/run.py` 把脚本目录放 sys.path[0]，项目根不在路径上；
+# 向上回溯到含 qlib_ifind_beta 包的目录（qrun → examples/champion 迁移后层级加深）。
+_repo_root = next(p for p in Path(__file__).resolve().parents if (p / "qlib_ifind_beta").is_dir())
+sys.path.insert(0, str(_repo_root))
 
 from ruamel.yaml import YAML
 
@@ -69,6 +71,11 @@ def run(config_path: str, experiment_name: str = "workflow") -> None:
     else:
         qlib.init(**qlib_init)
 
+    # 死锁修复①（2026-09-25 factor zoo 定位，faulthandler 落在
+    # Exchange.get_quote_from_qlib 的 loky 池重入死锁）：Champion 复现
+    # 与实验线同数据环境（data/qlib_root 已含仅分钟源股票），需同一修复。
+    C["joblib_backend"] = "threading"
+
     if "experiment_name" in config:
         experiment_name = config["experiment_name"]
     print(f"[run.py] experiment={experiment_name}  provider_uri={qlib_init.get('provider_uri')}")
@@ -80,5 +87,5 @@ def run(config_path: str, experiment_name: str = "workflow") -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        sys.exit("usage: python qrun/run.py <workflow.yaml> [experiment_name]")
+        sys.exit("usage: python examples/champion/run.py <workflow.yaml> [experiment_name]")
     run(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "workflow")

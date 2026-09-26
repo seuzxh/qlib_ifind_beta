@@ -1,5 +1,11 @@
 # 883926 高贝塔 · 策略层 topk/n_drop sweep — W1（test 2026-04→07）
-# 运行：conda run -n qlib_ifind_beta python qrun/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml
+# 运行：conda run -n qlib_ifind_beta python examples/champion/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml
+#
+# 2026-09-26 环境修复移植（与 factor zoo 冻结协议 qlib_ifind_beta/experiment/protocol.py 同源）：
+# ② universe 换 highbeta883926_dayok —— data/qlib_root 后来长出的 99 只仅分钟源股票
+#    缺日线 bin，会卡死/崩掉 PortAna 回测；dayok 过滤后成员行 -0.9%（全量 55792 → 55271）。
+# ③ exchange 显式 codes=dayok —— 默认 codes='all' 载全市场（加载量 -98%）。
+# ① joblib 死锁修复在 run.py（C['joblib_backend']='threading'）。
 #
 # 目的：策略参数 sweep——唯一变量 topk/n_drop（champion 20/15 → 10/8），handler/label/model/exchange/切分
 # 当前生产 Champion：18 因子、Top10/n_drop=8，配置与模型参数全冻结。
@@ -10,7 +16,7 @@ qlib_init:
 
 experiment_name: minute_enhanced_tk10_nd8
 
-market: &market highbeta883926
+market: &market highbeta883926_dayok   # 修复②：dayok universe（见文件头）
 benchmark: &benchmark SH000300
 
 data_handler_config: &data_handler_config
@@ -41,6 +47,7 @@ port_analysis_config: &port_analysis_config
         benchmark: *benchmark
         exchange_kwargs:
             freq: day
+            codes: highbeta883926_dayok   # 修复③：显式 codes（见文件头）
             limit_threshold:
                 - $change_941 >= $limit_up
                 - $change <= $limit_down
