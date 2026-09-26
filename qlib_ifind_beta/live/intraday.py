@@ -19,8 +19,8 @@ import numpy as np
 import pandas as pd
 
 from qlib_ifind_beta.config import CHAMPION_TOPK, PROJECT_ROOT
-from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
-from qlib_ifind_beta.minute_factors import compute_champion_factors
+from qlib_ifind_beta.factor.minute_enhanced_handler import MinuteEnhancedHandler
+from qlib_ifind_beta.factor.minute_factors import compute_champion_factors
 
 FACTOR_TIMES = tuple(f"09:{minute:02d}" for minute in range(31, 41))
 EXECUTION_TIME = "09:41"

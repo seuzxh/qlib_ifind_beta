@@ -30,13 +30,13 @@ HFLGB Champion、Top10/n_drop=8。09:31–09:40 形成特征，09:41 起按方�
 | 调仓策略 | `qlib_ifind_beta/td0_strategy.py` |
 | 盘中生产 | `qlib_ifind_beta/live/intraday.py`、`realtime/` |
 | 历史回放 | `qlib_ifind_beta/live/historical_replay.py` |
-| 工作流配置 | `qrun/workflow_minute_enhanced_tk10_nd8.yaml` |
+| 工作流配置 | `examples/champion/workflow_minute_enhanced_tk10_nd8.yaml` |
 
 ## 常用验证
 
 ```bash
 conda run -n qlib_ifind_beta python -m pytest -q
-conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml
+conda run -n qlib_ifind_beta python qrun/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml
 conda run -n qlib_ifind_beta python scripts/intraday_production.py --help
 conda run -n qlib_ifind_beta python scripts/replay_intraday_shadow.py
 ```

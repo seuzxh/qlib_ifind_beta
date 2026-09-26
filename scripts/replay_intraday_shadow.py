@@ -26,9 +26,9 @@ from qlib_ifind_beta.live.intraday import (
     make_active_manifest, reconcile_positions, upsert_bars, validate_factor_bars,
     write_csv, write_json, write_parquet,
 )
-from qlib_ifind_beta.materialize import board_limit
-from qlib_ifind_beta.minute_enhanced_handler import MinuteEnhancedHandler
-from qlib_ifind_beta.model_ensemble import load_model_bundle, predict_bundle_matrix
+from qlib_ifind_beta.data.materialize import board_limit
+from qlib_ifind_beta.factor.minute_enhanced_handler import MinuteEnhancedHandler
+from qlib_ifind_beta.experiment.model_ensemble import load_model_bundle, predict_bundle_matrix
 
 
 def _series(value) -> pd.Series:

@@ -41,7 +41,7 @@ nav_order: 2
 │  │                 + close0941/close1500（label v2 两腿）（day.bin）│  │
 │  └────────────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────┬───────────────────────────────────────────┘
-                               ▼  qrun/run.py（本次 13 秒）
+                               ▼  examples/champion/run.py（本次 13 秒）
 ┌───────────────────── 训练 / 回测（Champion 复现）────────────────────────┐
 │  DatasetH: train 42122 行 | valid 5097 | test 5776（2024-01→2026-07）    │
 │  HFLGBModel(LightGBM, binary, 12 棵树, 18 特征)                          │
@@ -70,7 +70,7 @@ nav_order: 2
 |---|---|---|---|---|---|
 | ① | 数据源与股池 | `python -m scripts.build_overlay`（内含 universe 刷新） | iFinD p03473 / 两只读行情源 | `universe_snapshots.csv`、`instruments/highbeta883926.txt` | 5123 codes / 615 天，0 新拉（全缓存） |
 | ② | overlay + 因子物化 | 同上（`materialize`、`materialize_minute`） | 1min bins、日频 bins | 每股 20+ 个自有 `day.bin` | 5047 ok / 76 缺（退市），~6 分钟 |
-| ③ | 训练与回测 | `python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml` | overlay 全部 bin | 新 recorder（pred/label/IC/组合分析） | 13 秒，与冻结 Champion **零漂移** |
+| ③ | 训练与回测 | `python examples/champion/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml` | overlay 全部 bin | 新 recorder（pred/label/IC/组合分析） | 13 秒，与冻结 Champion **零漂移** |
 | ④ | 盘中生产（回放） | `python scripts/replay_intraday_shadow.py --start --end --output` | 冻结 Champion + 1min 历史 | 单日目录 25 个审计文件 | 4 日全 PASS，~40 秒 |
 | ⑤ | 纸面跟踪 | （真实交易日人工执行） | 生产 CSV + 券商/收盘价 | `live_signals/settle/nav.csv` | 历史 7 信号日 / 6 结算日（07-14 后暂停） |
 | ⑥ | 模型治理 | `python scripts/retrain.py --test-start …` | 盘后新数据 | Candidate recorder + manifest | 未重跑（保持 CANDIDATE/REVIEW） |
@@ -172,7 +172,7 @@ SZ300164 三个交易日（18 列节选 8 列）：
 
 ### 输入 → 切分 → 模型
 
-命令：`conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml`
+命令：`conda run -n qlib_ifind_beta python examples/champion/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml`
 （本次 **13 秒**，新 recorder `f364dcb3dd8445d3ad369db47f8a2110`）
 
 | 段 | 区间 | dropna 后样本 | 天数 | 日均 |
@@ -369,7 +369,7 @@ PASS；模拟收益 **+39.27%**、最大回撤 **-19.81%**（方案 B 口径：0
 | 命令 | 耗时 | 结果 | 新产物 |
 |---|---|---|---|
 | `python -m scripts.build_overlay` | ~6 min | 5047 ok / 76 miss（与历史一致） | overlay 原地幂等重建 |
-| `python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml` | 13 s | PASS，与 Champion 零漂移 | recorder `f364dcb3dd8445d3ad369db47f8a2110`（含完整 portfolio_analysis） |
+| `python examples/champion/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml` | 13 s | PASS，与 Champion 零漂移 | recorder `f364dcb3dd8445d3ad369db47f8a2110`（含完整 portfolio_analysis） |
 | `python scripts/replay_intraday_shadow.py --start 2026-06-29 --end 2026-07-02 --output data/historical_shadow_replay_walkthrough_20260906` | ~40 s | 4 日全 PASS、对账通过、零漂移 | 隔离目录（未动 62 日验收产物） |
 | `python -m pytest -q` | 69 s | 117 passed | — |
 

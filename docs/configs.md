@@ -4,16 +4,16 @@ title: 配置说明
 nav_order: 7
 ---
 
-# 配置说明：qrun YAML 与运行链路
+# 配置说明：Champion YAML 与运行链路（原 qrun/，已迁 examples/champion/）
 
-训练与回测的最后一步由 `qrun/run.py <配置.yaml>` 驱动，**yml 是训练/回测口径的
+训练与回测的最后一步由 `examples/champion/run.py <配置.yaml>` 驱动，**yml 是训练/回测口径的
 单一事实来源**：Handler 窗口、label、模型超参、策略参数、交易成本全部由它声明。
-本文说明现役 Champion 配置的逐段含义、qrun/ 下其余 yml 的定位，以及 yml 与
+本文说明现役 Champion 配置的逐段含义、examples/champion/ 下 yml 的定位，以及 yml 与
 盘中生产链路的关系。
 
 > 注意区分：`docs/_config.yml` 是本文档站的 Jekyll 主题配置，与策略运行无关。
 
-## qrun/ 配置文件一览
+## examples/champion/ 配置文件一览
 
 | 文件 | 定位 | 状态 |
 |---|---|---|
@@ -86,7 +86,7 @@ exchange_kwargs:
 `SignalRecord`（pred/label.pkl）→ `SigAnaRecord`（逐日 IC/RankIC）→
 `PortAnaRecord`（TD0 策略回测报告），全部落进 `mlruns/<实验>/<recorder>/`。
 
-## 运行时如何加载 yml（qrun/run.py）
+## 运行时如何加载 yml（examples/champion/run.py）
 
 `run.py` 等价 qlib 官方 `qlib.cli.run.workflow`，额外修两个本机坑：
 
@@ -102,8 +102,8 @@ mlruns`。实测全流程（含 PortAna 回测）约 **13 秒**（2026-09-06 重
 ## yml 与生产链路的关系（关键）
 
 ```text
-qrun/workflow_minute_enhanced_tk10_nd8.yaml          scripts/retrain.py（不读 yml）
-        │ qrun/run.py 训练                               │ 程序化模板：超参与 Champion 相同，
+examples/champion/workflow_minute_enhanced_tk10_nd8.yaml          scripts/retrain.py（不读 yml）
+        │ examples/champion/run.py 训练                               │ 程序化模板：超参与 Champion 相同，
         ▼                                                │ 窗口按 90/20/embargo1/test≤20 滚动
 mlruns/1568…/93d435e0…/  ←—— 冻结 Champion ———          ▼
   params.pkl / pred.pkl / task                    minute_enhanced_rolling(_xgb)

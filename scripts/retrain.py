@@ -46,10 +46,10 @@ from qlib_ifind_beta.config import (
     ROLLING_XGB_EXPERIMENT,
     UNIVERSE_MARKET,
 )
-from qlib_ifind_beta.model_ensemble import (
+from qlib_ifind_beta.experiment.model_ensemble import (
     blend_scores, correlation_metrics, make_gate_metadata, predict_feature_matrix,
 )
-from qlib_ifind_beta.evaluation import backtest_td0
+from qlib_ifind_beta.experiment.evaluation import backtest_td0
 
 
 def _build_task_template() -> dict:
@@ -74,7 +74,7 @@ def _build_task_template() -> dict:
             "kwargs": {
                 "handler": {
                     "class": "MinuteEnhancedHandler",
-                    "module_path": "qlib_ifind_beta.minute_enhanced_handler",
+                    "module_path": "qlib_ifind_beta.factor.minute_enhanced_handler",
                     "kwargs": {
                         "instruments": UNIVERSE_MARKET,
                         "start_time": "2025-10-16",
@@ -287,7 +287,7 @@ def promote_candidate(manifest_path: str | Path, approved_by: str,
                               experiment_name=manifest["hflgb_experiment"])
     recorder.load_object("params.pkl")
     gate = recorder.load_object(ROLLING_GATE_ARTIFACT)
-    from qlib_ifind_beta.model_ensemble import validate_gate_metadata, validate_recorder_provenance
+    from qlib_ifind_beta.experiment.model_ensemble import validate_gate_metadata, validate_recorder_provenance
     validate_gate_metadata(gate, target_date=manifest["usable_from"])
     validate_recorder_provenance(recorder, gate)
     OnlineToolR(ROLLING_EXPERIMENT).reset_online_tag(recorder, exp_name=ROLLING_EXPERIMENT)

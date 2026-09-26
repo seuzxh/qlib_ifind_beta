@@ -5,15 +5,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from qlib_ifind_beta import materialize_minute as mm
-from qlib_ifind_beta.binio import read_bin
+from qlib_ifind_beta.data import materialize_minute as mm
+from qlib_ifind_beta.data.binio import read_bin
 from qlib_ifind_beta.config import (
     BUY_SLOT, FEATURES_1MIN_SRC, FEATURES_DST, FEATURES_SRC, FIRST_FEATURE_SLOT,
     MINUTE_DEAL_PRICE_FIELD, MINUTE_FACTOR_EXTRA_FIELDS, MINUTE_FACTOR_FIELDS,
     MINUTE_FACTOR_PATH_FIELDS,
     SLOTS_PER_DAY,
 )
-from qlib_ifind_beta.minute_factors import compute_day_factors
+from qlib_ifind_beta.factor.minute_factors import compute_day_factors
 
 # Morning window width (slots FIRST_FEATURE_SLOT..BUY_SLOT inclusive = 11).
 _MORNING_WINDOW = BUY_SLOT - FIRST_FEATURE_SLOT + 1

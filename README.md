@@ -51,7 +51,7 @@ conda run -n qlib_ifind_beta python -m scripts.build_overlay
 
 # 冻结 Champion 训练/回测复现
 conda run -n qlib_ifind_beta python scripts/materialize_minute.py
-conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml
+conda run -n qlib_ifind_beta python examples/champion/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml
 
 # 每日盘中 CSV 工作流（查看分阶段命令）
 conda run -n qlib_ifind_beta python scripts/intraday_production.py --help
@@ -70,13 +70,17 @@ conda run -n qlib_ifind_beta python scripts/paper_shadow.py report
 ## 目录
 
 ```text
-qlib_ifind_beta/        可复用数据、因子、模型、策略与生产逻辑
-  live/                 盘中状态转换、离线历史适配、冻结信号产物
-  realtime/             实时行情适配与内存推理
-scripts/                CLI 编排入口
-qrun/                   Qlib 训练和回测配置
+qlib_ifind_beta/        领域库（2026-09-26 按领域聚簇重组，详见 AGENTS.md）
+  data/                 bin 读写、overlay 农场、衍生 bin 物化、成分、iFinD 源
+  factor/               因子 Handler、分钟因子、factor_zoo 因子库
+  experiment/           模型集成、评估、筛选指标、冻结协议运行器(protocol.py)
+  trading/              TD0 策略
+  live/                 盘中状态转换、离线历史适配、实时行情与推理
+examples/               声明式实验（champion 配置、factor_zoo/rolling/research/shadow）
+scripts/                运维与生产入口（intraday_production、paper_shadow、cron）
 tests/                  离线测试
 docs/                   当前生产合同和必要验证结论
+tmp/                    一次性临时脚本（忽略）
 data/                   overlay、快照、生产CSV和回放产物（忽略）
 mlruns/                 模型与实验记录（忽略）
 ```

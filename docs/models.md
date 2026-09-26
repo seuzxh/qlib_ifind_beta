@@ -9,7 +9,7 @@ nav_order: 5
 ## 生产 Champion
 
 当前生产模型是 Qlib `HFLGBModel`，配置位于
-`qrun/workflow_minute_enhanced_tk10_nd8.yaml`。
+`examples/champion/workflow_minute_enhanced_tk10_nd8.yaml`。
 
 | 项目 | 现役配置 |
 | --- | --- |
@@ -78,5 +78,5 @@ Financial Machine Learning》）。代码层还有防篡改校验：
 
 ## 非生产研究模型
 
-`scripts/compare_models.py` 还提供 LGBM、XGBoost、CatBoost、Linear 等模型的滚动
+`examples/research/compare_models.py` 还提供 LGBM、XGBoost、CatBoost、Linear 等模型的滚动
 对比入口。这些用于研究和消融，不代表生产模型，也不能覆盖 Champion recorder。

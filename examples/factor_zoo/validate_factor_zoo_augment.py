@@ -1,0 +1,224 @@
+"""Phase 2-alpha — 18+k augment 冻结协议验证（timebox）。
+
+流程：
+  ① 从筛选产物加载 shortlist 特征（b1__/b2_t1__/day__ 前缀自动路由）；
+  ② 物化为 overlay 研究 bin `fz_<name>.day.bin`（additive，不动现役 bin；
+     沿用 xd*/e94* 研究 bin 先例）；
+  ③ 克隆 Champion yaml，仅替换 handler 类（18 因子 + k 个 fz 字段），
+     task_train 全流程跑通；
+  ④ 对照：冻结 Champion recorder + 同批未改动 handler 重训基线（excluded.json
+     方法论规则 1：单次运行 ±10pp 级噪声，同批基线必跑）。
+  结论只作排序参考；purged 19 段终审不在本 timebox 内（另行安排）。
+
+Run:
+  conda run -n qlib_ifind_beta python scripts/validate_factor_zoo_augment.py \
+      --features b1__alpha360__CLOSE05 --baseline
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import sys
+from pathlib import Path
+
+os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+import numpy as np
+import pandas as pd
+import qlib
+from ruamel.yaml import YAML
+
+from qlib_ifind_beta.data import binio
+from qlib_ifind_beta.config import CHAMPION_RECORDER_ID, OVERLAY_ROOT
+from qlib_ifind_beta.factor.minute_enhanced_handler import MinuteEnhancedHandler
+
+OUTDIR = ROOT / "reports" / "factor_zoo"
+EXPERIMENT = "factor_zoo_augment"
+OPEN_COST, CLOSE_COST = 0.0005, 0.0015   # 与 champion yaml exchange_kwargs 一致
+
+#: 由 --features 填充；handler 类在 task_train 进程内实例化，全局即可。
+FZ_FIELDS: list[str] = []
+DROP_FIELDS: list[str] = []   # 替换式挑战：从 18 因子中剔除的列名
+
+
+def safe_name(name: str) -> str:
+    """全小写 + 单下划线：engine 按小写找 bin 文件、双下划线被表达式解析吞掉
+    （两者均实测：大写/双下划线名读到 EMPTY）。"""
+    s = re.sub(r"[^A-Za-z0-9_]", "_", name).lower()
+    return "fz_" + re.sub(r"_+", "_", s)
+
+
+def load_feature(spec: str) -> pd.Series:
+    """按前缀路由：b1__ / b2_t1__ / day__（路线A chunk）。"""
+    if spec.startswith("b1__"):
+        df: pd.DataFrame = pd.read_pickle(OUTDIR / "minute_b1.pkl")
+        return df[spec[4:]]
+    if spec.startswith("b2_t1__"):
+        eod: pd.DataFrame = pd.read_pickle(OUTDIR / "minute_eod.pkl")
+        meta = pd.read_pickle(OUTDIR / "dayf_meta.pkl")
+        day_cal = sorted(meta.index.get_level_values("datetime").unique())
+        col = spec[7:]
+        parts = []
+        for s, g in eod[[col]].groupby(level="instrument"):
+            parts.append(g.droplevel("instrument").reindex(day_cal).shift(1))
+        f = pd.concat(parts).rename_axis(["instrument", "datetime"]).swaplevel()
+        f.index = f.index.set_levels(pd.to_datetime(f.index.levels[0]), level="datetime")
+        return f
+    if spec.startswith("day__"):
+        target = spec[5:]
+        for cf in sorted(OUTDIR.glob("dayf_chunk_*.pkl")):
+            df = pd.read_pickle(cf)
+            if target in df.columns:
+                return df[target]
+        raise KeyError(target)
+    if spec.startswith("accel__"):
+        df = pd.read_pickle(OUTDIR / "accel_state.pkl")
+        return df[spec[7:]]
+    raise ValueError(spec)
+
+
+def materialize(spec: str) -> str:
+    """特征 Series → overlay fz_<name>.day.bin（additive）。返回字段名。"""
+    f = load_feature(spec)
+    fname = safe_name(spec)
+    day_cal = [d.strip() for d in (OVERLAY_ROOT / "calendars" / "day.txt").read_text().splitlines() if d.strip()]
+    cal_pos = {d: i for i, d in enumerate(day_cal)}
+    for s, g in f.groupby(level="instrument"):
+        gg = g.droplevel("instrument")
+        gg.index = pd.to_datetime(gg.index).strftime("%Y-%m-%d")
+        vals = np.full(len(day_cal), np.nan, dtype=np.float32)
+        for d, v in gg.items():
+            i = cal_pos.get(d)
+            if i is not None and pd.notna(v):
+                vals[i] = np.float32(v)
+        out = OVERLAY_ROOT / "features" / s.lower() / f"{fname}.day.bin"  # 目录用小写（仓库约定）
+        if out.exists():
+            continue  # 幂等：已物化（重复实验提速）
+        out.parent.mkdir(parents=True, exist_ok=True)
+        start_idx = int(np.argmax(~np.isnan(vals))) if (~np.isnan(vals)).any() else 0
+        binio.write_bin(out, start_idx, vals[start_idx:])
+    print(f"  物化 {fname} 完成（{f.groupby(level='instrument').ngroups} 股）")
+    return fname
+
+
+class MinuteEnhancedFZHandler(MinuteEnhancedHandler):
+    """Champion handler + fz 研究字段（FZ_FIELDS/DROP_FIELDS 注入，支持替换式挑战）。"""
+
+    def get_feature_config(self):
+        fields, names = super().get_feature_config()
+        keep = [(f, n) for f, n in zip(fields, names) if n not in DROP_FIELDS]
+        return ([f for f, _ in keep] + [f"${n}" for n in FZ_FIELDS],
+                [n for _, n in keep] + list(FZ_FIELDS))
+
+
+def port_metrics(recorder) -> dict:
+    rep = recorder.load_object("portfolio_analysis/report_normal_1day.pkl")
+    s, b = rep["return"].fillna(0), rep["bench"].fillna(0)
+    cum = (1 + s).prod() - 1
+    ann = (1 + cum) ** (252 / len(s)) - 1
+    dd = ((1 + s).cumprod() / (1 + s).cumprod().cummax() - 1).min()
+    exc = (1 + (s - b)).prod() - 1
+    ir = (s - b).mean() / (s - b).std() * 252 ** 0.5
+    return {"累计": f"{cum:+.1%}", "年化": f"{ann:+.1%}", "超额": f"{exc:+.1%}",
+            "IR": f"{ir:.2f}", "回撤": f"{dd:.1%}",
+            "Calmar": f"{ann/abs(dd):.2f}" if dd else "inf"}
+
+
+def run_task(handler_class: str, module_path: str = "examples.factor_zoo.validate_factor_zoo_augment",
+             portana: bool = True) -> object:
+    """portana=False 时剥掉 PortAnaRecord（本机 task_train 回测段死锁，
+    timebox 内改用自带重放口径对比；全漏斗留待后续）。"""
+    from qlib.model.trainer import task_train
+    cfg = YAML(typ="safe").load(open(ROOT / "examples" / "champion" / "workflow_minute_enhanced_tk10_nd8.yaml"))
+    task = cfg["task"]
+    h = task["dataset"]["kwargs"]["handler"]
+    h["class"] = handler_class
+    h["module_path"] = module_path
+    if not portana:
+        task["record"] = [r for r in task["record"] if r.get("class") != "PortAnaRecord"]
+    for rec in task.get("record", []):
+        if rec.get("class") == "PortAnaRecord":
+            exk = ((rec.get("kwargs", {}).get("config") or {}).get("backtest") or {}).get("exchange_kwargs") or {}
+            if isinstance(exk.get("limit_threshold"), list):
+                exk["limit_threshold"] = tuple(exk["limit_threshold"])
+    return task_train(task, experiment_name=EXPERIMENT)
+
+
+def replay_topn(pred: pd.Series, label: pd.Series, topn: int = 10) -> pd.Series:
+    """手工重放：逐日 topn 等权，label v2 毛收益 - 双边成本（只排序不终判）。"""
+    daily = {}
+    for d, g in pred.groupby(level="datetime"):
+        sel = g.sort_values(ascending=False).head(topn)
+        y = label.xs(d, level="datetime").reindex(sel.index.get_level_values("instrument"))
+        daily[d] = float(y.mean()) - OPEN_COST - CLOSE_COST
+    return pd.Series(daily).sort_index()
+
+
+def replay_stats(r: pd.Series) -> str:
+    cum = (1 + r).prod() - 1
+    ann = (1 + cum) ** (252 / max(len(r), 1)) - 1
+    dd = ((1 + r).cumprod() / (1 + r).cumprod().cummax() - 1).min()
+    return (f"累计 {cum:+.1%} 年化 {ann:+.1%} 回撤 {dd:.1%} "
+            f"Calmar {ann/abs(dd):.2f}" if dd else f"累计 {cum:+.1%}")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--features", required=True, help="逗号分隔的筛选特征名")
+    a = ap.parse_args()
+    specs = a.features.split(",")
+
+    qlib.init(provider_uri=str(OVERLAY_ROOT), region="cn")
+
+    print("▶ ① 物化研究 bin", flush=True)
+    # 关键：task_train 按 "examples.factor_zoo.validate_factor_zoo_augment" 路径导入本模块，
+    # 与 __main__ 是两个模块对象 —— 必须写进可导入的那份，否则 handler 加 0 字段。
+    import examples.factor_zoo.validate_factor_zoo_augment as _importable
+    _importable.FZ_FIELDS.clear()
+    FZ_FIELDS.clear()
+    filled = [materialize(sp) for sp in specs]
+    _importable.FZ_FIELDS.extend(filled)
+    FZ_FIELDS.extend(filled)
+    print(f"   handler = 18 + {len(filled)}: {filled}", flush=True)
+
+    meta = pd.read_pickle(OUTDIR / "dayf_meta.pkl")
+    meta = meta.reorder_levels(["datetime", "instrument"]).sort_index()
+    label = meta["LABEL"]
+
+    def _pred(rec) -> pd.Series:
+        p = rec.load_object("pred.pkl")
+        p = p.iloc[:, 0] if isinstance(p, pd.DataFrame) else p
+        return p.reorder_levels(["datetime", "instrument"]).sort_index()
+
+    print("▶ ② 同批基线（18 因子，同配置重训，SignalRecord）", flush=True)
+    base_rec = run_task("MinuteEnhancedHandler",
+                        "qlib_ifind_beta.factor.minute_enhanced_handler", portana=False)
+    bm = base_rec.list_metrics()
+    base_pred = _pred(base_rec)
+    print(f"  baseline IC={bm.get('IC'):.4f} RankIC={bm.get('Rank IC'):.4f}", flush=True)
+
+    print("▶ ③ augment 训练（SignalRecord）", flush=True)
+    rec = run_task("MinuteEnhancedFZHandler", portana=False)
+    m = rec.list_metrics()
+    aug_pred = _pred(rec)
+    rid = getattr(rec, "recorder_id", None) or rec.id
+    print(f"  augment IC={m.get('IC'):.4f} RankIC={m.get('Rank IC'):.4f} recorder={rid}", flush=True)
+
+    print("▶ ④ 手工重放对照（top10 等权，双边成本 0.0005/0.0015；只排序不终判）", flush=True)
+    rb = replay_topn(base_pred, label)
+    ra = replay_topn(aug_pred, label)
+    print(f"  baseline: {replay_stats(rb)}（{len(rb)} 日）", flush=True)
+    print(f"  augment : {replay_stats(ra)}（{len(ra)} 日）", flush=True)
+    both = pd.DataFrame({"base": rb, "aug": ra}).dropna()
+    if len(both):
+        half = len(both) // 2
+        for name, seg in (("前半", both.iloc[:half]), ("后半", both.iloc[half:])):
+            print(f"  {name}: Δ日均(aug-base) {seg['aug'].sub(seg['base']).mean():+.4%}", flush=True)
+
+
+if __name__ == "__main__":
+    main()

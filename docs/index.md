@@ -10,7 +10,7 @@ nav_order: 1
 09:31–09:40 的十根分钟 K 线生成信号，09:41 生成买入价格与 CSV，最终由人工下单。
 
 > 本站面向项目交接、研究复核和生产操作。模型、因子和运行状态以仓库当前代码与
-> `qrun/workflow_minute_enhanced_tk10_nd8.yaml` 为准；日期标记为 2026-08-17。
+> `examples/champion/workflow_minute_enhanced_tk10_nd8.yaml` 为准；日期标记为 2026-08-17。
 
 ## 现役结论
 
@@ -29,8 +29,8 @@ nav_order: 1
 - [因子说明](factors.md)：18 个现役因子、计算窗口和前视约束。
 - [模型说明](models.md)：Champion、滚动候选、XGBoost 配对与晋升门控。
 - [生产基线](production-baseline.md)：日内流程、输入输出和人工操作合同。
-- [配置说明](configs.md)：qrun YAML 逐段图解、运行加载方式与 yml↔生产链路关系。
-- [回测与脚本解析](backtest-scripts.md)：qrun/回放/生产三条主干链的内部执行与全部脚本命令行。
+- [配置说明](configs.md)：Champion YAML 逐段图解、运行加载方式与 yml↔生产链路关系。
+- [回测与脚本解析](backtest-scripts.md)：champion 配置/回放/生产三条主干链的内部执行与全部脚本命令行。
 - [代码导读](code/index.md)：目录结构、模块地图、逐模块精读与阅读路线（新开发者从这里开始）。
 - [验证与研究](validation.md)：purged rolling 门控、风险叠加、已证伪方向存档。
 - [产物地图](artifacts.md)：训练/验证/回测/生产各环节产物位置与字段。
@@ -42,7 +42,7 @@ nav_order: 1
 
 ```bash
 conda run -n qlib_ifind_beta python -m pytest -q
-conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml
+conda run -n qlib_ifind_beta python examples/champion/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml
 conda run -n qlib_ifind_beta python scripts/intraday_production.py --help
 conda run -n qlib_ifind_beta python scripts/replay_intraday_shadow.py
 conda run -n qlib_ifind_beta python scripts/paper_shadow.py report   # 影子模拟盘净值

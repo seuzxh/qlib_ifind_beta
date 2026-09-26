@@ -64,7 +64,7 @@ def preflight(date: str, base: Path | None = None) -> dict:
 
 
 def universe_snapshot(date: str, base: Path | None = None) -> dict:
-    from qlib_ifind_beta import universe
+    from qlib_ifind_beta.data import universe
     paths = DayPaths.create(date, base)
     raw = universe.fetch_constituents(iv_date=date.replace("-", ""))
     raw = raw.rename(columns={"code_qlib": "code"})
@@ -88,7 +88,7 @@ def collect_factor_minute(date: str, minute: str, base: Path | None = None,
                           max_workers: int = 10) -> dict:
     if minute not in FACTOR_TIMES:
         raise ValueError(f"minute must be one of {FACTOR_TIMES}")
-    from qlib_ifind_beta.realtime.data_fetch import fetch_bars_parallel
+    from qlib_ifind_beta.live.realtime.data_fetch import fetch_bars_parallel
     paths = DayPaths.create(date, base)
     eligible = pd.read_csv(paths.file("universe_eligible.csv"))
     codes = eligible["code"].astype(str).tolist()
@@ -126,8 +126,8 @@ def collect_factor_minute(date: str, minute: str, base: Path | None = None,
 
 def score_and_plan(date: str, positions_file: Path, base: Path | None = None,
                    factor_confirmed: bool = False) -> dict:
-    from qlib_ifind_beta.realtime.data_fetch import get_daily_close_factor, get_prev_day_volumes_multi
-    from qlib_ifind_beta.realtime.signal import _predict_in_memory
+    from qlib_ifind_beta.live.realtime.data_fetch import get_daily_close_factor, get_prev_day_volumes_multi
+    from qlib_ifind_beta.live.realtime.signal import _predict_in_memory
     paths = DayPaths.create(date, base)
     universe = pd.read_csv(paths.file("universe_eligible.csv"))
     codes = universe["code"].astype(str).tolist()
@@ -163,7 +163,7 @@ def score_and_plan(date: str, positions_file: Path, base: Path | None = None,
 def build_buys(date: str, sell_fills_file: Path, cash_before: float,
                base: Path | None = None, max_workers: int = 10,
                factor_confirmed: bool = False) -> dict:
-    from qlib_ifind_beta.realtime.data_fetch import fetch_bars_parallel, get_daily_close_factor
+    from qlib_ifind_beta.live.realtime.data_fetch import fetch_bars_parallel, get_daily_close_factor
     paths = DayPaths.create(date, base)
     positions = pd.read_csv(paths.file("positions_before.csv"))
     sells = pd.read_csv(paths.file("sell_orders.csv"))

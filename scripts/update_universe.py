@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from qlib_ifind_beta import universe
+from qlib_ifind_beta.data import universe
 from qlib_ifind_beta.config import INDEX_CODE_IFIND
 
 

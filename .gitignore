@@ -35,3 +35,6 @@ __pycache__/
 /home/
 catboost_info/
 .codegraph/
+
+# 临时脚本（项目规约：一次性脚本一律放 tmp/，不进 Git）
+tmp/
