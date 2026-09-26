@@ -233,7 +233,7 @@ def test_dates_to_train_migrates_legacy_once_and_then_increments(qlib_init):
 def test_purged_segments_embargoes_label_horizon(qlib_init):
     import pandas as pd
     from qlib.data import D
-    from scripts.validate_xgb_purged_rolling_gate import purged_segments
+    from examples.rolling.validate_xgb_purged_rolling_gate import purged_segments
 
     calendar = [pd.Timestamp(date) for date in D.calendar(freq="day")]
     segments = purged_segments(calendar, ["2026-07-02", "2026-07-02"])

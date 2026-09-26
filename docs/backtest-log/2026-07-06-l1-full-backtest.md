@@ -1530,7 +1530,7 @@ champion 在 W1/W2 各有多次 run（不同时间重跑），IC 完全一致：
 | 设计意图 | 基线 | 同 topk=10 低换手（信号陈旧探针） | **头部集中 + 高换手保鲜** | 极端集中压测点 |
 
 - **双窗**（与 §22/§29/§32 一致）：W1 = champion 原窗（test 2026-04→07，train 2024-01→2025-12 / valid 2026-01→03）；W2 = W1 前推 1 年 OOS（test 2025-04→07，train 2024-01→2024-12 / valid 2025-01→03）。防 W1 单窗过拟合。
-- 6 runs = 3 档 × 2 窗。yaml = champion 副本仅改 `experiment_name` + `topk` + `n_drop`（[workflow_minute_enhanced_tk10_nd8.yaml](../../qrun/workflow_minute_enhanced_tk10_nd8.yaml) 等 6 份）。
+- 6 runs = 3 档 × 2 窗。yaml = champion 副本仅改 `experiment_name` + `topk` + `n_drop`（[workflow_minute_enhanced_tk10_nd8.yaml](../../examples/champion/workflow_minute_enhanced_tk10_nd8.yaml) 等 6 份）。
 - **成功判定**：双窗超额含成本年化**均超** champion **且** W1 回撤不得 < −10%（与 §22 gate 一致）。
 
 ### 33.2 全量 A/B 结果（基线 = champion enhanced(18)@20/15）
@@ -2496,7 +2496,7 @@ CatBoost IC 最高（0.0835）但 IC→超额传导最弱（top10 头部分辨�
 > 基于 §49 模型对比结论，champion 模型从 LGBModel(MSE) 升级为 HFLGBModel(binary)。
 
 ### 变更清单
-- `qrun/workflow_minute_enhanced_tk10_nd8.yaml`：model 段 LGBModel→HFLGBModel，loss mse→binary
+- `examples/champion/workflow_minute_enhanced_tk10_nd8.yaml`：model 段 LGBModel→HFLGBModel，loss mse→binary
 - `config.py`：CHAMPION_RECORDER_ID 更新为 93d435e0（HFLGBModel champion）
 - `scripts/retrain.py`：task_template model 段同步
 - `scripts/rolling_validate.py`：task_template model 段同步

@@ -1,4 +1,4 @@
-from qlib_ifind_beta import ifind
+from qlib_ifind_beta.data import ifind
 
 
 def test_load_refresh_token_prefers_environment(monkeypatch):

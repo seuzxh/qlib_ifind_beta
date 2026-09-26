@@ -55,7 +55,7 @@ Qlib 核心负责：
 
 | 项目 | 冻结值 | 权威来源 |
 |---|---|---|
-| Qlib provider | `data/qlib_root` | `qrun/workflow_minute_enhanced_tk10_nd8.yaml` |
+| Qlib provider | `data/qlib_root` | `examples/champion/workflow_minute_enhanced_tk10_nd8.yaml` |
 | 实验名 | `minute_enhanced_tk10_nd8` | 同上、`qlib_ifind_beta/config.py` |
 | Recorder ID | `93d435e0ef20464784553949eb3859a5` | `qlib_ifind_beta/config.py` |
 | 模型本体 | `params.pkl`，`HFLGBModel(binary)` 内含 LightGBM Booster | `mlruns/156869948604814731/<recorder>/artifacts/params.pkl` |

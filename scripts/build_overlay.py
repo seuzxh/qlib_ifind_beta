@@ -21,7 +21,7 @@ from pathlib import Path
 # allow `python -m scripts.build_overlay` from project root + `python scripts/build_overlay.py`
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from qlib_ifind_beta import overlay, universe, materialize, materialize_minute
+from qlib_ifind_beta.data import overlay, universe, materialize, materialize_minute
 from qlib_ifind_beta.config import BENCHMARK, OVERLAY_ROOT, UNIVERSE_MARKET
 
 # window covering train/valid/test (2024-01-01 → 2026-07-02)

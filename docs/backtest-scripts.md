@@ -6,7 +6,7 @@ nav_order: 7.5
 
 # 回测与脚本解析
 
-scripts/ 与 qrun/ 下每个入口的用途、命令行参数与内部执行链。运维视角的速查见
+scripts/ 与 examples/ 下每个入口的用途、命令行参数与内部执行链。运维视角的速查见
 [运维手册](operations.md)，配置口径见[配置说明](configs.md)；本文回答的是
 "**这个脚本内部做了什么、参数怎么给、产物落在哪**"。
 
@@ -17,13 +17,13 @@ scripts/ 与 qrun/ 下每个入口的用途、命令行参数与内部执行链�
 | 数据准备 | `python -m scripts.build_overlay` | 端到端重建 overlay（symlink + 股池 + 涨跌停 + 18 因子物化） | 现役，幂等 |
 | 数据准备 | `scripts/materialize_minute.py` | 只重物化分钟因子（改公式后免重拉股池） | 现役 |
 | 数据准备 | `scripts/update_universe.py` | 盘前 universe 快照增量更新（08:30 cron 入口，仅名单） | 现役，cron |
-| 训练回测 | `qrun/run.py <yml>` | 训练 + IC + TD0 策略回测，落 MLflow recorder | 现役 ★ |
+| 训练回测 | `examples/champion/run.py <yml>` | 训练 + IC + TD0 策略回测，落 MLflow recorder | 现役 ★ |
 | 生产/回放 | `scripts/intraday_production.py` | 盘中生产 6 步 + 治理 2 步 | 现役 ★ |
 | 生产/回放 | `scripts/replay_intraday_shadow.py` | 生产链路的历史适配回放（方案 B 全模拟） | 现役 ★ |
 | 重训治理 | `scripts/retrain.py` | 盘后滚动候选训练 + 门控 + 人工晋升 | 现役 |
-| 验证研究 | `scripts/rolling_validate.py` | 19 任务滚动重训验证（vs Champion 单次训练） | 研究 |
-| 验证研究 | `scripts/validate_factor_challengers.py` | 因子变体 × 4 窗口 A/B | 研究 |
-| 验证研究 | `scripts/validate_xgb_purged_rolling_gate.py` | 19 步 embargo walk-forward 验证 XGB 门控 | 研究（未过准入） |
+| 验证研究 | `examples/rolling/rolling_validate.py` | 19 任务滚动重训验证（vs Champion 单次训练） | 研究 |
+| 验证研究 | `examples/research/validate_factor_challengers.py` | 因子变体 × 4 窗口 A/B | 研究 |
+| 验证研究 | `examples/rolling/validate_xgb_purged_rolling_gate.py` | 19 步 embargo walk-forward 验证 XGB 门控 | 研究（未过准入） |
 | 对照诊断 | `compare_models.py` | LGBM/XGBoost/CatBoost/Linear 滚动对照 | 研究工具 |
 | 报告 | `scripts/make_report.py` | recorder → 13 个 plotly HTML 报告 | 现役 |
 
@@ -36,10 +36,10 @@ scripts/ 与 qrun/ 下每个入口的用途、命令行参数与内部执行链�
 > argparse，`--help` 无效，
 > 调用即开始训练/分析（会写 mlruns 与 data/）。用前先看清源码窗口。
 
-## 主干链 A：qrun 训练回测（13 秒全流程）
+## 主干链 A：champion 训练回测（13 秒全流程）
 
 ```bash
-conda run -n qlib_ifind_beta python qrun/run.py qrun/workflow_minute_enhanced_tk10_nd8.yaml
+conda run -n qlib_ifind_beta python examples/champion/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml
 ```
 
 内部执行链（`run.py` 加载 yml → 修正 limit_threshold list→tuple → qlib.init →

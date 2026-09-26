@@ -23,12 +23,139 @@ nav_order: 2
 
 不变量：失败 fail-closed（不降级、不猜）；一切产物带上游 SHA256。
 
+### 六步输入输出示例（T = 2026-07-21）
+
+**S1–S3 采集与质量门禁** —— `upsert_bars` 的 `incoming`（每股 10 行，列缺一不可）：
+
+```text
+         date      code bar_time   open   high    low  close  volume
+0 2026-07-21  SZ300001    09:31  12.30  12.36  12.28  12.35  452100
+...
+9 2026-07-21  SZ300001    09:40  12.41  12.44  12.38  12.42  388000
+```
+
+`validate_factor_bars` 返回 `(complete, quality)`：
+
+```python
+complete = ["SZ300001", "SH600520", ...]         # 恰好集齐十根的股票
+quality = {
+    "universe_count": 104, "complete_bar_count": 102, "coverage": 0.9808,
+    "missing": {"SZ300750": ["09:36", "09:37"]},  # 缺哪些 bar_time
+    "bar_window": ["09:31", "09:40"],
+    "status": "PASS",                             # 完整数 >= MIN_CANDIDATES(80)
+}
+```
+
+**S4 特征矩阵** —— `assemble_features(bars, prev_volumes, daily_info, codes)`：
+
+```python
+prev_volumes = {"SZ300001": [3.1e8, 2.8e8, 3.5e8, 2.9e8]}  # T-1/T-2/T-3/T-5 全天分钟量
+daily_info   = {"SZ300001": {"prev_close": 12.30, "prev_factor": 1.0,
+                             "factor": 1.0, "factor_confirmed": True}}
+# 输出：code + 18 因子列，列序 = MinuteEnhancedHandler.ENHANCED_FIELDS（模型合同）
+#         code  startup_mom_1m  ...  vol_vs_yest  vol_vs_yest_t2  ...  overnight_gap
+# 0  SZ300001          0.0041  ...         2.31            2.05  ...         0.0081
+```
+
+**S5 调仓决策** —— `plan_topk_dropout(scores, positions)`：
+
+```python
+# scores:    [code, score, limit_up]             # S4 矩阵过模型后的打分
+# positions: [code, quantity, sellable_quantity, hold_days]
+{"keep": ["SH600520", ...],        # 留仓
+ "sell": ["SZ300750", ...],        # 调出（先卖）
+ "blocked_sell": [],               # 想卖但 T+1/可用不足被拦
+ "buy_ranked": ["SZ300001", ...],  # 调入候选，按分数排序
+ "topk": 10, "n_drop": 8, "hold_thresh": 1}
+```
+
+`build_sell_orders` → 卖单：
+
+```text
+  client_order_id      code action  quantity    execution_policy           reason
+0    20260721-S-001  SZ300750   SELL      2000  SCHEME_B_UNVALIDATED  dropout_bottom
+```
+
+**S6–S7 两阶段执行** —— `apply_sell_fills` 消费券商成交回报（先卖）：
+
+```python
+# fills: [client_order_id, code, filled_quantity, average_price, fee]
+(positions_after_sell, {"cash_after_sell": 1081234.56, "status": "PASS"})
+```
+
+`build_execution_snapshot`（09:41 bar 快照）→ `build_buy_orders`（涨停拦截 → 顺延 → 等分 → 100 股取整，后买）：
+
+```text
+# snapshot:       code  price_941  change_941
+#             0  SZ300001      12.43      0.0106
+
+# buy orders:
+  client_order_id  rank      code action  quantity  reference_price  estimated_amount
+0    20260721-B-001     1  SZ300001    BUY      8000            12.43           99440.0
+```
+
+`apply_buy_fills` → `(positions, {"cash_after_buy": ..., "status": "PASS"})`；
+新买仓位 `hold_days=0`、`sellable_quantity` 不变（T+1 锁定）。
+
+**S8 收盘对账** —— `reconcile_positions`：
+
+```python
+{"status": "PASS",                  # 持仓零错位且 |cash_difference| <= 1 元
+ "position_mismatches": [],         # 否则 [{"code", "expected", "actual"}]
+ "cash_difference": 0.42,           # 券商现金 - 本地推算
+ "actual_position_count": 10}
+```
+
+**治理** —— `make_active_manifest`：
+
+```python
+{"trade_date": "2026-07-21", "experiment": "minute_enhanced_tk10_nd8",
+ "recorder_id": "93d435e0ef20464784553949eb3859a5", "artifact": "params.pkl",
+ "model_sha256": "9f2c…", "feature_schema_sha256": "a1b0…",
+ "qlib_version": "0.9.7", "status": "LOCKED",
+ "generated_at": "2026-07-21T08:55:00+08:00"}
+```
+
+CLI 子命令 → `data/production_signals/<date>/` 落盘文件的对应关系：
+
+```text
+preflight            → active_model_manifest.json / preflight.json / run_manifest.json
+universe             → universe_raw.csv / universe_eligible.csv / universe_quality.json
+collect-factor-bars  → factor_bars.parquet / bar_collection_status.csv
+score-and-plan-sells → features.parquet / scores.csv / rebalance_decision.json
+                       / sell_orders.csv（S4+S5）
+build-buy-orders     → sell_fills.csv / positions_after_sell.csv / cash_after_sell.json
+                       / execution_bar_0941.parquet / buy_orders.csv（S6-S7）
+reconcile            → positions_after_close.csv / daily_reconciliation.json（S8）
+```
+
 ## live/historical_replay.py —— 回放适配器（163 行）
 
 `HistoricalReplaySource`：`bars(date, codes)`（11 根）/ `previous_volumes`
 （T-k 全天分钟量）/ `daily_info`（T-1 close/factor，日频 bin 有洞时分钟降级）/
 `valuation_close`。用 binio 直读绕过表达式引擎（性能），被
 `replay_intraday_shadow.py` 消费——**生产函数 + 历史数据源 = 全链路回放**。
+
+四个访问器的输出形状与上面六步的输入一一对应：
+
+```python
+src = HistoricalReplaySource()
+
+src.bars("2026-07-21", codes)
+# → [date, code, bar_time, open, high, low, close, volume, amount,
+#    fetch_time, source="historical_1min"]，每股 11 行（10 因子 bar + 09:41 执行 bar）
+
+src.previous_volumes("2026-07-21", codes)
+# → {"SZ300001": [T-1, T-2, T-3, T-5 全天分钟量]}
+
+src.daily_info("2026-07-21", codes)
+# → {"SZ300001": {"prev_close": 12.30, "prev_factor": 1.0, "open": 12.31,
+#                 "factor": 1.0, "factor_confirmed": True}}
+#    日频 bin 有洞时走分钟降级，多一个 "historical_source": "minute_fallback"
+
+src.valuation_close("2026-07-21", codes)
+# → {"SZ300001": 12.55}   # 后复权收盘，供收盘估值
+```
 
 ## realtime/ —— 盘中在线路径
 
@@ -39,6 +166,24 @@ nav_order: 2
   minute_factors）→ `_predict_in_memory`（load_model_bundle + 矩阵推理，
   `use_online` 开关走冻结 Champion 或滚动候选）。**零漂移合同的实现在这**：
   同一 18 因子输入，与 Champion 历史 pred 逐位一致。
+
+两端的输入输出：
+
+```python
+fetch_realtime_bars("SZ300001", count=11)
+# → [{"date": "2026-07-21", "time": "09:31", "open": 12.30, "high": 12.36,
+#     "low": 12.28, "close": 12.35, "volume": 452100, "amount": 5580435.0},
+#    ... 共 11 根，截至最新分钟]
+
+generate_realtime_signal("2026-07-21")
+# → {"date": "2026-07-21", "n_candidates": 102,
+#    "candidates": [{"code": "SZ300001", "score": 0.83,
+#                    "limit_up": 0.10, "limit_down": -0.10,
+#                    "change_941": 0.0106, "price_941": 12.43}, ...],
+#    "topk": [... 10 只，已剔除 change_941 >= limit_up 的涨停股 ...],
+#    "model_source": "rolling_hflgb",   # 或 frozen / rolling_ensemble
+#    "ensemble_weight": 0.0}
+```
 
 ## scripts/ —— 12 个入口（按用途）
 

@@ -275,7 +275,7 @@ Expected: FAIL（`_bars_ready`/`_read_bin` 不存在）
 在 `scripts/paper_shadow.py` 中补充（放在 `append_nav` 之后）：
 
 ```python
-from qlib_ifind_beta.binio import read_bin as _read_bin
+from qlib_ifind_beta.data.binio import read_bin as _read_bin
 from qlib_ifind_beta.config import CHAMPION_EXPERIMENT, CHAMPION_RECORDER_ID, FEATURES_1MIN_SRC
 
 
@@ -317,7 +317,7 @@ def day(date: str) -> dict:
     import qlib
     qlib.init(provider_uri=str(OVERLAY_ROOT), region="cn")
     from qlib_ifind_beta.live.historical_replay import HistoricalReplaySource
-    from qlib_ifind_beta.model_ensemble import load_model_bundle
+    from qlib_ifind_beta.experiment.model_ensemble import load_model_bundle
     from scripts.replay_intraday_shadow import _eligible_snapshots, run_paper_day
 
     _, positions, cash = load_latest_state(ROOT, date)
