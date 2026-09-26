@@ -58,7 +58,7 @@ tail -5 logs/paper_shadow.log                                               # cr
 ```bash
 conda run -n qlib_ifind_beta python -m scripts.build_overlay   # ① overlay（一次性）
 conda run -n qlib_ifind_beta python scripts/materialize_minute.py  # ② 分钟因子物化
-conda run -n qlib_ifind_beta python qrun/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml  # ③ 训练回测
+conda run -n qlib_ifind_beta python examples/champion/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml  # ③ 训练回测
 conda run -n qlib_ifind_beta python -m pytest -q               # ④ 全量测试
 ```
 
@@ -70,7 +70,7 @@ conda run -n qlib_ifind_beta python -m pytest -q               # ④ 全量测�
 | 旧持仓掉出股池后无行情 | 退出成分股不在默认查询集 | 已修（§36.3）：`D.features(list, ...)` 直查 bin，不走池过滤 |
 | 分数全 NaN / 样本骤减 | `DropnaProcessor(feature)` 前视护栏生效 | 查该日 1min 数据源是否事故（如 2026-07-01 全市场缺失） |
 | iFinD 401 / token 失败 | access_token 过期 | 自动刷新重试；持续失败查 `/home/zxh/qlib_data/.ifind_token` 与 refresh token |
-| qrun 报 `limit_threshold` 类型错误 | YAML list 被 qlib 判为非法 | 用 `qrun/run.py` 入口（自动 list→tuple），勿直接 `qrun` |
+| qrun 报 `limit_threshold` 类型错误 | YAML list 被 qlib 判为非法 | 用 `examples/champion/run.py` 入口（自动 list→tuple），勿直接 `qrun` |
 | mlflow 报 FileStore 弃用异常 | mlflow 3.x 收紧 | 同上，`run.py` 已预置 `MLFLOW_ALLOW_FILE_STORE=true` |
 
 ## 数据与目录约定

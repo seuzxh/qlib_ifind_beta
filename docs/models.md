@@ -78,5 +78,5 @@ Financial Machine Learning》）。代码层还有防篡改校验：
 
 ## 非生产研究模型
 
-`scripts/compare_models.py` 还提供 LGBM、XGBoost、CatBoost、Linear 等模型的滚动
+`examples/research/compare_models.py` 还提供 LGBM、XGBoost、CatBoost、Linear 等模型的滚动
 对比入口。这些用于研究和消融，不代表生产模型，也不能覆盖 Champion recorder。
