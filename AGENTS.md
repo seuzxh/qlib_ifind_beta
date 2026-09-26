@@ -9,7 +9,7 @@ HFLGB Champion、Top10/n_drop=8；第一阶段只生成 CSV，由人工下单。
 
 - 只使用 conda 环境 `qlib_ifind_beta`，不要调用系统 Python。
 - 测试：`conda run -n qlib_ifind_beta python -m pytest -q`
-- Champion 复现：`conda run -n qlib_ifind_beta python qrun/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml`
+- Champion 复现：`conda run -n qlib_ifind_beta python examples/champion/run.py examples/champion/workflow_minute_enhanced_tk10_nd8.yaml`
 - 盘中生产入口：`conda run -n qlib_ifind_beta python scripts/intraday_production.py --help`
 - 历史影子回放：`conda run -n qlib_ifind_beta python scripts/replay_intraday_shadow.py`
 
@@ -19,14 +19,19 @@ HFLGB Champion、Top10/n_drop=8；第一阶段只生成 CSV，由人工下单。
 - 日线只读源：`/home/zxh/.qlib/qlib_data/cn_data`。
 - 1分钟只读源：`/home/zxh/.qlib/qlib_data/cn_data_1min`，每天240根真实K线。
 - `data/qlib_root`、`mlruns`、`reports` 和生产 CSV 都是运行资产，不提交 Git。
+- 术语表见根目录 `CONTEXT.md`（领域语言以它为准）。
 
-## 目录与约定
+## 目录与约定（2026-09-26 按 qlib 官方实践迁移）
 
-- 研究分支命名（2026-09-26 用户约定）：**「模块名｜持续目标」**，如
+- 研究分支命名（用户约定）：**「模块名｜持续目标」**，如
   `factor-zoo｜分钟因子匹配与替代挑战`；worktree 目录用模块名短路径。
-- `qlib_ifind_beta/`：可复用领域代码；`live/` 是生产与历史回放核心。
-- `scripts/`：CLI 编排；现役生产入口只有 `intraday_production.py`。
-- `qrun/`：Qlib 训练/回测配置；Champion 配置为 `workflow_minute_enhanced_tk10_nd8.yaml`。
+- **临时脚本一律放项目 `tmp/` 目录**（gitignored），不得散落 /tmp 或仓库根。
+- `qlib_ifind_beta/` 按领域聚簇分子包：`data/`（binio/overlay/materialize/
+  universe/ifind）、`factor/`（handlers/minute_factors/factor_zoo）、
+  `experiment/`（model_ensemble/evaluation/screen_lib）、`trading/`
+  （td0_strategy）、`live/`（intraday/historical_replay/realtime）。
+- `examples/`：声明式实验（champion 配置、factor_zoo/rolling/research/shadow
+  各研究线驱动）；`scripts/` 收窄为运维与生产入口。
 - `tests/`：所有网络调用必须 mock；测试必须离线可运行。
 - `docs/superpowers/specs/2026-07-20-intraday-production-signal-design.md`：生产合同。
 - 禁止未来数据、自动提交券商订单、硬编码 token、自动晋升候选模型。
